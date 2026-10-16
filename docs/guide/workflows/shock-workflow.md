@@ -21,7 +21,7 @@ The recording ships with the repository (`testdata/plate/shock.nc4`).
 | Compute the SRS | Compute SRS in the Shocks view | `project.compute_srs('Time History')` |
 | The required SRS | import it, with its tolerance | `ShockSpecification(...)` from `visualdynamics.core.data` |
 | Compare | select SRS and specification together | `plot_series([srs, spec])`, `plot_bars(srs, spec, 'srs')` from `visualdynamics.plot` |
-| Judge the tolerance | | `srs_tolerance(spec, srs)` from `visualdynamics.core.compliance`, `plot_srs_tolerance(srs, spec)` |
+| Judge the tolerance | Points Rule on the bar, with SRS and specification selected | `srs_tolerance(spec, srs)` from `visualdynamics.core.compliance`, `plot_srs_tolerance(srs, spec)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | Generate Report on the bar, with the project row selected | `project.generate_report('shock')` |
 | Or all of it at once | Automatic on the tree bar, once the project has its type | `project.work_up()` |
@@ -110,8 +110,10 @@ The bars are an RMS summary and not the tolerance check, which counts
 the points of each spectrum inside the band and applies the test
 document's rule to the count. A spectrum with a narrow, deep dip can
 read well inside 3 dB on the bars and still fail it. That check is
-`srs_tolerance` and its picture `plot_srs_tolerance`, described in
-[Judging an SRS against its tolerance](../srs-tolerance.md).
+**Points Rule** on the bar, with its band and rule in the panel
+beside the plot; in a script it is `srs_tolerance` and its picture
+`plot_srs_tolerance`. [Judging an SRS against its
+tolerance](../srs-tolerance.md) describes it.
 
 ### 5. Geometry, photos, report
 

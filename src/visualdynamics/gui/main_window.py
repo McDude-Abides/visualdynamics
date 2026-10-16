@@ -912,6 +912,10 @@ class MainWindow(QMainWindow):
             lambda _wanted: self.render_current())
         self.data_pane.octave_panel.changed.connect(
             lambda _per: self.render_current())
+        # the points rule's band and rule redraw the judgement at once:
+        # the plot is the preview of the settings being made
+        self.data_pane.srs_tolerance_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.octave_panel.apply_asked.connect(
             self.compute_octave)
         # the acts, asked for where their settings are set (Brandon,
@@ -15852,10 +15856,17 @@ class MainWindow(QMainWindow):
         return picked_spec or picked_measured
 
     def _srs_found(self, series):
-        """(measured, specification, channels) for a pair of shock
-        spectra, else None. By type, as everywhere else — a
-        `ShockSpecification` is an `Srs`, so the measurement is the one
-        that is not the target."""
+        """(measured, specification, channels, events, polarities) for
+        a pair of shock spectra, else None. By type, as everywhere else
+        — a `ShockSpecification` is an `Srs`, so the measurement is the
+        one that is not the target.
+
+        Several measured spectra of different polarities (a positive
+        and a negative, a maximax beside them) are one measurement read
+        each way: `polarities` holds them all, in the order selected,
+        for the points rule, which judges each; the other readings read
+        the first. Two of the same polarity are two measurements, and
+        not this comparison."""
         from ..core.data import ShockSpecification, Srs
 
         specs = [(data, records) for _n, data, records in series
@@ -15863,7 +15874,10 @@ class MainWindow(QMainWindow):
         measured = [(data, records) for _n, data, records in series
                     if isinstance(data, Srs)
                     and not isinstance(data, ShockSpecification)]
-        if len(specs) != 1 or len(measured) != 1:
+        if len(specs) != 1 or not measured:
+            return None
+        kinds = [getattr(data, 'kind', None) for data, _records in measured]
+        if len(set(kinds)) != len(kinds):
             return None
         channels = self._comparison_channels(specs[0], measured[0])
         # the events picked on the measured side, by their block: a
@@ -15875,9 +15889,11 @@ class MainWindow(QMainWindow):
         events = None
         if records and data.block is not None:
             events = sorted({str(data.block[i]) for i in records})
-        return data, specs[0][0], channels, events
+        return (data, specs[0][0], channels, events,
+                [spectrum for spectrum, _records in measured])
 
-    def _render_srs(self, measured, specification, channels, picked_events=None):
+    def _render_srs(self, measured, specification, channels, picked_events=None,
+                    polarities=None):
         """Measured shock spectra against the one they had to meet.
 
         Two readings, composed differently on purpose (Brandon,
@@ -15921,7 +15937,11 @@ class MainWindow(QMainWindow):
         index = {block: i for i, block in enumerate(blocks)}
         values = {(dof, index.get(block, 0)): value
                   for dof, block, value in rows}
-        if self.data_pane.srs_view == 'curves':
+        if self.data_pane.srs_view == 'points':
+            message = self._render_srs_points(
+                polarities or [measured], specification, dofs,
+                picked_events)
+        elif self.data_pane.srs_view == 'curves':
             # every channel at once is the three-dimensional default:
             # the stage shows all events of all channels with their
             # bands, and the 2D/3D toggle stands down to the flat
@@ -15993,6 +16013,87 @@ class MainWindow(QMainWindow):
              for dof in dofs for e in events if (dof, e) in values],
             dofs, events, units='dB')
         return message
+
+    def _render_srs_points(self, polarities, specification, dofs,
+                           picked_events):
+        """The points rule: each polarity selected against the
+        requirement's band at one channel and event, the points outside
+        marked, and the counts and verdicts in the panel beside it.
+
+        One channel and event at a time, chosen in the event box,
+        because the judgement is of one curve against one requirement;
+        the table under the plot still holds every channel's RMS
+        deviation, the overview the judgement does not replace. The
+        settings are the panel's, and every number is
+        `core.compliance.srs_tolerance`'s.
+        """
+        from ..plot.srs_tolerance import build_srs_tolerance, describe
+
+        panel = self.data_pane.srs_tolerance_panel
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        first = polarities[0]
+        pairs = []
+        for i in range(first.num_records):
+            dof = str(first.response_dof[i])
+            block = None if first.block is None else str(first.block[i])
+            if (dof in dofs and (dof, block) not in pairs
+                    and (picked_events is None or block is None
+                         or block in picked_events)):
+                pairs.append((dof, block))
+        if not pairs:
+            panel.show_results([])
+            return 'no channel in common to judge'
+        self.data_pane.show_events(
+            [dof if block is None else f'{dof} {block}'
+             for dof, block in pairs])
+        chosen = self.data_pane.chosen_event() or 0
+        dof, block = pairs[min(chosen, len(pairs) - 1)]
+        settings = panel.settings()
+        self.data_pane.graphics.clear()
+        try:
+            results = build_srs_tolerance(
+                self.data_pane.graphics, specification, polarities,
+                channel=dof, event=block, unit_system=self.unit_system,
+                theme=self.theme_name, **settings)
+        except ValueError as error:
+            # a spectrum at another Q, or one without this channel:
+            # the reason, and no numbers that would read as a verdict
+            panel.show_results([])
+            return str(error)
+        panel.show_results(results)
+        self._journal_srs_points(polarities, specification, dof, block,
+                                 settings)
+        where = dof if block is None else f'{dof}, {block}'
+        return f'{where}: ' + '; '.join(describe(r) for r in results)
+
+    def _journal_srs_points(self, polarities, specification, dof, block,
+                            settings):
+        """The points reading, journaled as the headless call that
+        draws it (`_journal_view`)."""
+        def number(value):
+            # an open edge is written so the line still runs
+            return "float('inf')" if value == float('inf') else repr(value)
+
+        def band(pair):
+            return (None if pair is None
+                    else f'({number(pair[0])}, {number(pair[1])})')
+
+        try:
+            spectra = [self.project.name_of(data) for data in polarities]
+            target = self.project.name_of(specification)
+        except (KeyError, ValueError):
+            return
+        given = ', '.join(f'project[{name!r}]' for name in spectra)
+        prefix = ('visualdynamics.plot.plot_srs_tolerance('
+                  f'[{given}], project[{target!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, channel={dof!r}, event={block!r}, '
+            f"inner={band(settings['inner'])}, "
+            f"outer={band(settings['outer'])}, "
+            f"rule={settings['rule']!r}, percent={settings['percent']!r}, "
+            "path='srs_tolerance.png', show=False)")
 
     def _render_banded(self, spec_name, spec, spec_records,
                        measured=None, measured_name=None,
@@ -16199,7 +16300,8 @@ class MainWindow(QMainWindow):
         matched = [level for level in measured if level.tone in known]
         tones = [tone.name for tone in spec.tones]
         self.data_pane.show_srs_views(bool(matched), kind='sine')
-        showing_bars = matched and self.data_pane.srs_view != 'curves'
+        showing_bars = (matched
+                        and self.data_pane.srs_reading('sine') != 'curves')
         if not showing_bars:
             tone = pick_tone(tones)
             # the stage and the flat plot are both readings of this; the

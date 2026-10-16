@@ -296,6 +296,7 @@ def test_the_inventory_covers_what_the_window_renders():
                             'viz.scalogram.plot_scalogram_stage'),
         '_render_replication': 'plot_replication',
         '_render_srs': "plot_bars(mode='srs')",
+        '_render_srs_points': 'plot_srs_tolerance',
         '_render_banded': 'viz.banded.plot_banded_stage',
         '_render_ratio': 'plot.plot_ratio',
         '_render_snr': 'plot.plot_snr',

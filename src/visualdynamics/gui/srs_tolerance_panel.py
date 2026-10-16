@@ -1,0 +1,200 @@
+"""The points rule's settings, beside a shock spectrum judged against its
+requirement.
+
+The Points reading of a shock-spectrum comparison draws each selected
+spectrum against the requirement's tolerance band, its points outside
+marked (`plot.srs_tolerance`). This panel holds what that judgement is
+made under (the inner band, the outer band if any, the rule and the
+share it asks for) and, under the rule, what came of it: for each
+polarity the count and share of its points inside and the verdict, and
+its worst point with its distance from the requirement in dB.
+
+Every edit redraws the plot at once, so the effect of a band or a rule
+is seen on the spectrum while it is set. Nothing is made: the
+judgement is a reading of two objects that already exist, as the RMS
+deviation bars are, so there is no Apply button to press. The same
+call a script makes, `core.compliance.srs_tolerance`, gives every
+number shown here.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
+
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QWidget,
+)
+
+from ..core.compliance import SRS_INNER_DB, SRS_POINTS_PERCENT
+from .editors import DoubleSpinBox
+from .settings_panel import add_derived, add_keyed_settings, add_rule, panel_grid
+
+#: the outer band offered when it is first ticked, dB below and above
+OUTER_DB = (-3.0, 6.0)
+
+#: the rules as the box names them, in `SRS_RULES` order
+RULE_NAMES = (('share', 'Share inside'), ('above_lower', 'All above lower'))
+
+
+def _spin(low: float, high: float, value: float, tip: str) -> DoubleSpinBox:
+    """A dB (or percent) field in half-decibel steps, reporting only a
+    finished edit, since each report redraws the judgement."""
+    box = DoubleSpinBox()
+    box.setRange(low, high)
+    box.setDecimals(2)
+    box.setSingleStep(0.5)
+    box.setValue(value)
+    box.setToolTip(tip)
+    return box
+
+
+class SrsTolerancePanel(QWidget):
+    """The settings and the readout. Edits are emitted as `settings()`."""
+
+    #: a setting moved; here is the whole set now
+    changed = Signal(dict)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.title: QLabel = QLabel('Points Rule')
+        grid = panel_grid(self, self.title)
+        self._loading = False
+
+        self.rule_box: QComboBox = QComboBox()
+        for key, name in RULE_NAMES:
+            self.rule_box.addItem(name, key)
+        self.rule_box.setToolTip(
+            'Share inside: at least the share below of the points lie '
+            'inside the inner band. All above lower: every point is at '
+            'or above the inner band\'s lower edge, with no ceiling. '
+            'The test plan says which applies')
+        self.percent_box: DoubleSpinBox = _spin(
+            0.0, 100.0, SRS_POINTS_PERCENT,
+            'The share of the points, in percent, that must lie inside '
+            'the inner band')
+        self.percent_box.setSingleStep(5.0)
+        self.inner_low: DoubleSpinBox = _spin(
+            -40.0, 0.0, SRS_INNER_DB[0],
+            'The inner band\'s lower edge, dB below the requirement')
+        self.inner_high: DoubleSpinBox = _spin(
+            0.0, 40.0, SRS_INNER_DB[1],
+            'The inner band\'s upper edge, dB above the requirement')
+        self.outer_box: QCheckBox = QCheckBox()
+        self.outer_box.setToolTip(
+            'An outer band every point must lie inside, whatever the '
+            'rule says')
+        self.outer_low: DoubleSpinBox = _spin(
+            -40.0, 0.0, OUTER_DB[0], 'The outer band\'s lower edge, dB')
+        self.outer_high: DoubleSpinBox = _spin(
+            0.0, 40.0, OUTER_DB[1], 'The outer band\'s upper edge, dB')
+        self.names, self.editors = add_keyed_settings(grid, [
+            ('rule', 'Rule', self.rule_box),
+            ('percent', 'Share [%]', self.percent_box),
+            ('inner_low', 'Inner below [dB]', self.inner_low),
+            ('inner_high', 'Inner above [dB]', self.inner_high),
+            ('outer', 'Outer band', self.outer_box),
+            ('outer_low', 'Outer below [dB]', self.outer_low),
+            ('outer_high', 'Outer above [dB]', self.outer_high),
+        ])
+        add_rule(grid, 8)
+        self.derived: dict[str, QLabel] = {
+            key: value for key, (_name, value) in add_derived(
+                grid, (('points', 'Points'),), 9).items()}
+        # one line per polarity, as many as are selected, so a label
+        # that wraps rather than a fixed set of rows
+        self.readout: QLabel = QLabel('')
+        self.readout.setWordWrap(True)
+        grid.addWidget(self.readout, 10, 0, 1, 2)
+        grid.setRowStretch(11, 1)
+
+        self.rule_box.currentIndexChanged.connect(self._edited)
+        self.outer_box.toggled.connect(self._edited)
+        for box in (self.percent_box, self.inner_low, self.inner_high,
+                    self.outer_low, self.outer_high):
+            box.valueChanged.connect(self._edited)
+        self._shown_rows()
+
+    def _shown_rows(self) -> None:
+        """Show only the rows that apply (principle 3): the share under
+        the share rule, the inner band's upper edge where the rule has
+        one, the outer band's edges while it is ticked."""
+        share = self.rule() == 'share'
+        outer = self.outer_box.isChecked()
+        for key, shown in (('percent', share), ('inner_high', share),
+                           ('outer_low', outer), ('outer_high', outer)):
+            self.names[key].setVisible(shown)
+            self.editors[key].setVisible(shown)
+
+    def _edited(self, *_args: Any) -> None:
+        self._shown_rows()
+        if not self._loading:
+            self.changed.emit(self.settings())
+
+    def rule(self) -> str:
+        """The rule chosen, one of `SRS_RULES`."""
+        return str(self.rule_box.currentData())
+
+    def settings(self) -> dict[str, Any]:
+        """The judgement's arguments as `srs_tolerance` takes them:
+        'inner', 'outer' (None when unticked), 'rule' and 'percent'.
+        Under 'above_lower' the inner band has no upper edge, so it is
+        given as open."""
+        rule = self.rule()
+        high = self.inner_high.value() if rule == 'share' else float('inf')
+        return {'inner': (self.inner_low.value(), high),
+                'outer': ((self.outer_low.value(), self.outer_high.value())
+                          if self.outer_box.isChecked() else None),
+                'rule': rule, 'percent': self.percent_box.value()}
+
+    def set_settings(self, inner: tuple[float, float] | None = None,
+                     outer: tuple[float, float] | None = None,
+                     rule: str | None = None,
+                     percent: float | None = None) -> None:
+        """Set the fields without a redraw per field, then emit once."""
+        self._loading = True
+        try:
+            if rule is not None:
+                self.rule_box.setCurrentIndex(
+                    [key for key, _name in RULE_NAMES].index(rule))
+            if percent is not None:
+                self.percent_box.setValue(percent)
+            if inner is not None:
+                self.inner_low.setValue(inner[0])
+                self.inner_high.setValue(inner[1])
+            self.outer_box.setChecked(outer is not None)
+            if outer is not None:
+                self.outer_low.setValue(outer[0])
+                self.outer_high.setValue(outer[1])
+        finally:
+            self._loading = False
+        self._edited()
+
+    def show_results(self, results: Sequence[dict[str, Any]],
+                     names: Sequence[str] | None = None) -> None:
+        """Write each judged spectrum's line: the count and share inside
+        and the verdict (`plot.srs_tolerance.describe`), then its worst
+        point. `names` labels each spectrum when its polarity alone
+        would not tell two apart. Empty `results` clears the readout."""
+        from ..plot.srs_tolerance import describe
+
+        if not results:
+            self.derived['points'].setText('—')
+            self.readout.setText('')
+            return
+        self.derived['points'].setText(str(results[0]['points']))
+        lines = []
+        for k, result in enumerate(results):
+            line = describe(result)
+            if names is not None:
+                line = f'{names[k]} {line}'
+            if result['points']:
+                line += (f'\nworst {result["worst_db"]:+.1f} dB at '
+                         f'{result["worst_frequency"]:.4g} Hz'
+                         ).replace('-', '−')
+            lines.append(line)
+        self.readout.setText('\n'.join(lines))

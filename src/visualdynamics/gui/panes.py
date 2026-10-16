@@ -48,6 +48,7 @@ from .pattern_panel import PatternPanel
 from .rigid_panel import RigidBodyPanel
 from .shock_panel import ShockPanel
 from .sine_panel import SinePanel
+from .srs_tolerance_panel import SrsTolerancePanel
 from .toolbars import fence, shows_anything, tidy
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
@@ -245,7 +246,8 @@ class DataPane(QWidget):
         #: are different questions and a single sticky choice shared
         #: between them would carry a random answer into a transient
         self.replication_view: str = 'overlay'
-        #: 'curves' or 'error' — the same for a pair of shock spectra
+        #: 'curves', 'error' or 'points' — the same for a pair of
+        #: shock spectra ('points' is theirs alone, not the sine's)
         self.srs_view: str = 'curves'
         #: 'overlay', 'ratio' or 'snr' — how two selected densities
         #: read together; sticky like every view choice
@@ -267,6 +269,11 @@ class DataPane(QWidget):
         self.graphics.setAcceptDrops(False)
         self.graphics.viewport().setAcceptDrops(False)
 
+        # the points rule's band and rule, beside a shock spectrum
+        # judged against them; the Points reading shows it. Made before
+        # the bar, whose SRS readings put it away
+        self.srs_tolerance_panel: SrsTolerancePanel = SrsTolerancePanel()
+        self.srs_tolerance_panel.hide()
         self.toolbar: QToolBar = self._build_toolbar()
         # The comparison, replication and SRS readings are built
         # visible and were only ever put away by `reset_controls` —
@@ -325,6 +332,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.sine_panel)
         plot_row.addWidget(self.truncate_panel)
         plot_row.addWidget(self.octave_panel)
+        plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.wavelet_panel)
 
         layout = QVBoxLayout(self)
@@ -567,10 +575,12 @@ class DataPane(QWidget):
             self.replication_actions[key] = action
         self.replication_actions['overlay'].setChecked(True)
         # the same two readings for a pair of shock spectra: the curves,
-        # and how far each channel sits from what it had to meet
+        # and how far each channel sits from what it had to meet; and a
+        # third that is the shock's own, the points rule
         self.srs_group: QActionGroup = QActionGroup(self)
         self.srs_actions: dict[str, QAction] = {}
-        for key, icon in (('curves', 'curves'), ('error', 'bars')):
+        for key, icon in (('curves', 'curves'), ('error', 'bars'),
+                          ('points', 'percent_bars')):
             text, tip = self.SRS_LABELS['srs'][key]
             action = QAction(control_icon(icon), text, self)
             action.setCheckable(True)
@@ -1005,7 +1015,11 @@ class DataPane(QWidget):
                            'The measured shock spectra against the one required'),
                 'error': ('SRS Error',
                           ('How far each channel sits from the spectrum it had '
-                           'to meet, RMS across the band in dB'))},
+                           'to meet, RMS across the band in dB')),
+                'points': ('Points Rule',
+                           ('Each spectrum against the tolerance band point by '
+                            'point: how many points are inside, under the '
+                            'rule the test plan names'))},
         'sine': {'curves': ('Levels',
                             'The extracted levels against the levels required'),
                  'error': ('Level Error',
@@ -1014,20 +1028,33 @@ class DataPane(QWidget):
     }
 
     def show_srs_views(self, offered: bool, kind: str = 'srs') -> None:
-        """Show or hide the two readings of a shock-spectrum
+        """Show or hide the readings of a shock-spectrum
         comparison, or, with `kind` 'sine', of sine levels against their
-        specification. While shown, the three comparison readings are
-        hidden."""
+        specification. The points rule is a shock's alone, so the sine
+        comparison has two. While shown, the three comparison readings
+        are hidden."""
+        labels = self.SRS_LABELS[kind]
         for key, action in self.srs_actions.items():
-            text, tip = self.SRS_LABELS[kind][key]
+            text, tip = labels.get(key, (action.text(), action.toolTip()))
             action.setText(text)
             action.setToolTip(tip)
-            action.setVisible(offered)
+            action.setVisible(offered and key in labels)
+        if not offered or 'points' not in labels:
+            self.srs_tolerance_panel.hide()
         if offered:
             for action in self.comparison_actions.values():
                 action.setVisible(False)
             self.toolbar.setVisible(True)
-            self.srs_actions[self.srs_view].setChecked(True)
+            # a reading this comparison does not have stands for its
+            # curves, as `srs_reading` says
+            self.srs_actions[self.srs_reading(kind)].setChecked(True)
+
+    def srs_reading(self, kind: str = 'srs') -> str:
+        """The reading a comparison of `kind` shows: the sticky choice,
+        or 'curves' when the choice is one this kind does not have (the
+        points rule, carried from a shock to a sine comparison)."""
+        return (self.srs_view if self.srs_view in self.SRS_LABELS[kind]
+                else 'curves')
 
     def _choose_replication(self, which: str) -> None:
         """Which reading of a transient replication the plot shows."""

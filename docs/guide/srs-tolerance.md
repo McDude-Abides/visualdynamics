@@ -70,6 +70,23 @@ A pulse that is not symmetric often meets the requirement in one
 direction and not the other, and the maximax spectrum, which takes the
 larger of the two at every point, hides that.
 
+## In the app
+
+Select the shock specification and a measured SRS together, and choose
+**Points Rule** on the bar, beside **Spectra** and **SRS Error**. To
+judge several polarities at once, select the positive, negative or
+maximax spectra together with the specification; spectra of one
+polarity are one measurement each and are compared one at a time. The
+plot is the picture below, at the channel and event chosen in the box
+on the bar. The panel beside it holds the rule (a share inside, or
+every point at or above the lower edge), the share asked for, the
+inner band and, when ticked, the outer band. Under them, for each
+polarity, are the count and share of its points inside, the verdict,
+and its worst point with its distance from the requirement in dB.
+Every edit redraws the judgement at once. Nothing is made, so there is
+no Apply button; the console records the `plot_srs_tolerance` call
+that draws what is on screen.
+
 ## In a script
 
 ```python

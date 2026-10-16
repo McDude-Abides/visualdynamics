@@ -554,3 +554,123 @@ def test_the_legend_counts_what_the_rule_counts():
     result = srs_tolerance(spec, measured(spec, db), rule='above_lower')
     assert describe(result) == (
         'maximax: 89/92 at or above \u22121.5 dB (96.7 %), fails')
+
+
+# ---- the reading in the window -----------------------------------------------
+
+
+def _shock_pair(window, pump, *spectra):
+    """The requirement and these spectra in the window, selected, on
+    the Points reading."""
+    from conftest import select_objects
+
+    spec = requirement(warning=(-1.5, 3.0), abort=(-3.0, 6.0))
+    window.add_object('Requirement', spec)
+    names = []
+    for k, (db, kind) in enumerate(spectra):
+        name = f'SRS {k + 1}'
+        window.add_object(name, measured(spec, db, kind=kind))
+        names.append(name)
+    select_objects(window, pump, 'Requirement', *names)
+    window.data_pane.srs_actions['points'].trigger()
+    pump()
+    return spec
+
+
+def test_the_points_rule_is_a_reading_of_a_shock_comparison(window, pump):
+    """Offered beside the spectra and the RMS bars, and choosing it
+    puts the panel up and the judgement in it and on the status line."""
+    db = np.zeros(POINTS)
+    db[40:50] = -5.0
+    spec = _shock_pair(window, pump, (db, 'maximax'))
+    worst = srs_tolerance(spec, measured(spec, db))['worst_frequency']
+    pane = window.data_pane
+    assert pane.srs_actions['points'].isVisible()
+    assert pane.srs_actions['points'].text() == 'Points Rule'
+    assert pane.srs_view == 'points'
+    panel = pane.srs_tolerance_panel
+    assert panel.isVisible()
+    assert panel.derived['points'].text() == '92'
+    assert panel.readout.text().splitlines() == [
+        'maximax: 82/92 inside (89.1 %), fails',
+        f'worst \u22125.0 dB at {worst:.4g} Hz']
+    assert 'maximax: 82/92 inside (89.1 %), fails' in window._status_text
+    plot = pane.graphics.getItem(0, 0)
+    assert [item for item in plot.listDataItems()
+            if getattr(item, 'is_outside_mark', False)]
+
+
+def test_each_polarity_selected_is_judged(window, pump):
+    """A positive and a negative spectrum selected with the requirement
+    are one measurement read two ways, a line each."""
+    _shock_pair(window, pump, (0.0, 'positive'), (-2.0, 'negative'))
+    lines = window.data_pane.srs_tolerance_panel.readout.text().splitlines()
+    assert lines[0] == 'positive: 92/92 inside (100.0 %), passes'
+    assert lines[2] == 'negative: 0/92 inside (0.0 %), fails'
+    # every point is 2 dB under, so the worst is any of them
+    assert lines[3].startswith('worst \u22122.0 dB at ')
+
+
+def test_the_panels_band_and_rule_redraw_the_judgement(window, pump):
+    """+5 dB everywhere fails a share of -1.5/+3 dB, passes it with the
+    band widened to +6, and passes 'All above lower' outright; the
+    rows that do not apply to a rule are not shown."""
+    _shock_pair(window, pump, (5.0, 'maximax'))
+    panel = window.data_pane.srs_tolerance_panel
+    assert panel.readout.text().startswith('maximax: 0/92 inside')
+    panel.inner_high.setValue(6.0)
+    pump()
+    assert panel.readout.text().startswith(
+        'maximax: 92/92 inside (100.0 %), passes')
+    panel.inner_high.setValue(3.0)
+    panel.rule_box.setCurrentIndex(1)
+    pump()
+    assert panel.settings()['rule'] == 'above_lower'
+    assert panel.readout.text().startswith(
+        'maximax: 92/92 at or above \u22121.5 dB (100.0 %), passes')
+    assert not panel.percent_box.isVisibleTo(panel)
+    assert not panel.inner_high.isVisibleTo(panel)
+    assert not panel.outer_low.isVisibleTo(panel)
+    panel.outer_box.setChecked(True)
+    pump()
+    assert panel.outer_high.isVisibleTo(panel)
+    assert panel.settings()['outer'] == (-3.0, 6.0)
+    assert 'passes' in panel.readout.text()       # 5 dB is inside +6...
+    panel.outer_high.setValue(4.0)
+    pump()
+    assert 'fails' in panel.readout.text()        # ...and outside +4
+
+
+def test_the_points_reading_is_journaled_as_its_plot_call(window, pump):
+    _shock_pair(window, pump, (0.0, 'positive'), (-2.0, 'negative'))
+    panel = window.data_pane.srs_tolerance_panel
+    panel.set_settings(rule='above_lower', outer=(-3.0, 6.0))
+    pump()
+    lines = [line for line in window.project.journal
+             if line.startswith('visualdynamics.plot.plot_srs_tolerance(')]
+    assert lines == [
+        ("visualdynamics.plot.plot_srs_tolerance([project['SRS 1'], "
+        "project['SRS 2']], project['Requirement'], channel='101Z+', "
+        "event=None, inner=(-1.5, float('inf')), outer=(-3.0, 6.0), "
+        "rule='above_lower', percent=90.0, path='srs_tolerance.png', "
+        'show=False)')]
+
+
+def test_the_points_rule_is_not_offered_for_sine_levels(qt_app):
+    """It is a shock's: the sine comparison keeps its two readings, and
+    a points choice carried over reads as its curves."""
+    from visualdynamics.gui.panes import DataPane
+
+    pane = DataPane('light', offscreen=True)
+    try:
+        pane.srs_view = 'points'
+        pane.show_srs_views(True, kind='sine')
+        assert not pane.srs_actions['points'].isVisible()
+        assert pane.srs_reading('sine') == 'curves'
+        assert pane.srs_actions['curves'].isChecked()
+        assert not pane.srs_tolerance_panel.isVisibleTo(pane)
+        pane.show_srs_views(True)
+        assert pane.srs_actions['points'].isVisible()
+        assert pane.srs_reading() == 'points'
+    finally:
+        pane.close()
