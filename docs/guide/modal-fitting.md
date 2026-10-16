@@ -99,6 +99,13 @@ The fit runs as the cursor moves, and the MAC and anything the drag
 skipped are brought up to date when the cursor stops. There is no
 separate fit button.
 
+The peak the cursor sits on is also read by its half-power width: the
+0.707 level, its two crossings and the Q they give are drawn in the
+cursor's red, and the reading ends the status line
+(`ModalFitSession.half_power`). It is the curve's own width, beside the
+damping the search found; where the two disagree the peak is not one
+clean mode ([Reading Q from a peak's half-power width](half-power.md)).
+
 ## The equation being solved
 
 The model behind everything on the screen is the residue form of a

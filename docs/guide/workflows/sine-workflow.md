@@ -192,6 +192,11 @@ project.save('sine.vdyn')
   level moves its reading in ways that do not move the extraction.
   [How a tracking filter reads a sweep](../sine-tracking.md) reads a
   record the way a controller does, setting by setting.
+- A resonance's Q can be read off a level, by its half-power width
+  (`level.half_power(frequency)`), but only off a slow sweep. A mode
+  swept faster than it can build reads late, low and wide, and its Q
+  low; [Reading Q from a peak's half-power width](../half-power.md)
+  says how slow is slow enough.
 - Where the levels wobble, look at the wavelet first. A ripple in an
   extracted level can come from the article (a resonance swept
   through), from the test (two tones beating in one band), or from the

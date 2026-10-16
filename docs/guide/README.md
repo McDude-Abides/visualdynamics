@@ -42,6 +42,8 @@ that is not an alpha.
   on top of a random, both judged from one recording
 - [How a tracking filter reads a sweep](sine-tracking.md): the
   controller's band and detector, and why its level differs
+- [Reading Q from a peak's half-power width](half-power.md): the
+  0.707 line, its crossings, and how many lines a peak needs
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

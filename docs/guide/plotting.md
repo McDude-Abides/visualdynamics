@@ -86,8 +86,11 @@ specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 `plot_snr(...)` and `plot_replication(...)`. Each draws the figure the
 app shows, and each takes `path=`. `plot_srs_tolerance(...)` draws a
 shock response spectrum against its tolerance band, point by point
-([Judging an SRS against its tolerance](srs-tolerance.md)), and takes
-`path=` too. The 3-D forms are in
+([Judging an SRS against its tolerance](srs-tolerance.md)).
+`plot_half_power(frf, 180.0)` draws one record with the half-power
+reading of a peak on it, the reading the fitting screen's cursor shows
+([Reading Q from a peak's half-power width](half-power.md)).
+The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and
 `sinespec.plot_sine_stage(specification, levels)` puts measured sine
