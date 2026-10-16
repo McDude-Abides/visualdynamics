@@ -55,6 +55,34 @@ from .half_power import HALF_POWER, HalfPower, crossings, read_half_power
 _POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
 
 
+def prominence_window(lines: int) -> int:
+    """How many lines either side a peak's prominence is measured
+    over, for a search across `lines` lines: a twelfth of them, and at
+    least 25."""
+    return max(25, int(lines) // 12)
+
+
+def prominence(values: Any, peaks: Any, window: int) -> np.ndarray:
+    """How far each of `peaks` (line indices) stands above its
+    surroundings: its log value less the median log value of the
+    `window` lines either side of it.
+
+    This is how a peak looks on a plot, and it is the ranking the
+    fitting screen's suggestion uses. Ranked by raw height instead, the
+    tallest line of an accelerance (which grows as frequency squared) is
+    nearly always a shoulder of the highest dense cluster, never the
+    first mode. One rule, so the suggestion and the signature
+    comparison's mode finding (`signature.find_modes`) rank alike.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    logs = np.log(np.maximum(values, 1e-300))
+    out = np.empty(len(peaks))
+    for k, i in enumerate(peaks):
+        lo, hi = max(0, i - window), min(len(values), i + window + 1)
+        out[k] = logs[i] - np.median(logs[lo:hi])
+    return out
+
+
 class ModalFitSession:
     """An interactive fit of real normal modes to one FRF set.
 
@@ -414,14 +442,9 @@ class ModalFitSession:
                     and s1[i] >= s1[i - 1] and s1[i] >= s1[i + 1]
                     and (free[i] or self._another_mode_at(i))]
         if interior:
-            window = max(25, int(np.count_nonzero(inside)) // 12)
-            logs = np.log(np.maximum(s1, 1e-300))
-
-            def prominence(i: int) -> float:
-                lo, hi = max(0, i - window), min(len(s1), i + window + 1)
-                return float(logs[i] - np.median(logs[lo:hi]))
-
-            index = max(interior, key=prominence)
+            rank = prominence(s1, interior,
+                              prominence_window(int(np.count_nonzero(inside))))
+            index = interior[int(np.argmax(rank))]
         else:
             candidates = np.where(free)[0]
             index = int(candidates[np.argmax(s1[candidates])])

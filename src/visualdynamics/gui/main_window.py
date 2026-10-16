@@ -923,6 +923,10 @@ class MainWindow(QMainWindow):
         # the plot is the preview of the settings being made
         self.data_pane.srs_tolerance_panel.changed.connect(
             lambda _settings: self.render_current())
+        # the signature comparison's modes and limits redraw it at once:
+        # the plot is the preview of the settings being made
+        self.data_pane.signature_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.octave_panel.apply_asked.connect(
             self.compute_octave)
         # the tone readout: the toggle redraws, and a window chosen in
@@ -11518,6 +11522,17 @@ class MainWindow(QMainWindow):
         self.data_pane.show_srs_views(spectra is not None)
         if spectra is not None:
             return self._render_srs(*spectra)
+        # two signatures of one article, before and after a test: drawn
+        # over each other, or compared mode by mode against limits. The
+        # overlay is the default and the toggle the other reading
+        signature = self._signature_found(series)
+        self.data_pane.offer_signature(signature is not None)
+        if signature is not None and self.data_pane.signature_wanted:
+            # a comparison against limits is read flat, its windows
+            # drawn on one plot: no depth axis to offer
+            self.data_pane.offer_waterfall(False)
+            return self._render_signature(signature)
+        self.data_pane.signature_panel.hide()
         # a specification on its own reads two ways: its spectra, or
         # the level each channel asks for as bars over the table
         levels = self._specification_rows(series)
@@ -16395,6 +16410,118 @@ class MainWindow(QMainWindow):
             events = sorted({str(data.block[i]) for i in records})
         return (data, specs[0][0], channels, events,
                 [spectrum for spectrum, _records in measured])
+
+    def _signature_found(self, series):
+        """The two selected when they are two signatures of one kind,
+        else None: two FRFs (a transmissibility is an FRF), or two
+        spectra, which is what a tracked sweep's level is. A
+        specification is not a signature, and two densities have
+        their own readings."""
+        if len(series) != 2:
+            return None
+        kinds = []
+        for _name, data, _records in series:
+            if isinstance(data, Frf):
+                kinds.append(Frf)
+            elif isinstance(data, Spectrum) and not isinstance(data, Bounded):
+                kinds.append(Spectrum)
+            else:
+                return None
+        return series if kinds[0] is kinds[1] else None
+
+    def _render_signature(self, series):
+        """The Signature reading: the two signatures overlaid with a
+        window on each mode for its limits, and the modes, their shifts
+        and verdicts in the panel beside.
+
+        One record at a time, chosen in the event box when the
+        signature before holds several (one response point is one
+        signature); the record after is the one at the same DOF. The
+        modes are the panel's, or, when it names none, the most
+        prominent peaks of the record before (`find_modes`). The
+        settings are the panel's, and every number is
+        `core.signature.compare_signatures`'s.
+        """
+        from ..core.signature import find_modes
+        from ..plot.signature import build_signature, display_scale
+
+        pane = self.data_pane
+        panel = pane.signature_panel
+        panel.set_pair([name for name, _data, _records in series])
+        panel.show()
+        settings = panel.settings()
+        names = [name for name, _data, _records in series]
+        before_name = settings['before'] if settings['before'] in names \
+            else names[0]
+        after_name = next(name for name in names if name != before_name)
+        found = {name: (data, records) for name, data, records in series}
+        before, picks = found[before_name]
+        after = found[after_name][0]
+        rows = list(picks) if picks else list(range(before.num_records))
+        pane.show_events([self._signature_label(before, i) for i in rows])
+        chosen = pane.chosen_event() or 0
+        record = rows[min(chosen, len(rows) - 1)]
+        pane.graphics.clear()
+        modes = settings['modes']
+        if isinstance(modes, str):
+            # the field cannot be read: say why, and draw no verdict
+            panel.show_result(None)
+            return f'Signature: {modes}'
+        named = modes is not None
+        if not named:
+            modes = find_modes(before, record, settings['find'])
+            if not modes:
+                panel.show_result(None)
+                return f'Signature: {before_name} has no peak to compare'
+        try:
+            comparison = build_signature(
+                pane.graphics, before, after, modes, record=record,
+                frequency_limit=settings['frequency_limit'],
+                amplitude_limit=settings['amplitude_limit'],
+                names=(before_name, after_name), table=False,
+                unit_system=self.unit_system, theme=self.theme_name)
+        except ValueError as error:
+            # a window with no line of the record after in it: the
+            # reason, and no numbers that would read as a verdict
+            panel.show_result(None)
+            return f'Signature: {error}'
+        panel.show_result(comparison, display_scale(
+            before.ordinate_dim[record], self.unit_system))
+        self._journal_signature(before, after, comparison, record,
+                                settings)
+        how = '' if named else ' (modes found)'
+        return (f'{before_name} before, {after_name} after, at '
+                f'{comparison.dof}{how}: {comparison.describe()}')
+
+    @staticmethod
+    def _signature_label(data, record):
+        """A record as the event box lists it: its DOF, or its DOF pair."""
+        reference = getattr(data, 'reference_dof', None)
+        response = str(data.response_dof[record])
+        return (response if reference is None
+                else f'{response} / {reference[record]}')
+
+    def _journal_signature(self, before, after, comparison, record,
+                           settings):
+        """The signature reading, journaled as the headless call that
+        draws it (`_journal_view`), with the modes it read, found or
+        named, written out."""
+        try:
+            names = (self.project.name_of(before),
+                     self.project.name_of(after))
+        except (KeyError, ValueError):
+            return
+        modes = [(shift.mode.frequency, shift.mode.counts)
+                 for shift in comparison.shifts]
+        prefix = ('visualdynamics.plot.plot_signature('
+                  f'project[{names[0]!r}], project[{names[1]!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, {modes!r}, record={record!r}, '
+            f"frequency_limit={settings['frequency_limit']!r}, "
+            f"amplitude_limit={settings['amplitude_limit']!r}, "
+            f'names={names!r}, '
+            "path='signature.png', show=False)")
 
     def _render_srs(self, measured, specification, channels, picked_events=None,
                     polarities=None):

@@ -3056,6 +3056,80 @@ def plot_ratio(signal: Any, floor: Any, *,
                         title=title or 'Signal to noise', size=size)
 
 
+
+def plot_signature(before: Any, after: Any, modes: Any, *,
+                   record: int = 0, after_record: int | None = None,
+                   frequency_limit: Any = None,
+                   amplitude_limit: Any = None,
+                   search: float | None = None,
+                   names: tuple[str, str] = ('before', 'after'),
+                   unit_system: UnitSystem | None = None,
+                   theme: Any = None,
+                   path: str | os.PathLike | None = None,
+                   show: bool = True, title: str | None = None,
+                   size: tuple[int, int] = (1300, 700)) -> Any:
+    """Two signatures overlaid, a window drawn on each mode for its
+    frequency and amplitude limits, and the table of shifts beside.
+
+        visualdynamics.plot.plot_signature(
+            before, after, [84.0, SignatureMode(412.0, counts=False)],
+            path='signature.png')
+
+    The comparison is `core.signature.compare_signatures`'s: each mode
+    read before and after, its frequency and amplitude shift in
+    percent, and a verdict on each mode that counts. The window about a
+    mode's peak before the test is as wide as the frequency limit and
+    as tall as the amplitude limit, so the peak after passes when it
+    lands inside. A mode that counts has a solid window and its verdict
+    written over it; one that does not count has a dotted window and
+    'not judged'.
+
+    Parameters
+    ----------
+    before, after : DataArray
+        The two signatures: FRFs, transmissibilities or tracked sweep
+        levels.
+    modes : float, SignatureMode, (float, bool), sequence, or shape set
+        The modes compared (`core.signature.as_modes`).
+    record, after_record : int
+        Which record of each; `after_record` by DOF when omitted.
+    frequency_limit, amplitude_limit : float or (float, float), optional
+        The limits in percent; `FREQUENCY_LIMIT` and `AMPLITUDE_LIMIT`
+        when omitted.
+    search : float, optional
+        How far either side a mode's window reaches, as a share of its
+        frequency; `SEARCH` when omitted.
+    names : (str, str), default ('before', 'after')
+        The two curves' names in the legend.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.signature import AMPLITUDE_LIMIT, FREQUENCY_LIMIT, SEARCH
+    from .signature import build_signature
+
+    settings = {
+        'frequency_limit': (FREQUENCY_LIMIT if frequency_limit is None
+                            else frequency_limit),
+        'amplitude_limit': (AMPLITUDE_LIMIT if amplitude_limit is None
+                            else amplitude_limit),
+        'search': SEARCH if search is None else search}
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_signature(widget, before, after, modes, record=record,
+                        after_record=after_record, names=names,
+                        unit_system=unit_system, theme=theme, **settings)
+
+    dof = before.response_dof[record]
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{dof} before and after',
+                        size=size)
+
 def plot_comparison(measured: Any, specification: Any, *,
                     pair: tuple[str, str] | None = None,
                     unit_system: UnitSystem | None = None,
