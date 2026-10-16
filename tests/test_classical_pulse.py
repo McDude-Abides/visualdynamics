@@ -368,3 +368,80 @@ def test_a_record_is_checked_on_its_first_acceleration_channel():
         check_pulse(shot, nominal, '9Z+')
     with pytest.raises(ValueError, match='holds none'):
         check_pulse(history(np.zeros(t.size), dims=['force']), nominal)
+
+
+# ---- the view ----------------------------------------------------------------
+
+
+def _plots(layout):
+    import pyqtgraph as pg
+
+    return [item for item in layout.ci.items if isinstance(item, pg.PlotItem)]
+
+
+def test_the_view_marks_the_points_outside_and_shades_the_window(qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.classical_pulse import build_pulse_check
+    from visualdynamics.units import SI
+
+    check = judged(pulse(), pulse(peak=62.5))
+    layout = pg.GraphicsLayoutWidget()
+    build_pulse_check(layout, check, unit_system=SI, name='1Z+')
+    record_plot, velocity_plot = _plots(layout)
+    assert 'Flagged' in record_plot.titleLabel.text
+    assert '1Z+: 50 m/s' not in record_plot.titleLabel.text
+    marks = [item for item in record_plot.listDataItems()
+             if getattr(item, 'is_outside_mark', False)]
+    assert len(marks) == 1
+    assert marks[0].opts['symbol'] == 'o'
+    assert len(marks[0].xData) == check.outside_count
+    window = next(item for item in record_plot.items
+                  if isinstance(item, pg.LinearRegionItem))
+    assert window.getRegion() == pytest.approx(check.window)
+    band = next(item for item in velocity_plot.items
+                if isinstance(item, pg.LinearRegionItem))
+    nominal = check.nominal_velocity_change
+    assert band.getRegion() == pytest.approx((0.8 * nominal, 1.2 * nominal))
+    assert 'velocity change' in velocity_plot.titleLabel.text
+    layout.close()
+
+
+def test_the_view_marks_nothing_on_a_good_pulse(qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.classical_pulse import build_pulse_check
+
+    layout = pg.GraphicsLayoutWidget()
+    build_pulse_check(layout, judged(pulse()))
+    record_plot, _velocity = _plots(layout)
+    assert record_plot.titleLabel.text.split('<br>')[1].startswith('Passes')
+    assert not [item for item in record_plot.listDataItems()
+                if getattr(item, 'is_outside_mark', False)]
+    layout.close()
+
+
+def test_the_readout_is_in_the_windows_units():
+    from visualdynamics.plot.classical_pulse import readout
+    from visualdynamics.units import IN_LBF_S
+
+    check = judged(pulse('sawtooth', 40.0), pulse('sawtooth', 40.0,
+                                                  edge=0.1 * T))
+    rows = readout(check, IN_LBF_S.with_units(acceleration='g'))
+    assert list(rows) == ['peak', 'duration', 'fall', 'velocity', 'outside']
+    assert rows['velocity'] == '93.43 in/s, +10.0 %'
+    assert rows['fall'] == '1.1 of 1.1 ms'
+    assert rows['outside'] == f'0 of {check.points}'
+    slow = judged(pulse('sawtooth', 40.0), pulse('sawtooth', 40.0,
+                                                 edge=0.2 * T))
+    assert readout(slow)['fall'].endswith(', out')
+
+
+def test_the_view_draws_to_a_file(qt_app, tmp_path):
+    from visualdynamics.plot import plot_pulse_check
+
+    t, opens = record()
+    path = tmp_path / 'pulse.png'
+    plot_pulse_check(history(pulse().at(t - opens)), 'half-sine', 50 * G, T,
+                     path=str(path), show=False)
+    assert path.exists() and path.stat().st_size > 2000

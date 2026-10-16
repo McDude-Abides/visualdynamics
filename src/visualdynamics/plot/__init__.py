@@ -3293,6 +3293,87 @@ def plot_time_statistics(history: Any, record: int = 0, *,
                         size=size)
 
 
+
+def plot_pulse_check(history: Any, shape: str, peak: float,
+                     duration: float, edge: float | None = None, *,
+                     channel: int | str | None = None,
+                     band: float | None = None,
+                     duration_tolerance: float | None = None,
+                     edge_limit: float | None = None,
+                     velocity_tolerance: float | None = None,
+                     quiet: float | None = None,
+                     unit_system: UnitSystem | None = None,
+                     theme: Any = None,
+                     path: str | os.PathLike | None = None,
+                     show: bool = True, title: str | None = None,
+                     size: tuple[int, int] = (1000, 850)) -> Any:
+    """Draw a measured classical pulse on its tolerance envelope.
+
+        visualdynamics.plot.plot_pulse_check(history, 'half-sine',
+                                             50 * 9.80665, 0.011,
+                                             path='pulse.png')
+
+    Two rows for one acceleration channel: the record on the envelope
+    of the nominal pulse, the samples outside it marked and the
+    velocity window shaded, with the verdict as its title; and the
+    velocity across that window against the nominal change and its
+    tolerance (`core.classical_pulse.check_pulse`). The pulse is given
+    as `core.classical_pulse.ClassicalPulse` takes it, the peak in SI.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The shock record.
+    shape : str
+        'half-sine', 'sawtooth' or 'trapezoid'.
+    peak : float
+        The nominal peak, signed, in m/s².
+    duration : float
+        The nominal duration, in seconds.
+    edge : float, optional
+        The sawtooth's fall or the trapezoid's rise and fall, in
+        seconds.
+    channel : int or str, optional
+        The record's row or DOF; its first acceleration channel by
+        default.
+    band, duration_tolerance, edge_limit, velocity_tolerance, quiet : float, optional
+        The tolerances, as shares (the quiet in durations); the
+        `core.classical_pulse` defaults when omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        If the pulse is not a classical pulse, the channel is not an
+        acceleration, or the pulse cannot be found in the record.
+    """
+    from ..core import classical_pulse as pulses
+    from .classical_pulse import build_pulse_check
+
+    pulse = pulses.ClassicalPulse(shape, peak, duration, edge)
+    given = {'band': band, 'duration_tolerance': duration_tolerance,
+             'edge_limit': edge_limit,
+             'velocity_tolerance': velocity_tolerance, 'quiet': quiet}
+    check = pulses.check_pulse(
+        history, pulse, channel,
+        **{key: value for key, value in given.items() if value is not None})
+    dof = str(history.response_dof[pulses.pulse_channel(history, channel)])
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_pulse_check(widget, check, unit_system=unit_system,
+                          theme=theme, name=dof)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{dof}: classical pulse check',
+                        size=size)
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,
