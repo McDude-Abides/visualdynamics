@@ -292,6 +292,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_bars': 'plot_bars',
         '_render_levels': 'plot_bars.level_chart / compliance.specification_rms',
         '_render_kurtosis': 'plot_kurtosis',
+        '_render_statistics': 'plot_time_statistics',
         '_render_wavelet': ('plot_scalogram / '
                             'viz.scalogram.plot_scalogram_stage'),
         '_render_replication': 'plot_replication',

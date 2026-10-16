@@ -532,6 +532,35 @@ def _draw_kurtosis(painter, color):
     painter.drawPath(path)
 
 
+def _draw_statistics(painter, color):
+    """A histogram under its bell, with a bar standing at each edge.
+
+    The statistics reading's button: the samples counted by level and
+    set against the Gaussian, which is the one picture that shows a
+    clipped record at a glance (its samples piled at the rails). Bars
+    and a curve together, so it is told from the kurtosis glyph's bare
+    bell and from the bar-chart readings' bare bars.
+    """
+    painter.setPen(Qt.PenStyle.NoPen)
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setBrush(QBrush(faint))
+    for x, height in ((14, 8), (20, 18), (26, 28), (32, 30), (38, 20),
+                      (44, 10)):
+        painter.drawRect(QRectF(x, 50 - height, 5, height))
+    # the two piled edges: what a clipped record's histogram wears
+    painter.setBrush(QBrush(QColor(color)))
+    for x in (7, 51):
+        painter.drawRect(QRectF(x, 36, 5, 14))
+    path = QPainterPath()
+    path.moveTo(6, 50)
+    path.cubicTo(22, 50, 24, 12, 32, 12)
+    path.cubicTo(40, 12, 42, 50, 58, 50)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(QColor(color), 4))
+    painter.drawPath(path)
+
+
 def _draw_sine_levels(painter, color):
     """A sweep with its level read along it: the chirp, and dots on
     its crests — the sine view's button."""
@@ -1947,7 +1976,8 @@ def control_icon(name: str) -> QIcon:
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,
-     'kurtosis': _draw_kurtosis, 'filter': _draw_filter,
+     'kurtosis': _draw_kurtosis, 'statistics': _draw_statistics,
+     'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,
      'tone': _draw_tone,
      'log_axis': _draw_log_axis,

@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from ..units import UnitSystem
     from .averaging import Averaging
     from .half_power import HalfPower
+    from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
 
 from ..units import (
@@ -1796,6 +1797,37 @@ class TimeHistory(DataArray):
         from .filters import differentiate
 
         return differentiate(self)
+
+    def time_statistics(self, record: int = 0, **options: Any
+                        ) -> TimeStatistics:
+        """Read one channel's statistics in the time domain: the
+        moments, the crest factor and its peak, the samples at the peak
+        and on the rail, the tails beyond 3, 4 and 5 sigma against the
+        Gaussian's, the crossing rate counted and from the spectrum, the
+        expected largest peak and the kurtosis frame by frame, each
+        judged against its band.
+
+        `core.time_statistics.record_statistics` does the reading, over
+        the span the kurtosis bars read, and says how;
+        `visualdynamics.plot.plot_time_statistics` draws it.
+
+        Parameters
+        ----------
+        record : int, default 0
+            Which channel.
+        **options
+            `full_scale` (the channel's range, in SI), `margin`,
+            `frame`, `duration` and the bands, as
+            `core.time_statistics.time_statistics` takes them.
+
+        Returns
+        -------
+        TimeStatistics
+            Every number, in SI as the record is stored, the bands and
+            the flags.
+        """
+        from .time_statistics import record_statistics
+        return record_statistics(self, record, **options)
 
     def srs_windows(self, shocks: Sequence[Any] | None = None
                     ) -> list[Any]:

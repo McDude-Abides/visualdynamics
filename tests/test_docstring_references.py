@@ -45,6 +45,8 @@ THEORY = {
                         'through before its spectrum',
     'core.tone_readout': 'a tone read off an autospectrum: the noise '
                          'bandwidth and leakage of a window',
+    'core.time_statistics': 'the moments, the Gaussian tails, the crossing '
+                            'rate and the expected largest peak',
 }
 
 #: and methods, where the theory lives on the call rather than the module

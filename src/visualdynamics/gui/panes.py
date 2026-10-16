@@ -49,6 +49,7 @@ from .rigid_panel import RigidBodyPanel
 from .shock_panel import ShockPanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
+from .statistics_panel import StatisticsPanel
 from .tone_panel import TonePanel
 from .toolbars import fence, shows_anything, tidy
 from .truncate_panel import TruncatePanel
@@ -232,6 +233,11 @@ class DataPane(QWidget):
         self.tone_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
+        #: and the time statistics, the same way
+        self.statistics_wanted: bool = False
+        #: what they are read with, kept across redraws so a range typed
+        #: for one channel survives clicking away and back
+        self.statistics_settings: dict[str, Any] | None = None
         #: and the scalogram, the same way
         self.wavelet_wanted: bool = False
         #: what it is computed with, kept across redraws so a tuned
@@ -310,6 +316,11 @@ class DataPane(QWidget):
         self.wavelet_panel: WaveletPanel = WaveletPanel()
         self.wavelet_panel.hide()
         self.wavelet_panel.changed.connect(self._wavelet_edited)
+        # the time statistics' settings and their table, beside the
+        # three rows that draw them; read only, nothing to apply
+        self.statistics_panel: StatisticsPanel = StatisticsPanel()
+        self.statistics_panel.hide()
+        self.statistics_panel.changed.connect(self._statistics_edited)
         # the specification being written at a shape set's modal
         # coordinates, beside the plot that previews it; the toggle
         # is on the table bar, where a lone shape set's readings are
@@ -341,6 +352,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.wavelet_panel)
+        plot_row.addWidget(self.statistics_panel)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -716,6 +728,21 @@ class DataPane(QWidget):
             'clipped or non-random record')
         self.kurtosis_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.kurtosis_action)
+        # the five-minute look at one channel, in numbers: the moments,
+        # the crest factor, the rail, the tails against the Gaussian's
+        # and the kurtosis frame by frame, each against its band. Beside
+        # the kurtosis bars because it reads the same span, and replaces
+        # the trace for the same reason they do
+        self.statistics_action: QAction = QAction(
+            control_icon('statistics'), 'Statistics', self)
+        self.statistics_action.setCheckable(True)
+        self.statistics_action.setToolTip(
+            'One channel read in the time domain: mean, rms, skewness, '
+            'kurtosis, crest factor, samples on the rail, the tails '
+            'against the Gaussian and the kurtosis frame by frame, each '
+            'flagged outside its band')
+        self.statistics_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.statistics_action)
         # and the same for the events in a transient record: the windows
         # bracketed on the plot and listed beside it, or neither
         self.shocks_action: QAction = QAction(control_icon('shocks'), 'Shocks', self)
@@ -740,6 +767,7 @@ class DataPane(QWidget):
         for action in (self.averaging_action, self.filter_action,
                        self.sine_action,
                        self.truncate_action, self.kurtosis_action,
+                       self.statistics_action,
                        self.shocks_action, self.wavelet_action):
             self.reading_group.addAction(action)
         # the banded reading of a spectrum: the octave conversion
@@ -864,6 +892,8 @@ class DataPane(QWidget):
                  ('sine_action', 'sine_wanted', 'sine_panel'),
                  ('truncate_action', 'truncate_wanted', 'truncate_panel'),
                  ('kurtosis_action', 'kurtosis_wanted', None),
+                 ('statistics_action', 'statistics_wanted',
+                  'statistics_panel'),
                  ('shocks_action', 'shocks_wanted', 'shock_panel'),
                  ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'))
 
@@ -933,7 +963,7 @@ class DataPane(QWidget):
         self.tone_toggled.emit(checked)
 
     def _choose_reading(self, checked: bool) -> None:
-        """The kurtosis or the wavelet button: a different *reading* of
+        """The kurtosis, statistics or wavelet button: a different *reading* of
         the record rather than a mark on it, so it replaces the trace
         outright — and the mark-the-trace toggles stand down, having
         nothing to mark."""
@@ -950,6 +980,18 @@ class DataPane(QWidget):
         """
         self.wavelet_settings = dict(settings)
         self.reread.emit()
+
+    def _statistics_edited(self, settings) -> None:
+        """A statistics setting moved: keep it, then draw again. Kept
+        on the pane, as the wavelet's are, so it is sticky."""
+        self.statistics_settings = dict(settings)
+        self.reread.emit()
+
+    @property
+    def showing_statistics(self) -> bool:
+        """Whether the time statistics are offered and checked."""
+        return (self.statistics_action.isVisible()
+                and self.statistics_action.isChecked())
 
     @property
     def showing_wavelet(self) -> bool:
@@ -1271,15 +1313,16 @@ class DataPane(QWidget):
         because `show_controls` runs before the window knows whether
         the drawing will be plain curves. The toggle is offered whenever
         the current reading has both forms, and hidden only where one
-        does not exist: the kurtosis bars are flat, with nothing to put
-        along a depth axis, and while `flat_only` is set. The scalogram
+        does not exist: the kurtosis bars and the statistics' rows are
+        flat, with nothing to put along a depth axis, and while `flat_only` is set. The scalogram
         has both forms, and in 3-D it is drawn as a surface.
         """
         # Offering the toggle wherever both forms exist is the *setting*
         # half of principle 3, and the half that survives: it is the
         # readings that stay offered whichever one is chosen (Brandon,
         # 2026-08-27).
-        flat = self.kurtosis_wanted or self.flat_only
+        flat = (self.kurtosis_wanted or self.statistics_wanted
+                or self.flat_only)
         self.waterfall_action.setVisible(offered and not flat)
         if offered and not flat:
             self.toolbar.setVisible(True)
@@ -1562,7 +1605,8 @@ class DataPane(QWidget):
         # unpicking it first (Brandon, 2026-08-27). A fenced set of
         # five that shows one is worse than the undivided row was.
         reading = averaging or shocks
-        instead = reading and (self.kurtosis_wanted or self.wavelet_wanted)
+        instead = reading and (self.kurtosis_wanted or self.wavelet_wanted
+                               or self.statistics_wanted)
         self.averaging_action.setVisible(averaging)
         self.filter_action.setVisible(averaging)
         self.filter_action.setChecked(averaging and self.filter_wanted)
@@ -1610,6 +1654,11 @@ class DataPane(QWidget):
         # record, and a record is what has channels to be Gaussian
         self.kurtosis_action.setVisible(reading)
         self.kurtosis_action.setChecked(reading and self.kurtosis_wanted)
+        # beside it, offered where it is and for the same reason
+        self.statistics_action.setVisible(reading)
+        self.statistics_action.setChecked(reading and self.statistics_wanted)
+        if not reading or not self.statistics_wanted:
+            self.statistics_panel.hide()
         # the scalogram is offered wherever the averaging is, and for
         # the same reason: both are readings of a record
         self.wavelet_action.setVisible(averaging)

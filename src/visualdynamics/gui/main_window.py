@@ -11474,6 +11474,9 @@ class MainWindow(QMainWindow):
                                         series[0][2])
         if history is not None and self.data_pane.showing_kurtosis:
             return self._render_kurtosis(history, series)
+        if history is not None and self.data_pane.showing_statistics:
+            return self._render_statistics(history, series[0][0],
+                                           series[0][2])
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,
@@ -15719,6 +15722,85 @@ class MainWindow(QMainWindow):
         # which one this is rather than leaving it to be guessed
         _spans, phrase = analyzed_span(history)
         return f'{self.bar_chart.summary.toPlainText()}, {phrase}'
+
+    def _render_statistics(self, history, name=None, records=None):
+        """One channel of this record read in the time domain: the
+        trace, its histogram against the Gaussian and its kurtosis
+        frame by frame, with the table and the flags in the panel.
+
+        One channel at a time, as the scalogram is: the first selected,
+        and the tree is settled onto it so the selection and the
+        picture cannot disagree. The panel's range is in the units the
+        trace is drawn in and is put into SI here, once, before the
+        reading; every number is `TimeHistory.time_statistics`'s.
+        """
+        from ..plot.time_statistics import build_time_statistics
+        from ..units import UNKNOWN
+
+        panel = self.data_pane.statistics_panel
+        panel.set_settings(self.data_pane.statistics_settings)
+        settings = panel.settings()
+        panel.show()
+        channel = records[0] if records else 0
+        if name is not None and len(history.response_dof) > 1 \
+                and records != [channel]:
+            item = self._item_for_object(name)
+            if item is not None:
+                item.setExpanded(True)
+            self._select_records(name, [channel])
+        us = self.unit_system
+        dimension = history.ordinate_dim[channel]
+        if dimension == UNKNOWN:
+            # raw numbers, shown as they are, and a range typed in them
+            unit = ''
+
+            def shown(values):
+                return values
+
+            def to_si(value):
+                return value
+        else:
+            unit = us.label_text(dimension)
+
+            def shown(values):
+                return us.from_si(values, dimension)
+
+            def to_si(value):
+                # a range is a size either way, so it converts by the
+                # unit's scale alone
+                return float(us.to_si(value, dimension)
+                             - us.to_si(0.0, dimension))
+        panel.set_unit(unit)
+        full_scale = settings['full_scale']
+        options = {'full_scale': (None if full_scale is None
+                                  else to_si(full_scale)),
+                   'margin': settings['margin'],
+                   'frame': settings['frame'],
+                   'duration': settings['duration'],
+                   'kurtosis_band': settings['kurtosis_band']}
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        try:
+            stats = history.time_statistics(channel, **options)
+        except ValueError as error:
+            # a frame shorter than two samples, a band set backwards: the
+            # reason, and no table that would read as a verdict
+            panel.show_statistics(None)
+            return str(error)
+        build_time_statistics(self.data_pane.graphics, history, stats,
+                              channel, unit_system=us,
+                              theme=self.theme_name)
+        panel.show_statistics(stats, shown, unit)
+        if name is not None:
+            call = 'visualdynamics.plot.plot_time_statistics'
+            given = ', '.join(f'{key}={value!r}'
+                              for key, value in options.items())
+            self._journal_view(
+                f'{call}(project[{name!r}]',
+                f'{call}(project[{name!r}], {channel}, {given}, '
+                "path='time_statistics.png', show=False)")
+        return f'{history.record_label(channel)}: {stats.describe()}'
 
     def _render_wavelet(self, history, name=None, records=None):
         """Where this record's frequencies are, moment by moment.

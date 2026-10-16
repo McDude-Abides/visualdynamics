@@ -3227,6 +3227,72 @@ def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
                         title=title or 'Kurtosis by channel', size=size)
 
 
+def plot_time_statistics(history: Any, record: int = 0, *,
+                         full_scale: float | None = None,
+                         unit_system: UnitSystem | None = None,
+                         theme: Any = None,
+                         path: str | os.PathLike | None = None,
+                         show: bool = True, title: str | None = None,
+                         size: tuple[int, int] = (1000, 980),
+                         **options: Any) -> Any:
+    """Draw one channel's time statistics: the trace, its histogram
+    against the Gaussian, and its kurtosis frame by frame.
+
+        visualdynamics.plot.plot_time_statistics(
+            history, 0, full_scale=25 * 9.80665, path='statistics.png')
+
+    Three rows (`plot.time_statistics`): the trace with the range drawn
+    across it and every sample on the rail marked; the histogram as a
+    density beside the bell of the record's own mean and standard
+    deviation, with 3, 4 and 5 sigma marked and the share beyond each
+    against the Gaussian's; the kurtosis against time inside its frame
+    band, with the record's own kurtosis across it. The top row is
+    titled with the judgement (`TimeStatistics.describe`). This is the
+    script form of the Statistics reading on a time history's bar, and
+    the numbers are `TimeHistory.time_statistics`.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The record.
+    record : int, default 0
+        Which channel.
+    full_scale : float, optional
+        The channel's range, in SI: the rail is drawn and counted only
+        when it is given.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+    **options
+        `margin`, `frame`, `duration` and the bands, as
+        `core.time_statistics.time_statistics` takes them.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        If `record` names no channel, or as
+        `core.time_statistics.time_statistics` raises.
+    """
+    from .time_statistics import build_time_statistics
+
+    stats = history.time_statistics(record, full_scale=full_scale,
+                                    **options)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_time_statistics(widget, history, stats, record,
+                              unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{history.record_label(record)}: '
+                                        'time statistics'),
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,
