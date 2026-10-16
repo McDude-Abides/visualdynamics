@@ -380,3 +380,177 @@ def test_the_judgement_lives_beside_the_rms_reading():
     assert compliance.SRS_INNER_DB == (-1.5, 3.0)
     assert compliance.SRS_POINTS_PERCENT == 90.0
 
+
+# ---- the overlay -----------------------------------------------------------
+
+
+def test_the_overlay_draws_headless(tmp_path):
+    from visualdynamics.plot import plot_srs_tolerance
+
+    spec = requirement()
+    path = tmp_path / 'tolerance.png'
+    plot_srs_tolerance([measured(spec, kind='positive'),
+                        measured(spec, -2.0, kind='negative')], spec,
+                       outer=(-3.0, 6.0), path=str(path), show=False)
+    assert path.exists() and path.stat().st_size > 2000
+
+
+def test_the_overlay_marks_the_points_outside_and_states_the_count(qt_app):
+    """Each spectrum named with its count, share and verdict; the
+    points the rule counts against it filled, and only those."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.srs_tolerance import SYMBOLS, build_srs_tolerance
+
+    spec = requirement()
+    db = np.zeros(POINTS)
+    db[40:50] = -5.0
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        results = build_srs_tolerance(
+            layout, spec, [measured(spec, db),
+                           measured(spec, 2.0, kind='positive')],
+            outer=(-3.0, 6.0))
+        plot = layout.getItem(0, 0)
+        names = [label.text for _sample, label in plot.legend.items]
+        assert names[:3] == ['requirement',
+                             'maximax: 82/92 inside (89.1 %), fails',
+                             'positive: 92/92 inside (100.0 %), passes']
+        assert 'outside \u22121.5/+3 dB' in names
+        assert 'below \u22123 dB' in names
+        assert 'above +6 dB' in names
+        marks = [item for item in plot.listDataItems()
+                 if getattr(item, 'is_outside_mark', False)]
+        assert len(marks) == 1                # the positive has none
+        x = marks[0].xData                    # as given, not in decades
+        assert np.allclose(x, spec.abscissa[40:50])
+        assert marks[0].opts['symbol'] == SYMBOLS[0]
+        assert [r['passed'] for r in results] == [False, True]
+    finally:
+        layout.close()
+
+
+def test_the_above_lower_overlay_shades_no_ceiling(qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.srs_tolerance import build_srs_tolerance
+
+    spec = requirement()
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        build_srs_tolerance(layout, spec, measured(spec, 5.0),
+                            rule='above_lower')
+        plot = layout.getItem(0, 0)
+        names = [label.text for _sample, label in plot.legend.items]
+        assert 'maximax: 92/92 at or above \u22121.5 dB (100.0 %), passes' \
+            in names
+        assert 'below \u22121.5 dB' in names
+        assert not any(name.startswith('outside') for name in names)
+        assert not [item for item in plot.listDataItems()
+                    if getattr(item, 'is_outside_mark', False)]
+    finally:
+        layout.close()
+
+
+def test_the_overlay_refuses_a_channel_it_cannot_find(qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.srs_tolerance import build_srs_tolerance
+
+    spec = requirement()
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        with pytest.raises(ValueError, match='no record at 101Z'):
+            build_srs_tolerance(layout, spec, measured(spec, dof='202X+'))
+        with pytest.raises(ValueError, match='Q=50'):
+            build_srs_tolerance(layout, spec, measured(spec, q=50.0))
+    finally:
+        layout.close()
+
+
+def _zone_edges(plot):
+    """The y values of every zone edge drawn, as given."""
+    return [np.asarray(item.yData) for item in plot.listDataItems()
+            if getattr(item, 'is_zone_edge', False)]
+
+
+def _has_curve(curves, values):
+    return any(c.shape == values.shape and np.allclose(c, values)
+               for c in curves)
+
+
+def test_the_overlay_shades_the_bands_at_their_decibels(qt_app):
+    """The zones' edges are the requirement times each band's factor,
+    in the plot's units (g by default), and the requirement is drawn
+    in the same units."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.srs_tolerance import build_srs_tolerance
+
+    spec = requirement()
+    in_g = spec.ordinate[0] / 9.80665
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        build_srs_tolerance(layout, spec, measured(spec), outer=(-3.0, 6.0))
+        plot = layout.getItem(0, 0)
+        edges = _zone_edges(plot)
+        for db in (-1.5, 3.0, -3.0, 6.0):
+            assert _has_curve(edges, in_g * 10.0 ** (db / 20.0)), db
+        drawn = [item for item in plot.listDataItems()
+                 if item.name() == 'requirement']
+        assert np.allclose(drawn[0].yData, in_g)
+        assert plot.titleLabel.text.startswith(
+            '101Z+ against \u22121.5/+3 dB within \u22123/+6 dB; '
+            '90 % of points inside')
+    finally:
+        layout.close()
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        build_srs_tolerance(layout, spec, measured(spec), rule='above_lower')
+        edges = _zone_edges(layout.getItem(0, 0))
+        assert _has_curve(edges, in_g * 10.0 ** (-1.5 / 20.0))
+        assert not _has_curve(edges, in_g * 10.0 ** (3.0 / 20.0))
+        assert 'every point at or above' in layout.getItem(0, 0).titleLabel.text
+    finally:
+        layout.close()
+
+
+def test_the_overlay_draws_the_event_named(qt_app):
+    """Two events at one channel: the one named is the one judged and
+    drawn, and its legend line says so by its count."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.srs_tolerance import build_srs_tolerance
+
+    spec = requirement()
+    values = np.vstack([spec.ordinate[0], spec.ordinate[0] * 10 ** -0.1])
+    run = Srs(spec.abscissa, values, response_dof=['101Z+', '101Z+'],
+              ordinate_dim='acceleration', block=['shock 1', 'shock 2'])
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        (result,) = build_srs_tolerance(layout, spec, run, event='shock 2')
+        assert result['event'] == 'shock 2'
+        assert result['inside_count'] == 0
+        plot = layout.getItem(0, 0)
+        assert plot.titleLabel.text.startswith('101Z+, shock 2 against')
+    finally:
+        layout.close()
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        with pytest.raises(ValueError, match='101Z\\+, shock 3'):
+            build_srs_tolerance(layout, spec, run, event='shock 3')
+    finally:
+        layout.close()
+
+
+def test_the_legend_counts_what_the_rule_counts():
+    """Under 'above_lower' the count is the points at or above the
+    lower edge, whatever is above the band."""
+    from visualdynamics.plot.srs_tolerance import describe
+
+    spec = requirement()
+    db = np.full(POINTS, 5.0)
+    db[:3] = -2.0
+    result = srs_tolerance(spec, measured(spec, db), rule='above_lower')
+    assert describe(result) == (
+        'maximax: 89/92 at or above \u22121.5 dB (96.7 %), fails')

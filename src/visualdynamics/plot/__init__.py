@@ -2809,6 +2809,79 @@ def plot_comparison(measured: Any, specification: Any, *,
                         size=size)
 
 
+def plot_srs_tolerance(measured: Any, specification: Any, *,
+                       channel: str | None = None,
+                       event: str | None = None,
+                       inner: tuple[float, float] | None = None,
+                       outer: tuple[float, float] | None = None,
+                       rule: str = 'share',
+                       percent: float | None = None,
+                       unit_system: UnitSystem | None = None,
+                       theme: Any = None,
+                       path: str | os.PathLike | None = None,
+                       show: bool = True, title: str | None = None,
+                       size: tuple[int, int] = (1000, 700)) -> Any:
+    """One channel's shock response spectra against the requirement's
+    tolerance band, point by point, with the points outside marked and
+    the count inside stated.
+
+        positive = history.compute_srs(kind='positive')
+        negative = history.compute_srs(kind='negative')
+        visualdynamics.plot.plot_srs_tolerance(
+            [positive, negative], spec, outer=(-3.0, 6.0),
+            path='tolerance.png')
+
+    The judgement is `core.compliance.srs_tolerance`'s, one per
+    spectrum: the requirement in gray, the band around it shaded as a
+    specification's zones are (yellow outside the inner band, red and
+    blue past the outer one), each spectrum in its own color and
+    marker, and every point the rule counts against it marked with
+    its marker filled. Each spectrum's legend entry gives its
+    polarity, how many of its points are inside the band, the share,
+    and whether it passed.
+
+    Parameters
+    ----------
+    measured : Srs or sequence of Srs
+        The spectra, typically one per polarity.
+    specification : ShockSpecification or Srs
+        The requirement.
+    channel : str, optional
+        The DOF drawn; the specification's first by default.
+    event : str, optional
+        The event drawn, by block label; each spectrum's first record
+        at the channel by default.
+    inner, outer, rule, percent
+        The band and the rule, as for `core.compliance.srs_points`;
+        `inner` and `percent` default to `SRS_INNER_DB` and
+        `SRS_POINTS_PERCENT` there.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.compliance import SRS_INNER_DB, SRS_POINTS_PERCENT
+    from .srs_tolerance import build_srs_tolerance
+
+    settings = {'inner': SRS_INNER_DB if inner is None else inner,
+                'outer': outer, 'rule': rule,
+                'percent': SRS_POINTS_PERCENT if percent is None else percent}
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_srs_tolerance(widget, specification, measured,
+                            channel=channel, event=event,
+                            unit_system=unit_system, theme=theme, **settings)
+
+    dof = specification.response_dof[0] if channel is None else channel
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{dof} against its SRS tolerance',
+                        size=size)
+
+
 def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
                   low: float | None = None, high: float | None = None,
                   theme: Any = None,
