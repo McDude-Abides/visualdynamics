@@ -108,6 +108,11 @@ surface the wavelet reading opens in, and
 `sinespec.plot_sine_stage(specification, levels)` puts measured sine
 levels on the specification's stage. Both take `screenshot=`.
 
+The Pulse Check reading has its call too:
+`plot_pulse_check(history, shape, peak, duration, edge)` draws a
+classical pulse on its tolerance envelope with its velocity change
+beneath; see [checking a classical pulse](pulse-check.md).
+
 The toggles that draw a reading over the data are an argument:
 
 ```python

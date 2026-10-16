@@ -121,6 +121,11 @@ read well inside 3 dB on the bars and still fail it. That check is
 beside the plot; in a script it is `srs_tolerance` and its picture
 `plot_srs_tolerance`. [Judging an SRS against its
 tolerance](../srs-tolerance.md) describes it.
+A classical pulse (a half-sine, sawtooth or trapezoid) is judged in
+time rather than by its spectrum: **Pulse Check** on the time history's
+bar draws the record on the nominal pulse's tolerance envelope and
+reads its velocity change; [Checking a classical
+pulse](../pulse-check.md) says how.
 
 ### 5. Geometry, photos, report
 

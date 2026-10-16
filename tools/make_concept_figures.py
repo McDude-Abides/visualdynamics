@@ -180,6 +180,61 @@ def compliance():
     print(f'{"hole":>24}: {got["lines"]} cells, nothing judged in the notch')
 
 
+
+def pulse_check():
+    """Two classical pulses judged against their envelopes: a 40 g,
+    11 ms sawtooth compensated as a shaker makes it, its fall taking
+    nearly the whole tenth allowed, and a 50 g half-sine followed by a
+    fixture ringing at 700 Hz past the band after the pulse."""
+    import numpy as np
+
+    from visualdynamics.core.classical_pulse import ClassicalPulse, check_pulse
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_pulse_check
+    from visualdynamics.units import IN_LBF_S
+
+    g, rate, duration = 9.80665, 51200.0, 0.011
+    shown = IN_LBF_S.with_units(acceleration='g')
+    t = np.arange(int(0.25 * rate)) / rate
+    opens = 0.11
+    noise = 0.15 * g * np.random.default_rng(5).standard_normal(t.size)
+
+    def record(values):
+        return TimeHistory(t, values[None], response_dof=['101Z+'],
+                           ordinate_dim=['acceleration'])
+
+    # the sawtooth, with a 40 ms half-sine of the other sign either side
+    # carrying half its area each, so the table starts and ends at rest
+    made = ClassicalPulse('sawtooth', 40.0 * g, duration, 0.001)
+    area = 0.5 * made.peak * (duration + made.edge)
+    length = 0.04
+    compensation = ClassicalPulse('half-sine', -np.pi * area / (4 * length),
+                                  length)
+    sawtooth = (made.at(t - opens) + compensation.at(t - opens + length)
+                + compensation.at(t - opens - made.extent) + noise)
+    check = check_pulse(record(sawtooth),
+                        ClassicalPulse('sawtooth', 40.0 * g, duration))
+    print(f'sawtooth: change {check.velocity_change / 0.0254:.1f} in/s, '
+          f'{100 * (check.velocity_ratio - 1):+.1f} % of nominal, '
+          f'{"passes" if check.passed else "flagged"}')
+    plot_pulse_check(record(sawtooth), 'sawtooth', 40.0 * g, duration,
+                     unit_system=shown, show=False,
+                     path=str(OUT / 'pulse-check-sawtooth.png'))
+
+    # the half-sine, and a fixture mode ringing after it
+    nominal = ClassicalPulse('half-sine', 50.0 * g, duration)
+    after = np.clip(t - opens - duration, 0.0, None)
+    ringing = np.where(t > opens + duration, 15.0 * g
+                       * np.exp(-after / 0.008)
+                       * np.sin(2 * np.pi * 700.0 * after), 0.0)
+    ringing_record = record(nominal.at(t - opens) + ringing + noise)
+    check = check_pulse(ringing_record, nominal)
+    print(f'ringing: {check.outside_count} of {check.points} outside, '
+          f'{"passes" if check.passed else "flagged"}')
+    plot_pulse_check(ringing_record, 'half-sine', 50.0 * g, duration,
+                     unit_system=shown, show=False,
+                     path=str(OUT / 'pulse-check-ringing.png'))
+
 def sine_tracking():
     """One swept tone read the ways a controller reads it: a clipped
     drive's third harmonic through each detector and band, and a step
@@ -592,6 +647,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
     compliance()
+    pulse_check()
     sine_tracking()
     sine_tracking_band()
     srs_tolerance()

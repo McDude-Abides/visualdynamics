@@ -61,6 +61,8 @@ that is not an alpha.
   solid shapes added, patterned, subtracted and joined, then meshed
   into bricks and solved
 - [The wavelet reading](wavelet.md): a time history as a scalogram
+- [Checking a classical pulse](pulse-check.md): a half-sine, sawtooth
+  or trapezoid against its envelope and its velocity change
 - [The channel table](channel-table.md): the one object that is a
   spreadsheet, and its rules
 - [How a PSD means its area](psd-reading.md): bandwidth, integration,
