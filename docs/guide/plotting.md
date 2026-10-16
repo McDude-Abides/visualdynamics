@@ -112,6 +112,9 @@ against the modes it passes is `plot_sweep_rate(specification, [(22.0,
 rate](sweep-rate.md)). `plot_signature(before, after, modes)` draws
 two signatures with a window on each mode for its limits and the table
 of shifts beside ([comparing signatures](signature-comparison.md)).
+`plot_dwell(history, specification)` draws a held tone's level against
+time, the reading the sine view's Dwell readout shows ([Reading a
+dwell against time](dwell.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

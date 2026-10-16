@@ -63,6 +63,8 @@ that is not an alpha.
   does to a peak and its Q
 - [Comparing signatures before and after a test](signature-comparison.md):
   each mode's frequency and amplitude shift, judged against limits
+- [Reading a dwell against time](dwell.md): a held tone's build-up,
+  steady level and ring-down, in cycles
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

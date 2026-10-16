@@ -205,6 +205,12 @@ project.save('sine.vdyn')
   checks every tone against the modes typed into it, and flags a Q read
   off a level swept too fast for it;
   [Checking a sweep rate](../sweep-rate.md) explains the arithmetic.
+- A dwell is one point over frequency. A tone held at one frequency (a
+  sweep across a hair of a hertz, as `SineTone.dwell` writes it and a
+  controller's file carries it) is read against time instead:
+  the build-up, the steady level and the ring-down after the stop,
+  each in cycles ([Reading a dwell against time](../dwell.md)). The
+  sine view's Dwell readout shows them beside the record.
 - Where the levels wobble, look at the wavelet first. A ripple in an
   extracted level can come from the article (a resonance swept
   through), from the test (two tones beating in one band), or from the

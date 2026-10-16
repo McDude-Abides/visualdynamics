@@ -775,6 +775,41 @@ def stroke_readout():
                 size=(1000, 900), path=str(OUT / 'stroke-readout.png'))
 
 
+def dwell():
+    """A tone held at a resonance and then stopped: a 1 g tone at 20 Hz
+    on a one-mass resonator of Q 30, ninety cycles on and sixty off,
+    read against time with the peak over each cycle. The level builds to
+    95 % in about Q cycles and rings down to 5 % in about as many."""
+    import numpy as np
+    from scipy.signal import lfilter
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.dwell import read_dwell
+    from visualdynamics.core.sine import SineSweepSpecification, SineTone
+    from visualdynamics.core.srs import ramp_invariant
+    from visualdynamics.plot import plot_dwell
+
+    g, rate, fn, q = 9.80665, 4000.0, 20.0, 30.0
+    n = np.arange(150 * 200)                     # 200 samples a cycle
+    x = np.sin(2.0 * np.pi * fn * n / rate) * (n < 90 * 200)
+    b, a = ramp_invariant([fn], rate, 1.0 / (2.0 * q))
+    y = lfilter(b[0], a[0], x)
+    history = TimeHistory(n / rate, np.vstack([x, y]) * g,
+                          response_dof=['1Z+', '101Z+'],
+                          ordinate_dim=['acceleration'] * 2,
+                          ordinate_unit=['m/s**2'] * 2)
+    spec = SineSweepSpecification([SineTone.dwell('Dwell', fn, [g], 4.5)],
+                                  ['1Z+'], ordinate_unit='m/s**2')
+    plot_dwell(history, spec, onset=0.0, show=False, size=(1000, 600),
+               path=str(OUT / 'dwell.png'))
+    reading = read_dwell(history, spec, onset=0.0)
+    print(f'dwell: {reading.level[29] / g:.2f} g at {reading.seconds[29]:.2f} s;'
+          f' {100 * reading.share_at(q):.1f} % after Q cycles, '
+          f'{100 * reading.share_at(2 * q):.1f} % after 2Q, '
+          f'{100 * reading.remaining_at(q):.1f} % Q cycles after the stop; '
+          f'{reading.describe()}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -792,6 +827,7 @@ def main():
     signature()
     replication_fit()
     stroke_readout()
+    dwell()
     print('done')
 
 
