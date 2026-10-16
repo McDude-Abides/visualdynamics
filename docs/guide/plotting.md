@@ -84,6 +84,9 @@ drawn at a picture's width whatever the record's length; the
 `plot_shock_check(history)` (a shock record's raw velocity beside its
 positive and negative spectra; see
 [checking a shock record](shock-check.md)),
+`plot_time_statistics(history, record)` (one channel's trace, histogram
+against the Gaussian and kurtosis frame by frame; see
+[time statistics](time-statistics.md)),
 and, for a specification comparison, `plot_bars(measured,
 specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 `plot_snr(...)` and `plot_replication(...)`. Each draws the figure the

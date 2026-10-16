@@ -55,6 +55,15 @@ the same window for any run, whatever its size, with no import.
 specification and channel table beside them in the tree, and the
 type's remaining slots in gray](../images/random-import.png)
 
+Before any spectrum is read, look at each channel in the time domain:
+**Statistics** on the bar reads the selected channel's mean, rms,
+skewness, kurtosis and crest factor, counts its samples on the rail
+when its range is typed in, sets its tails beside the Gaussian's and
+draws its kurtosis frame by frame, with anything outside its band in
+bold. A clipped channel's spectrum sits a fraction of a decibel from a
+clean one, and [its time statistics](../time-statistics.md) are where
+it shows.
+
 ### 2. Compute the control PSDs
 
 Select the time history, open the **Averaging** view and press

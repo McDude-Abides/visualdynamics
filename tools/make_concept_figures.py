@@ -472,6 +472,41 @@ def tone_readout():
                       f'{reading.floor / g ** 2:.5f} {state}')
 
 
+def time_statistics():
+    """A record's time statistics: twelve seconds of a flat 20 to
+    2,000 Hz profile at 0.04 g^2/Hz, through a 25 g range that its
+    largest peaks pass, read with the default bands."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_time_statistics
+    from visualdynamics.units import SI
+
+    g = 9.80665
+    rate = 5120.0
+    n = int(12.0 * rate)
+    # white noise shaped line by line to the profile: unit variance is
+    # an ASD of 2/rate, so each line in the band is scaled to 0.04
+    spectrum = np.fft.rfft(np.random.default_rng(1403).standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / rate)
+    gain = np.where((f >= 20.0) & (f <= 2000.0),
+                    np.sqrt(0.04 / (2.0 / rate)), 0.0)
+    clean = np.fft.irfft(spectrum * gain, n)
+    history = TimeHistory(np.arange(n) / rate,
+                          np.clip(clean, -25.0, 25.0)[None] * g,
+                          response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'],
+                          ordinate_unit=['g'])
+    stats = history.time_statistics(0, full_scale=25.0 * g)
+    print(f'through 25 g: {stats.rms / g:.2f} grms, crest '
+          f'{stats.crest:.2f}, kurtosis {stats.kurtosis:.2f}, '
+          f'{stats.rail} on the rail; {stats.describe()}')
+    plot_time_statistics(history, 0, full_scale=25.0 * g,
+                         unit_system=SI.with_units(acceleration='g'),
+                         show=False, size=(1000, 980),
+                         path=str(OUT / 'time-statistics-clipped.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -482,6 +517,7 @@ def main():
     shock_check()
     averaging_confidence()
     tone_readout()
+    time_statistics()
     print('done')
 
 
