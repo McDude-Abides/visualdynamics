@@ -99,6 +99,9 @@ reading of a peak on it, the reading the fitting screen's cursor shows
 `plot_tone_readout(asd, [19.44, 58.32], window=...)` draws an
 autospectrum with each tone read off it, the reading the Tones cursor
 shows ([Reading a tone off an ASD](tone-readout.md)).
+`plot_replication_segments(...)` draws a replicated run judged segment
+by segment ([Judging a replication by
+segment](replication-segments.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

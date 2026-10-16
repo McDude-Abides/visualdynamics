@@ -35,6 +35,8 @@ that is not an alpha.
   largest peak and the kurtosis frame by frame
 - [The transient workflow](workflows/transient-workflow.md): a target
   waveform compared with what the test article did
+- [Judging a replication by segment](replication-segments.md): each
+  stretch of a replicated record held to the rule for its kind
 - [The shock workflow](workflows/shock-workflow.md): events, the SRS,
   and its tolerance band
 - [Judging an SRS against its tolerance](srs-tolerance.md): the band,

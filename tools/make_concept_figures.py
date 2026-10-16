@@ -507,6 +507,87 @@ def time_statistics():
                          path=str(OUT / 'time-statistics-clipped.png'))
 
 
+def replication_segments():
+    """A minute of rough road replicated, judged segment by segment: a
+    stationary stretch, a pothole and a braking transient. The run's
+    error elsewhere is under five percent of the record's rms, and it
+    misses most of the pothole's 250 Hz ring, which the whole-record
+    figure hides and the pothole's own spectrum and peaks do not.
+    The record is the one `tests/test_replication_segments.py` judges."""
+    import numpy as np
+    from scipy.signal import butter, sosfiltfilt
+
+    from visualdynamics.core.data import TimeHistory, TransientSpecification
+    from visualdynamics.plot import plot_replication_segments
+    from visualdynamics.units import SI
+
+    rate, seconds = 2048.0, 60.0
+    n = int(seconds * rate)
+    t = np.arange(n) / rate
+    rng = np.random.default_rng(27)
+
+    def ring(at, peak, frequency, zeta=0.06):
+        w = 2.0 * np.pi * frequency
+        s = np.clip(t - at, 0.0, None)
+        return np.where(t >= at, peak * np.exp(-zeta * w * s)
+                        * (np.cos(w * s) - zeta * np.sin(w * s)), 0.0)
+
+    def filtered(x, low, high=None):
+        y = sosfiltfilt(butter(2, low, 'highpass', fs=rate, output='sos'), x)
+        if high is not None:
+            y = sosfiltfilt(butter(2, high, 'lowpass', fs=rate,
+                                   output='sos'), y)
+        return y
+
+    # ride motion and a broadband floor to 400 Hz, onto and off the
+    # course over 2 s, swelling as the vehicle brakes at 46 s
+    f = np.fft.rfftfreq(n, 1.0 / rate)
+    asd = np.zeros_like(f)
+    inside = (f >= 0.7) & (f <= 400.0)
+    asd[inside] = np.exp(np.interp(
+        np.log(f[inside]), np.log([0.7, 3.5, 6.0, 150.0, 400.0]),
+        np.log([0.02, 0.02, 0.015, 0.015, 0.0015])))
+    x = np.fft.irfft(np.fft.rfft(rng.standard_normal(n))
+                     * np.sqrt(asd * rate / 2.0), n)
+    x *= np.clip(np.minimum(t, seconds - t) / 2.0, 0.0, 1.0)
+    x *= 1.0 + 0.8 * np.exp(-((t - 46.0) / 2.5) ** 2)
+    # a dozen impacts ringing a bracket at 60 and 250 Hz, the largest a
+    # 14 g pothole at 32 s
+    for at, peak in ((5.2, 9.0), (9.7, 7.5), (13.1, 10.0), (17.8, 8.0),
+                     (21.4, 11.0), (26.0, 7.0), (32.0, 14.0), (36.5, 9.5),
+                     (39.9, 8.5), (52.3, 10.5), (55.6, 7.5), (57.1, 9.0)):
+        x += ring(at, 0.4 * peak, 60.0) + ring(at, 0.6 * peak, 250.0)
+    reference = filtered(x - x.mean(), 3.0)
+    error = filtered(rng.standard_normal(n), 3.0, 400.0)
+    control = (reference + 0.044 * reference.std() / error.std() * error
+               - 0.7 * ring(32.0, 0.6 * 14.0, 250.0))
+
+    def record(values, kind):
+        return kind(t, values[None] * 9.80665, response_dof=['1Z+'],
+                    ordinate_dim=['acceleration'], ordinate_unit=['g'])
+
+    g = SI.with_units('SI (g)', acceleration='g')
+    marks = [(6.0, 30.0, 'stationary', 'rough road'),
+             (31.9, 32.7, 'shock', 'pothole'),
+             (41.0, 51.0, 'transient', 'braking')]
+    run = record(control, TimeHistory)
+    target = record(reference, TransientSpecification)
+    plot_replication_segments(run, target, marks, band=(5.0, 400.0),
+                              window=0.5, unit_system=g, show=False,
+                              size=(1100, 820),
+                              path=str(OUT / 'replication-segments.png'))
+    from visualdynamics.core.replication_segments import replication_segments
+
+    result = replication_segments(run, target, marks, band=(5.0, 400.0),
+                                  window=0.5)
+    print(result.describe())
+    for segment in result.segments:
+        print(f'  {segment.describe()}; {segment.share:.2f} % of the mean '
+              f'square, own rms error {segment.rms_error:.1f} %')
+        for check in segment.checks:
+            print(f'    {check.describe()}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -518,6 +599,7 @@ def main():
     averaging_confidence()
     tone_readout()
     time_statistics()
+    replication_segments()
     print('done')
 
 

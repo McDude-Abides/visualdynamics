@@ -22,6 +22,7 @@ every step. The run does not ship with the repository. It is saved as
 | Read the target | select it: one channel, drop-down for the rest | `spec.plot(...)` |
 | Overlay | select the pair: the replication views appear | `plot_replication(history, spec, 'overlay')` |
 | Waveform error | Waveform Error on the plot bar | `plot_replication(history, spec, 'waveform')` |
+| Judge by segment | Segments on the plot bar, the marks in its panel | `replication_segments(history, spec, marks)` from `visualdynamics.core.replication_segments`, `plot_replication_segments(...)` |
 | PSDs of both | Compute PSDs in each one's Averaging view | `project.compute_psds(name)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | Generate Report on the bar, with the project row selected | `project.generate_report('transient')` |
@@ -93,6 +94,15 @@ replicated transient; drag it to move it.
 eight-channel motion land in the 6-26% band, and the bars say which
 channels carry the error](../images/transient-error.png)
 
+The waveform error is one figure over the whole playing, and a long
+record that holds several kinds of motion hides a short event's miss
+in it. **Segments** on the bar judges each marked stretch of the
+record by the rule for its kind: a stationary stretch by its ASD and
+mean square, a long transient by its envelope, a shock by its
+spectrum and peaks. The marks and the tolerances are set in the panel
+beside the plot. [Judging a replication by
+segment](../replication-segments.md) describes it.
+
 ### 4. Then compare levels
 
 Compute PSDs from both sides, in each one's **Averaging** view. The
@@ -163,7 +173,9 @@ project.save('transient.vdyn')
 
 - Whether the reproduction is close enough. There is no band to fall
   outside: the overlay is the evidence, and the waveform and RMS error
-  bars put numbers on it without deciding it. The decision is written
+  bars put numbers on it without deciding it. Where the test plan
+  writes tolerances by segment, the Segments reading applies them,
+  and the segments and their kinds are the plan's. The decision is written
   in the conclusions. The demonstration run's 6-26 % errors are
   informative in themselves: two shakers cannot exactly reproduce an
   eight-channel motion, and the numbers say how close they came.
