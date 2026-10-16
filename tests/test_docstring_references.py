@@ -52,6 +52,8 @@ THEORY = {
     'core.replication_segments': 'the averaged periodogram, the shock '
                                  'response spectrum and the tapered '
                                  'cosine window each segment is read by',
+    'core.sweep_rate': 'a resonance swept through: the peak read low, '
+                       'late and wide, and the filter it is simulated with',
 }
 
 #: and methods, where the theory lives on the call rather than the module

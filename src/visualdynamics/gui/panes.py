@@ -52,6 +52,7 @@ from .shock_panel import ShockPanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
 from .statistics_panel import StatisticsPanel
+from .sweep_rate_panel import SweepRatePanel
 from .tone_panel import TonePanel
 from .toolbars import fence, shows_anything, tidy
 from .truncate_panel import TruncatePanel
@@ -181,6 +182,9 @@ class DataPane(QWidget):
     octave_toggled = Signal(bool)
     #: the tone readout was asked for (True) or put away (False)
     tone_toggled = Signal(bool)
+    #: a sine specification's sweep-rate reading was asked for (True)
+    #: or put away (False)
+    sweep_rate_toggled = Signal(bool)
     #: the fit's residual CMIF was toggled
     residual_toggled = Signal(bool)
     shocks_toggled = Signal(bool)
@@ -233,6 +237,7 @@ class DataPane(QWidget):
         self.truncate_wanted: bool = False
         self.octave_wanted: bool = False
         self.tone_wanted: bool = False
+        self.sweep_rate_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
         #: and the time statistics, the same way
@@ -324,6 +329,10 @@ class DataPane(QWidget):
         self.octave_panel.hide()
         self.tone_panel: TonePanel = TonePanel()
         self.tone_panel.hide()
+        # the modes a sine sweep is checked against, beside the sweep
+        # drawn through their bands; the Sweep Rate reading shows it
+        self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
+        self.sweep_rate_panel.hide()
         self.wavelet_panel: WaveletPanel = WaveletPanel()
         self.wavelet_panel.hide()
         self.wavelet_panel.changed.connect(self._wavelet_edited)
@@ -367,6 +376,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.segments_panel)
+        plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
         plot_row.addWidget(self.pulse_panel)
@@ -832,6 +842,23 @@ class DataPane(QWidget):
             'its spike, which moves with the line spacing and the window')
         self.tone_action.triggered.connect(self._choose_tone)
         toolbar.addAction(self.tone_action)
+        # a sine specification read against the modes it sweeps
+        # through: the time and cycles in each half-power band, and
+        # whether the rate lets the mode build. A reading of the
+        # specification alone, so it stands beside the stage toggle
+        # rather than among a record's readings
+        self.sweep_rate_action: QAction = QAction(
+            control_icon('sweep_rate'), 'Sweep Rate', self)
+        self.sweep_rate_action.setCheckable(True)
+        self.sweep_rate_action.setToolTip(
+            'Check the sweep rate against the modes it passes: the '
+            'time and cycles in each half-power band, and whether the '
+            'rate is under 87 fn / Q\u00b2 oct/min')
+        self.sweep_rate_action.triggered.connect(self._choose_sweep_rate)
+        # offered by the render that draws a sine specification, and by
+        # nothing else, so it starts put away
+        self.sweep_rate_action.setVisible(False)
+        toolbar.addAction(self.sweep_rate_action)
         # ---- and out of the fence again -----------------------------
         # the fit's residual CMIF: what is left after the confirmed
         # modes are taken out — the curve Find Mode hunts. A plot
@@ -877,6 +904,8 @@ class DataPane(QWidget):
             self.plot_mode_group.actions(),
             [self.waterfall_action],
             [self.octave_action, self.tone_action],
+            [self.octave_action],
+            [self.sweep_rate_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -999,6 +1028,30 @@ class DataPane(QWidget):
         if not checked:
             self.tone_panel.hide()
         self.tone_toggled.emit(checked)
+
+    def _choose_sweep_rate(self, checked: bool) -> None:
+        """The sweep-rate button: remember it, then say so."""
+        self.sweep_rate_wanted = bool(checked)
+        if not checked:
+            self.sweep_rate_panel.hide()
+        self.sweep_rate_toggled.emit(checked)
+
+    @property
+    def showing_sweep_rate(self) -> bool:
+        """Whether the sweep-rate reading is offered and checked."""
+        return (self.sweep_rate_action.isVisible()
+                and self.sweep_rate_action.isChecked())
+
+    def offer_sweep_rate(self, offered: bool) -> None:
+        """Show or hide the Sweep Rate toggle, for a sine specification;
+        checked as it was last left. Its panel goes with it when it is
+        not offered or not checked."""
+        self.sweep_rate_action.setVisible(offered)
+        self.sweep_rate_action.setChecked(offered and self.sweep_rate_wanted)
+        if not (offered and self.sweep_rate_wanted):
+            self.sweep_rate_panel.hide()
+        if offered:
+            self.toolbar.setVisible(True)
 
     def _choose_reading(self, checked: bool) -> None:
         """The kurtosis, statistics or wavelet button: a different *reading* of
@@ -1786,6 +1839,7 @@ class DataPane(QWidget):
         self.event_action.setVisible(False)
         self.scaling_action.setVisible(False)
         self.rms_action.setVisible(False)
+        self.offer_sweep_rate(False)
         self.show_replication_views(False)
         self.show_srs_views(False)
         # the comparison's and two densities' readings too: they were
@@ -1808,6 +1862,7 @@ class DataPane(QWidget):
                        self.shocks_action, self.filter_action,
                        self.truncate_action, self.octave_action,
                        self.tone_action,
+                       self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

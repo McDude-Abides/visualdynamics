@@ -612,6 +612,22 @@ def _draw_sine_levels(painter, color):
         painter.drawEllipse(QPointF(x, 16), 4, 4)
 
 
+def _draw_sweep_rate(painter, color):
+    """A sweep rising across a mode's band: the line climbing left to
+    right, a faint strip across it, and the stretch inside the strip
+    drawn heavy, which is the time the reading counts."""
+    faint = QColor(color)
+    faint.setAlpha(80)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(faint))
+    painter.drawRect(QRectF(4, 26, 56, 10))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 3))
+    painter.drawLine(QPointF(6, 56), QPointF(58, 8))
+    painter.setPen(_pen(color, 7))
+    painter.drawLine(QPointF(27.7, 36), QPointF(38.5, 26))
+
+
 def _draw_wavelet(painter, color):
     """A wave packet: a burst that starts, peaks and dies away.
 
@@ -2015,6 +2031,7 @@ def control_icon(name: str) -> QIcon:
      'tone': _draw_tone,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
+     'sweep_rate': _draw_sweep_rate,
      'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,
      'automatic': _draw_automatic,
      'table': _draw_channel_table, 'overlay': _draw_overlay,

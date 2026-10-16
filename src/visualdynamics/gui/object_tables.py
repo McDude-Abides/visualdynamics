@@ -1695,3 +1695,81 @@ def compliance_grid_model(rows: Any,
         Column('Outside abort [%]', lambda h, r: h.rows[r][2],
                format=_number),
     ], len, parent)
+
+
+def sweep_rate_rows(tone: str, checks: Sequence[Any],
+                    swept: Sequence[tuple[str, float, float, Any]] = ()
+                    ) -> list[dict[str, Any]]:
+    """The sweep-rate table's rows: one per pass of the tone through a
+    mode (`core.sweep_rate.SweepRateCheck`), then one per Q read off a
+    tracked level at a mode, `swept` holding (DOF, frequency, Q,
+    `SweptQ`).
+
+    The two kinds share the columns: a level's row names the level's
+    DOF where a pass names its direction, gives the rate at the level's
+    peak and the rule's rate for the Q the reading implies, and leaves
+    the time in the band empty, since a level is a reading of the sweep
+    rather than a pass of it."""
+    rows = []
+    for check in checks:
+        rows.append({
+            'tone': tone, 'mode': check.frequency, 'q': check.q,
+            'pass': check.direction + ('' if check.crossed else ', partial'),
+            'rate': f'{abs(check.rate):.3g} {check.unit}',
+            'limit': f'{check.limit:.3g} {check.unit}',
+            'ratio': check.ratio, 'seconds': check.seconds,
+            'cycles': check.cycles,
+            'peak': 100.0 * check.peak_share, 'q_read': check.q_read,
+            'verdict': check.verdict})
+    for dof, frequency, q, reading in swept:
+        if reading.q_true is None:
+            verdict = 'too fast to read any Q'
+        elif reading.flagged:
+            verdict = f'reads low; Q about {reading.q_true:.3g}'
+        else:
+            verdict = 'slow enough'
+        rows.append({
+            'tone': tone, 'mode': frequency, 'q': q,
+            'pass': f'level at {dof}',
+            'rate': f'{abs(reading.rate):.3g} {reading.unit}',
+            'limit': f'{reading.limit:.3g} {reading.unit}',
+            'ratio': reading.ratio, 'seconds': None, 'cycles': None,
+            'peak': None, 'q_read': reading.q_read, 'verdict': verdict})
+    return rows
+
+
+def sweep_rate_model(rows: Sequence[dict[str, Any]],
+                     parent: QObject | None = None) -> TableModel:
+    """A table of `sweep_rate_rows`: each pass of a sine tone through a
+    mode, with the time and the cycles it spends in the mode's
+    half-power band, its rate against the rule's, what a mode of that Q
+    reads at that rate, and the verdict; then each Q read off a tracked
+    level, judged against its sweep. Read-only: the modes are set in the
+    panel beside the plot."""
+    def field(key, places=None):
+        def text(value):
+            if value is None:
+                return ''
+            if isinstance(value, float):
+                if not np.isfinite(value):
+                    return ''
+                return f'{value:.{places}f}' if places is not None \
+                    else f'{value:.4g}'
+            return str(value)
+        return Column(key, lambda h, r: h[r][key], format=text)
+
+    columns = [
+        ('Tone', 'tone', None, LEFT), ('Mode [Hz]', 'mode', None, None),
+        ('Q', 'q', None, None), ('Pass', 'pass', None, LEFT),
+        ('Rate', 'rate', None, None), ("Rule's rate", 'limit', None, None),
+        ('× Rule', 'ratio', 2, None), ('In band [s]', 'seconds', None, None),
+        ('Cycles', 'cycles', 1, None), ('Peak read [%]', 'peak', 1, None),
+        ('Q read', 'q_read', 1, None), ('Verdict', 'verdict', None, LEFT)]
+    built = []
+    for title, key, places, alignment in columns:
+        column = field(key, places)
+        column.title = title
+        if alignment is not None:
+            column.alignment = alignment
+        built.append(column)
+    return TableModel(list(rows), built, len, parent)

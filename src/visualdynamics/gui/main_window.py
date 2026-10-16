@@ -911,6 +911,12 @@ class MainWindow(QMainWindow):
             self._truncation_edited)
         self.data_pane.octave_toggled.connect(
             lambda _wanted: self.render_current())
+        # the sweep-rate reading and its modes redraw at once: the plot
+        # and the table are the reading of the settings being made
+        self.data_pane.sweep_rate_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.sweep_rate_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.octave_panel.changed.connect(
             lambda _per: self.render_current())
         # the points rule's band and rule redraw the judgement at once:
@@ -8706,6 +8712,8 @@ class MainWindow(QMainWindow):
                          or bool(reports) or bool(matches)
                          or levels is not None
                          or bool(replicating)
+                         or (bool(sine_specs)
+                             and self.data_pane.sweep_rate_wanted)
                          or bool(series and self._srs_found(series))
                          or (bool(series)
                              and self._compliance_rows(series) is not None))
@@ -16795,6 +16803,17 @@ class MainWindow(QMainWindow):
         known = {tone.name for tone in spec.tones}
         matched = [level for level in measured if level.tone in known]
         tones = [tone.name for tone in spec.tones]
+        # the sweep rate is a reading of the specification itself, so it
+        # is offered whenever one is drawn, and while it is checked it
+        # is the reading: the levels' readings stand down until it is
+        # put away
+        self.data_pane.offer_sweep_rate(True)
+        if self.data_pane.showing_sweep_rate:
+            self.data_pane.show_srs_views(False)
+            tone = pick_tone(tones)
+            return self._render_sweep_rate(
+                spec, tone, [level for level in matched if level.tone == tone],
+                chosen(sine_dofs(spec)) if picked_dofs else None) + note
         self.data_pane.show_srs_views(bool(matched), kind='sine')
         showing_bars = (matched
                         and self.data_pane.srs_reading('sine') != 'curves')
@@ -16858,6 +16877,82 @@ class MainWindow(QMainWindow):
              if (dof, tone) in values],
             dofs, list(range(len(tones))), units='dB')
         return self.bar_chart.summary.toPlainText() + note
+
+    def _render_sweep_rate(self, spec, tone, levels, dofs=None):
+        """A sine specification's sweep against the modes it passes:
+        one tone's path as frequency against time with each mode's
+        half-power band across it, every pass in the table under it,
+        and the modes in the panel beside it.
+
+        With tracked levels of the tone selected, the Q read off each
+        level at each mode is judged against the rate it was swept at
+        and listed under the passes (`core.sweep_rate.read_swept_q`),
+        at the DOFs picked, else every one. Every number is
+        `core.sweep_rate`'s; the plot is `plot_sweep_rate`'s.
+        """
+        from ..core.sweep_rate import read_swept_q
+        from ..plot.sweep_rate import build_sweep_rate
+
+        pane = self.data_pane
+        panel = pane.sweep_rate_panel
+        panel.show()
+        pane.offer_waterfall(False)
+        pane.show_waterfall(False)
+        pane.show_pairs([])
+        settings = panel.settings()
+        pane.graphics.clear()
+        checks = build_sweep_rate(pane.graphics, spec, settings['modes'],
+                                  tone=tone, margin=settings['margin'],
+                                  theme=self.theme_name)
+        swept = []
+        for level in levels:
+            for i in range(level.num_records):
+                dof = str(level.response_dof[i])
+                if dofs is not None and dof not in dofs:
+                    continue
+                for frequency, q in settings['modes']:
+                    reading = read_swept_q(level, spec, frequency, record=i,
+                                           margin=settings['margin'])
+                    if reading is not None:
+                        swept.append((dof, frequency, q, reading))
+        panel.show_results(checks, [reading for *_rest, reading in swept])
+        self._show_sweep_rate_table(tone, checks, swept)
+        self._journal_sweep_rate(spec, tone, settings)
+        if not settings['modes']:
+            return f'{tone}: give the modes to check the sweep against'
+        fast = sum(check.too_fast for check in checks)
+        low = sum(reading.flagged for *_rest, reading in swept)
+        flagged = (f'; {low} Q read{"s" * (low != 1)} off the level '
+                   'flagged low' if swept else '')
+        return (f'{tone}: {len(checks)} pass{"es" * (len(checks) != 1)} '
+                f'through {len(settings["modes"])} mode'
+                f'{"s" * (len(settings["modes"]) != 1)}, {fast} too fast'
+                + flagged)
+
+    def _show_sweep_rate_table(self, tone, checks, swept):
+        """Every pass, and every Q read off a level, in the table under
+        the plot (`object_tables.sweep_rate_model`)."""
+        from .object_tables import sweep_rate_model, sweep_rate_rows
+
+        rows = sweep_rate_rows(tone, checks, swept)
+        self._set_table_model(sweep_rate_model(rows, self))
+
+    def _journal_sweep_rate(self, spec, tone, settings):
+        """The sweep-rate reading, journaled as the headless call that
+        draws it (`_journal_view`)."""
+        try:
+            name = self.project.name_of(spec)
+        except (KeyError, ValueError):
+            return
+        modes = ', '.join(f'({frequency!r}, {q!r})'
+                          for frequency, q in settings['modes'])
+        prefix = ('visualdynamics.plot.plot_sweep_rate('
+                  f'project[{name!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, [{modes}], tone={tone!r}, '
+            f"margin={settings['margin']!r}, path='sweep_rate.png', "
+            'show=False)')
 
     def _srs_bounds_moved(self, low, high):
         self.data_pane.srs_bounds = (low, high)

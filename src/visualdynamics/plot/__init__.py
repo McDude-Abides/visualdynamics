@@ -3768,6 +3768,64 @@ def plot_tracking_filter(history: Any, specification: Any, setting: Any, *,
                         size=size)
 
 
+def plot_sweep_rate(specification: Any, modes: Any, *,
+                    tone: str | None = None,
+                    margin: float | None = None,
+                    theme: Any = None,
+                    path: str | os.PathLike | None = None,
+                    show: bool = True, title: str | None = None,
+                    size: tuple[int, int] = (1000, 700)) -> Any:
+    """One sine tone's sweep through the modes it passes: frequency
+    against time, each mode's half-power band a strip, and the time and
+    cycles the sweep spends in each written beside its crossing.
+
+        visualdynamics.plot.plot_sweep_rate(
+            spec, [(22.0, 40.0), (180.0, 20.0)], path='sweep_rate.png')
+
+    The checks are `core.sweep_rate.check_sweep_rate`'s. A crossing the
+    sweep makes slowly enough for the mode to build is solid and marked
+    with a circle; one above the rule's rate (about 87 fn / Q**2 oct/min
+    on a log sweep) is dashed, marked with a cross, and labeled too
+    fast. Each label gives the seconds and cycles in the band, the Q
+    the mode needs, and the rate as a multiple of the rule's.
+
+    Parameters
+    ----------
+    specification : SineSweepSpecification or SineTone
+        The sweep.
+    modes : iterable of (frequency, Q), or ShapeSet
+        The modes, natural frequency in Hz with its Q.
+    tone : str, optional
+        The tone drawn; the specification's first by default.
+    margin : float, optional
+        The multiple of the rule's rate a crossing may reach before it
+        is flagged; `core.sweep_rate.MARGIN` (1) by default.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.sweep_rate import MARGIN
+    from .sweep_rate import build_sweep_rate
+
+    modes = list(modes) if not hasattr(modes, 'damping') else modes
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_sweep_rate(widget, specification, modes, tone=tone,
+                         margin=MARGIN if margin is None else margin,
+                         theme=theme)
+
+    name = tone or getattr(specification, 'name', None) or \
+        specification.tones[0].name
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{name}: sweep rate against the modes',
+                        size=size)
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,
