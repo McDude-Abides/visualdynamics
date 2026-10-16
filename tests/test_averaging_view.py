@@ -306,6 +306,59 @@ def test_the_table_shows_what_follows_from_the_five(window, pump):
     assert float(panel.derived['resolution'].text().split()[0]) < 1.0
 
 
+def test_the_table_says_what_the_averages_are_worth(window, pump):
+    """Beside how many averages, what they are worth: the nominal 2n,
+    the count discounted for overlap, and the 90 percent band that
+    count gives. Overlap adds frames to the record and the discount
+    shows what each added frame is worth."""
+    from visualdynamics.core.averaging import confidence_bands
+
+    looking_at(window, pump, MODAL)
+    show_averaging(window, pump)
+    panel = window.data_pane.averaging_panel
+    panel.window_box.setCurrentIndex(panel.window_box.findData('hann'))
+    panel.length_box.setValue(1024)
+    panel.overlap_box.setValue(50.0)
+    panel.frames_box.setValue(10)
+    pump()
+    assert panel.records == 1
+    assert panel.derived['dof'].text() == '20'
+    # Welch's closed form for Hann at half overlap: 36 n² / (19 n - 1)
+    assert panel.derived['equivalent'].text() == f'{3600 / 189:.4g}'
+    band = confidence_bands(1.0, 3600 / 189, levels=[0.9])[0]
+    assert panel.derived['band'].text() == (
+        f'{band.lower_db:+.1f} / {band.upper_db:+.1f} dB')
+    panel.overlap_box.setValue(75.0)
+    pump()
+    assert panel.derived['dof'].text() == '20', 'still twenty frames'
+    assert float(panel.derived['equivalent'].text()) < 3600 / 189, (
+        'but frames that share more are worth less')
+
+
+def test_a_split_capture_is_worth_two_per_record(window, pump):
+    looking_at(window, pump, SPLIT)
+    show_averaging(window, pump)
+    panel = window.data_pane.averaging_panel
+    assert panel.derived['dof'].text() == '40'
+    assert panel.derived['equivalent'].text() == '40'
+
+
+def test_the_psd_computed_is_worth_what_the_table_said(window, pump):
+    """One rule for the readout and the record: the count the panel
+    shows is the one the PSD its button makes is stamped with."""
+    looking_at(window, pump, MODAL)
+    show_averaging(window, pump)
+    panel = window.data_pane.averaging_panel
+    panel.overlap_box.setValue(75.0)
+    pump()
+    shown = panel.derived['equivalent'].text()
+    panel.psds_button.click()
+    pump()
+    psd = next(obj for obj in window.objects.values()
+               if type(obj).__name__ == 'Psd')
+    assert {f'{n:.4g}' for n in psd.statistical_dof} == {shown}
+
+
 def test_the_table_will_not_ask_for_more_record_than_there_is(window, pump):
     """Lengthening a frame with the count already at what the record
     held would ask for record that is not there. The count comes down

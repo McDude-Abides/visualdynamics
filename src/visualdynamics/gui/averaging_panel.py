@@ -2,12 +2,14 @@
 
 The settings are the start, the frame length, the overlap, the window
 (with its parameter, for the Tukey and Kaiser windows), the detrend and
-the frame count. Four values that follow from them are shown below and
-cannot be edited: how many averages the spectra are built from, the
-frequency resolution, how long each frame lasts, and where the analysis
-ends. They cannot be edited because a value that could be typed in two
-places would disagree with itself after the second edit. Detect fills
-the settings in from the record itself.
+the frame count. The values that follow from them are shown below and
+cannot be edited: how many averages the spectra are built from, what
+those averages are worth (the statistical degrees of freedom, nominal
+and discounted for overlap, and the 90 percent confidence band they
+give), the frequency resolution, how long each frame lasts, and where
+the analysis ends. They cannot be edited because a value that could be
+typed in two places would disagree with itself after the second edit.
+Detect fills the settings in from the record itself.
 
 The panel says what the settings are, reports when they change, and
 computes with its own buttons (Compute PSDs, Compute CPSDs, Compute
@@ -34,7 +36,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.averaging import DETRENDS, WINDOW_PARAMETERS, WINDOWS, Averaging
+from ..core.averaging import (
+    CONFIDENCE_LEVELS,
+    DETRENDS,
+    WINDOW_PARAMETERS,
+    WINDOWS,
+    Averaging,
+    confidence_bands,
+)
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter
 from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
@@ -147,11 +156,33 @@ class AveragingPanel(QWidget):
         # what follows from the five, shown so the trade is visible while
         # it is being made rather than after the PSD comes out
         self.derived: dict[str, QLabel] = {}
-        derived = (('averages', 'Averages'), ('resolution', 'Δf'),
+        # what the averages are worth beside how many there are: the
+        # count alone hides that overlapped frames are not independent,
+        # and the band is what the count means on the plot
+        level = CONFIDENCE_LEVELS[0]
+        derived = (('averages', 'Averages'), ('dof', 'DOF (2n)'),
+                   ('equivalent', 'Equivalent DOF'),
+                   ('band', f'{round(level * 100)} % band'),
+                   ('resolution', 'Δf'),
                    ('duration', 'Frame'), ('stop', 'Ends'))
-        for key, (_name, value) in add_derived(grid, derived,
-                                               len(rows) + 2).items():
+        tips = {
+            'dof': 'Statistical degrees of freedom of the averaged '
+                   'spectrum: two per frame averaged. Not the '
+                   'measurement DOFs the channels are taken at',
+            'equivalent': 'The degrees of freedom discounted for '
+                          'overlap (Welch): overlapped frames share '
+                          'samples, so they steady the average less '
+                          'than as many independent frames would',
+            'band': 'Where the true spectrum lies, at this confidence, '
+                    'about the averaged one: decibels below and above '
+                    'it, from the equivalent degrees of freedom '
+                    '(chi-square)'}
+        for key, (name, value) in add_derived(grid, derived,
+                                              len(rows) + 2).items():
             self.derived[key] = value
+            if key in tips:
+                name.setToolTip(tips[key])
+                value.setToolTip(tips[key])
 
         self.detect_button: QPushButton = QPushButton('Detect')
         self.detect_button.setToolTip(
@@ -421,6 +452,15 @@ class AveragingPanel(QWidget):
         self.derived['averages'].setText(
             f'{self.records} × {averaging.frames} = {averages}'
             if self.records > 1 else str(averages))
+        # the same count a PSD computed now is stamped with, from the
+        # same rule (`Averaging.statistical_dof`), records pooled
+        worth = averaging.statistical_dof(records=self.records)
+        self.derived['dof'].setText(str(worth.nominal))
+        self.derived['equivalent'].setText(f'{worth.equivalent:.4g}')
+        band = confidence_bands(1.0, worth.equivalent,
+                                levels=CONFIDENCE_LEVELS[:1])[0]
+        self.derived['band'].setText(
+            f'{band.lower_db:+.1f} / {band.upper_db:+.1f} dB')
         self.derived['duration'].setText(
             f'{averaging.frame_length / rate:.4g} s')
         self.derived['stop'].setText(
