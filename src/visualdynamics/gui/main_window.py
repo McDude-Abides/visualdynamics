@@ -11484,7 +11484,13 @@ class MainWindow(QMainWindow):
                                      octave=self._octave_source(series)
                                      is not None,
                                      tone=self._tone_source(series)
-                                     is not None)
+                                     is not None,
+                                     fit=history is not None and any(
+                                         history.known_dim(i) == 'acceleration'
+                                         for i in range(history.num_records)))
+        if history is not None and self.data_pane.showing_fit:
+            return self._render_replication_fit(history, series[0][0],
+                                                series[0][2])
         if history is not None and self.data_pane.showing_wavelet:
             return self._render_wavelet(history, series[0][0],
                                         series[0][2])
@@ -16053,6 +16059,67 @@ class MainWindow(QMainWindow):
                                           'acceleration'))
         settings['duration'] = float(f'{pulse.duration:.3g}')
         return settings
+
+    def _render_replication_fit(self, history, name=None, records=None):
+        """Whether a shaker can play this record: its travel at one
+        cutoff inside the stroke, over the sweep of every candidate.
+
+        The ratings and cutoffs are the panel's, kept on the pane so a
+        shaker typed once stays typed from record to record; every
+        number is `core.replication_fit.replication_fit`'s, and the
+        picture is `plot.replication_fit`'s, the one a script draws.
+        The channel is the picked record when it is an acceleration,
+        the record's first acceleration otherwise.
+        """
+        from ..core.replication_fit import ShakerRating, replication_fit
+        from ..plot.replication_fit import build_replication_fit
+
+        panel = self.data_pane.replication_fit_panel
+        settings = panel.show_settings(self.data_pane.fit_settings,
+                                       self.unit_system)
+        self.data_pane.fit_settings = settings
+        panel.show()
+        # flat: there is no depth axis for a travel against its stops
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        picked = [i for i in (records or [])
+                  if history.known_dim(i) == 'acceleration']
+        channel = picked[0] if picked else None
+        try:
+            fit = replication_fit(history, ShakerRating(**panel.rating()),
+                                  cutoffs=settings['cutoffs'],
+                                  channel=channel)
+            cutoff = settings['cutoff']
+            if cutoff is not ... and cutoff is not None:
+                fit.case(cutoff)          # a cutoff no longer offered
+        except KeyError:
+            cutoff = ...
+        except ValueError as error:
+            # a rating at zero, a cutoff past Nyquist: the reason, and
+            # no numbers that would read as a verdict
+            panel.show_fit(None)
+            return str(error)
+        case = build_replication_fit(self.data_pane.graphics, fit, cutoff,
+                                     unit_system=self.unit_system,
+                                     theme=self.theme_name)
+        panel.show_fit(fit, case)
+        if name is not None:
+            self._journal_replication_fit(name, fit, settings, cutoff)
+        return f'{fit.dof}: {case.describe()}'
+
+    def _journal_replication_fit(self, name, fit, settings, cutoff):
+        """The fit, journaled as the headless call that draws it
+        (`_journal_view`)."""
+        rating = {key: settings[key] for key in (
+            'force', 'stroke', 'velocity', 'moving_mass', 'body_mass')}
+        prefix = ("visualdynamics.plot.plot_replication_fit("
+                  f"project[{name!r}]")
+        drawn = '' if cutoff is ... else f'cutoff={cutoff!r}, '
+        self._journal_view(
+            prefix,
+            f'{prefix}, {rating!r}, channel={fit.dof!r}, '
+            f"cutoffs={tuple(settings['cutoffs'])!r}, {drawn}"
+            "path='replication_fit.png', show=False)")
 
     def _kurtosis_bounds_moved(self, low, high):
         """Remember a dragged band, so a redraw does not put it back."""

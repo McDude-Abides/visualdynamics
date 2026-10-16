@@ -3448,6 +3448,86 @@ def plot_pulse_check(history: Any, shape: str, peak: float,
                         title=title or f'{dof}: classical pulse check',
                         size=size)
 
+def plot_replication_fit(history: Any,
+                         rating: Any,
+                         channel: str | int | None = None, *,
+                         cutoffs: Sequence[float] | None = None,
+                         cutoff: Any = ...,
+                         unit_system: UnitSystem | None = None,
+                         theme: Any = None,
+                         path: str | os.PathLike | None = None,
+                         show: bool = True, title: str | None = None,
+                         size: tuple[int, int] = (1100, 800)) -> Any:
+    """Draw whether a shaker can play a reference record.
+
+        rating = {'force': 17800.0, 'stroke': 0.0508, 'velocity': 1.78,
+                  'moving_mass': 68.0, 'body_mass': 1360.0}
+        visualdynamics.plot.plot_replication_fit(history, rating,
+                                                 path='fit.png')
+
+    The check is `core.replication_fit.replication_fit`. The top row is
+    the armature's travel through the record at one cutoff, the body's
+    share counted, inside the band the stroke allows, with the verdict
+    and what the record does integrated as logged written above it. The
+    bottom row is the sweep across the candidate cutoffs: the travel
+    each way against the room, the peak velocity against the rating,
+    and the share of the mean square removed with the change in the
+    largest peak. A filled marker fits and a hollow one does not.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The reference record.
+    rating : ShakerRating or mapping
+        The shaker's ratings in SI, as a
+        `core.replication_fit.ShakerRating` or the keyword arguments
+        that make one.
+    channel : str or int, optional
+        The acceleration channel, by DOF or index; the first by default.
+    cutoffs : sequence of float, optional
+        The candidate high-pass cutoffs in Hz;
+        `core.replication_fit.CUTOFFS` by default.
+    cutoff : float or None, optional
+        The candidate drawn on the top row; None draws the record as
+        logged. Omitted, the lowest cutoff that fits, or the lowest
+        candidate when none does.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        If the record has no acceleration channel, `channel` is not
+        one, or a rating or cutoff is out of range.
+    KeyError
+        If `cutoff` is not one of the candidates.
+    """
+    from ..core.replication_fit import CUTOFFS, ShakerRating, replication_fit
+    from .replication_fit import build_replication_fit, default_cutoff
+
+    if not isinstance(rating, ShakerRating):
+        rating = ShakerRating(**dict(rating))
+    fit = replication_fit(history, rating,
+                          cutoffs=CUTOFFS if cutoffs is None else cutoffs,
+                          channel=channel)
+    drawn = fit.case(default_cutoff(fit) if cutoff is ... else cutoff)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_replication_fit(widget, fit, drawn.cutoff,
+                              unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{fit.dof}: replication fit, '
+                                        f'{drawn.name()}'),
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,

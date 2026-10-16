@@ -46,6 +46,7 @@ from .mesh_solids_panel import MeshSolidsPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
 from .pulse_panel import PulsePanel
+from .replication_fit_panel import ReplicationFitPanel
 from .rigid_panel import RigidBodyPanel
 from .segments_panel import SegmentsPanel
 from .shock_panel import ShockPanel
@@ -150,9 +151,10 @@ class DataPane(QWidget):
     for how to read the data.
 
     The bar has the readings of the data shown (averaging, filter,
-    truncate, kurtosis, shocks, scalogram, octave bands, the CMIF and
-    others), the choices of a comparison against a specification, the
-    record filters and the acts the selection can take. It shows only
+    truncate, kurtosis, shocks, scalogram, replication fit, octave
+    bands, the CMIF and others), the choices of a comparison against a
+    specification, the record filters and the acts the selection can
+    take. It shows only
     the controls the data can use. A control that does not apply is
     hidden, not grayed out.
 
@@ -255,6 +257,11 @@ class DataPane(QWidget):
         #: tolerances kept across redraws, None until one is set
         self.pulse_wanted: bool = False
         self.pulse_settings: dict[str, Any] | None = None
+        #: the replication fit, the same way, and the ratings and
+        #: cutoffs it was read with (SI), kept across redraws and
+        #: objects: a shaker's ratings do not change with the record
+        self.fit_wanted: bool = False
+        self.fit_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
         #: 'curves', 'error' or 'lines' — sticky, like the other view
@@ -351,6 +358,11 @@ class DataPane(QWidget):
         self.pulse_panel: PulsePanel = PulsePanel()
         self.pulse_panel.hide()
         self.pulse_panel.changed.connect(self._pulse_edited)
+        # the shaker's ratings beside a record checked against them
+        self.replication_fit_panel: ReplicationFitPanel = \
+            ReplicationFitPanel()
+        self.replication_fit_panel.hide()
+        self.replication_fit_panel.changed.connect(self._fit_edited)
         # the specification being written at a shape set's modal
         # coordinates, beside the plot that previews it; the toggle
         # is on the table bar, where a lone shape set's readings are
@@ -387,6 +399,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
         plot_row.addWidget(self.pulse_panel)
+        plot_row.addWidget(self.replication_fit_panel)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -833,12 +846,25 @@ class DataPane(QWidget):
             '— against its tolerance envelope and its velocity change')
         self.pulse_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.pulse_action)
+        # whether a shaker can play this record as a replication
+        # reference: its travel and velocity at a few high-pass cutoffs
+        # against the ratings, and the force at its largest peak
+        self.fit_action: QAction = QAction(control_icon('replication_fit'),
+                                           'Replication Fit', self)
+        self.fit_action.setCheckable(True)
+        self.fit_action.setToolTip(
+            'Whether a shaker can play this record: the force at its '
+            'largest peak, and its travel each way and peak velocity at '
+            'each candidate high-pass cutoff, against the ratings')
+        self.fit_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.fit_action)
         for action in (self.averaging_action, self.filter_action,
                        self.sine_action,
                        self.truncate_action, self.kurtosis_action,
                        self.statistics_action,
                        self.shocks_action, self.wavelet_action,
-                       self.pulse_action):
+                       self.pulse_action,
+                       self.fit_action):
             self.reading_group.addAction(action)
         # the banded reading of a spectrum: the octave conversion
         # previewed as steps over the narrowband, its spacing in the
@@ -985,7 +1011,8 @@ class DataPane(QWidget):
                   'statistics_panel'),
                  ('shocks_action', 'shocks_wanted', 'shock_panel'),
                  ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'),
-                 ('pulse_action', 'pulse_wanted', 'pulse_panel'))
+                 ('pulse_action', 'pulse_wanted', 'pulse_panel'),
+                 ('fit_action', 'fit_wanted', 'replication_fit_panel'))
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
         """Put the acts the selection can take on this bar
@@ -1077,9 +1104,9 @@ class DataPane(QWidget):
             self.toolbar.setVisible(True)
 
     def _choose_reading(self, checked: bool) -> None:
-        """The kurtosis, statistics or wavelet button: a different *reading* of
-        the record rather than a mark on it, so it replaces the trace
-        outright — and the mark-the-trace toggles stand down, having
+        """The kurtosis, statistics, wavelet or replication fit button: a
+        different *reading* of the record rather than a mark on it, so it
+        replaces the trace outright — and the mark-the-trace toggles stand down, having
         nothing to mark."""
         del checked                      # the buttons are the state now
         self._readings_settled()
@@ -1118,6 +1145,17 @@ class DataPane(QWidget):
         """Whether the pulse check is offered and checked."""
         return (self.pulse_action.isVisible()
                 and self.pulse_action.isChecked())
+
+    def _fit_edited(self, settings) -> None:
+        """A rating, the cutoffs or the cutoff drawn moved: keep them on
+        the pane, as the scalogram's are, then draw again."""
+        self.fit_settings = dict(settings)
+        self.reread.emit()
+
+    @property
+    def showing_fit(self) -> bool:
+        """Whether the replication fit is offered and checked."""
+        return self.fit_action.isVisible() and self.fit_action.isChecked()
 
     @property
     def showing_wavelet(self) -> bool:
@@ -1465,8 +1503,11 @@ class DataPane(QWidget):
         # half of principle 3, and the half that survives: it is the
         # readings that stay offered whichever one is chosen (Brandon,
         # 2026-08-27).
+        # the fit by whether it is up, not wanted: its choice is sticky
+        # across a selection it is not offered for, such as a spectrum,
+        # which keeps its 3-D form
         flat = (self.kurtosis_wanted or self.statistics_wanted
-                or self.flat_only)
+                or self.showing_fit or self.flat_only)
         self.waterfall_action.setVisible(offered and not flat)
         if offered and not flat:
             self.toolbar.setVisible(True)
@@ -1712,7 +1753,7 @@ class DataPane(QWidget):
                       averaging: bool = False, shocks: bool = False,
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
-                      tone: bool = False) -> None:
+                      tone: bool = False, fit: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1724,9 +1765,10 @@ class DataPane(QWidget):
         offers the readings of a time history (averaging, filter,
         truncate, kurtosis, scalogram), `sine` adds the sine reading to
         them for a record with a sweep specification, and `shocks` offers
-        the shock view and kurtosis. `octave` offers the octave bands of a
-        plain density, `tone` the tone readout of a plain autospectrum,
-        and `residual` the fit's residual CMIF. The pair,
+        the shock view and kurtosis. `fit` offers the replication fit,
+        for a record with acceleration to integrate. `octave` offers the
+        octave bands of a plain density, `tone` the tone readout of a plain
+        autospectrum, and `residual` the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -1751,7 +1793,8 @@ class DataPane(QWidget):
         reading = averaging or shocks
         instead = reading and (self.kurtosis_wanted or self.wavelet_wanted
                                or self.statistics_wanted
-                               or self.pulse_wanted)
+                               or self.pulse_wanted
+                               or (fit and self.fit_wanted))
         self.averaging_action.setVisible(averaging)
         self.filter_action.setVisible(averaging)
         self.filter_action.setChecked(averaging and self.filter_wanted)
@@ -1809,6 +1852,12 @@ class DataPane(QWidget):
         self.wavelet_action.setVisible(averaging)
         self.wavelet_action.setChecked(averaging and self.wavelet_wanted)
         self.shocks_action.setVisible(shocks)
+        # the replication fit integrates acceleration, so it is offered
+        # for a record that holds some and nowhere else (principle 3)
+        self.fit_action.setVisible(fit)
+        self.fit_action.setChecked(fit and self.fit_wanted)
+        if not fit or not self.fit_wanted:
+            self.replication_fit_panel.hide()
         # the octave reading belongs to a plain density; offered there,
         # absent everywhere else (principle 3)
         self.octave_action.setVisible(octave)
@@ -1903,6 +1952,7 @@ class DataPane(QWidget):
                        self.truncate_action, self.octave_action,
                        self.tone_action,
                        self.sweep_rate_action,
+                       self.fit_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

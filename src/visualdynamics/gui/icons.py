@@ -628,6 +628,27 @@ def _draw_sweep_rate(painter, color):
     painter.drawLine(QPointF(27.7, 36), QPointF(38.5, 26))
 
 
+def _draw_replication_fit(painter, color):
+    """A record's travel between two stops.
+
+    What the reading puts on the plot, in miniature: a wandering trace
+    that swells once, inside two dashed lines it must not cross. The
+    dashes are the stops, and the trace staying between them is the
+    question the reading answers.
+    """
+    faint = QColor(color)
+    faint.setAlpha(140)
+    pen = QPen(faint, 3)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(pen)
+    for y in (12, 52):
+        painter.drawLine(QPointF(4, y), QPointF(60, y))
+    swell = [(x, 32 - (6 + 12 * math.exp(-((x - 40) / 7.0) ** 2))
+              * math.sin(x / 2.2)) for x in range(6, 59)]
+    painter.setPen(_pen(color, 4))
+    painter.drawPath(_curve(swell))
+
+
 def _draw_wavelet(painter, color):
     """A wave packet: a burst that starts, peaks and dies away.
 
@@ -2032,6 +2053,7 @@ def control_icon(name: str) -> QIcon:
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,
+     'replication_fit': _draw_replication_fit,
      'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,
      'automatic': _draw_automatic,
      'table': _draw_channel_table, 'overlay': _draw_overlay,
