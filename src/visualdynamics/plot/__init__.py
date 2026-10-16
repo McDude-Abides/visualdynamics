@@ -2117,11 +2117,134 @@ def octave_preview(items: Iterable[Any], steps: tuple[Any, Any, Any],
     return drawn
 
 
+#: how each confidence level's edges are dashed, in the order the levels
+#: are given: told apart by the dash as well as by the depth of their
+#: shading, since both bands are one color
+BAND_STYLES = ('dash', 'dot', 'dashdot')
+
+
+def confidence_preview(items: Iterable[Any], psd: Any,
+                       colors: Mapping[str, str],
+                       records: Sequence[int] | None = None,
+                       levels: Sequence[float] | None = None,
+                       unit_system: UnitSystem | None = None
+                       ) -> list[tuple[Any, Any]]:
+    """Draw the chi-square confidence band of an averaged PSD over it.
+
+    For each record and each level (`core.averaging.CONFIDENCE_LEVELS`,
+    90 and 95 percent, by default), the band from `Psd.confidence_band`
+    is shaded between its two edges, and the edges are drawn as steps
+    the way the PSD itself is, so each line's band sits on its own bin.
+    The bands share one color, the specification's gray, and the
+    narrower one is shaded over the wider, so the inner band reads
+    darker; the edges of each level are
+    dashed their own way (`BAND_STYLES`) and named in the legend. The
+    band is drawn behind the data and widens the plot's limits to take
+    it in, so its top edge is not cut off at the highest peak.
+
+    Bands are drawn only on plots whose quantity matches, and only for
+    `records` when given, as `octave_preview` draws its steps. Returns
+    the (plot, item) pairs added, edges and fills, so the caller can
+    take them away again. The spectrum's own degrees of freedom are
+    used (`Psd.statistical_dof`); one that has none is refused with the
+    `ValueError` `Psd.confidence_band` raises.
+    """
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+
+    from ..core.averaging import CONFIDENCE_LEVELS
+
+    levels = list(CONFIDENCE_LEVELS if levels is None else levels)
+    us = unit_system or DEFAULT_SYSTEM
+    wanted = (range(psd.num_records) if records is None
+              else [int(i) for i in records])
+    widths = (psd.bin_edges() if getattr(psd, 'bandwidth', None)
+              is not None else None)
+    dashes = {'dash': Qt.PenStyle.DashLine, 'dot': Qt.PenStyle.DotLine,
+              'dashdot': Qt.PenStyle.DashDotLine}
+    bands = []
+    for n, level in enumerate(levels):
+        lower, upper = psd.confidence_band(level)
+        bands.append((level, BAND_STYLES[n % len(BAND_STYLES)],
+                      lower.display_ordinate(us),
+                      upper.display_ordinate(us)))
+    # the widest first, so the narrower band's shading lies over it
+    bands.sort(key=lambda band: band[0], reverse=True)
+    # the specification's gray, not a curve color: the band is a
+    # statement about the estimate rather than another measurement,
+    # and gray is the one hue no curve in the cycle takes
+    color = colors['specification_curve']
+    shade = QColor(color)
+    shade.setAlpha(ZONE_ALPHA)
+    drawn = []
+    for item in items:
+        if not isinstance(item, pg.PlotItem):
+            continue
+        key = getattr(item, 'series_key', None)
+        log_y = bool(key[3]) if key is not None else False
+        reach = []
+        for k in wanted:
+            if key is not None and (psd.ordinate_dim[k],
+                                    psd.dimension_hint[k]) \
+                    != (key[1], key[2]):
+                continue
+            for level, style, lows, highs in bands:
+                pen = pg.mkPen(color, width=1, style=dashes[style])
+                x, low = step_outline(psd.abscissa, np.real(lows[k]), widths)
+                _x, high = step_outline(psd.abscissa, np.real(highs[k]),
+                                        widths)
+                # a line at zero has no place on a log axis, and its band
+                # is zero wide anyway
+                low = np.where(low > 0.0, low, np.nan)
+                high = np.where(high > 0.0, high, np.nan)
+                edges = []
+                for values in (low, high):
+                    edge = pg.PlotDataItem(x, values, pen=pen,
+                                           connect='finite')
+                    edge.setZValue(-2)       # behind the data it bounds
+                    edge.is_zone_edge = True  # a band, not a measurement
+                    item.addItem(edge)
+                    edges.append(edge)
+                    drawn.append((item, edge))
+                if np.isfinite(low).all() and np.isfinite(high).all():
+                    fill = pg.FillBetweenItem(edges[0], edges[1],
+                                              brush=pg.mkBrush(shade))
+                    fill.setZValue(-10)
+                    item.addItem(fill)
+                    drawn.append((item, fill))
+                reach.extend(v for v in (np.nanmin(low), np.nanmax(high))
+                             if np.isfinite(v))
+        if not reach:
+            continue
+        legend = getattr(item, 'legend', None)
+        if legend is not None:
+            for level, style, _lows, _highs in sorted(bands):
+                legend.addItem(pg.PlotDataItem(
+                    [], [], pen=pg.mkPen(color, width=1,
+                                         style=dashes[style])),
+                    f'{round(level * 100)} % confidence')
+        # widen the limits the plot was locked to, so the band's top
+        # edge over the highest peak can be seen (`_Extents.lock`)
+        top, bottom = max(reach), min(reach)
+        if log_y:
+            top, bottom = np.log10(top), np.log10(bottom)
+        view = item.getViewBox()
+        y_lo, y_hi = view.state['limits']['yLimits']
+        pad = 0.05 * (top - bottom) or 1.0
+        view.setLimits(yMin=(bottom - pad if y_lo is None
+                             else min(y_lo, bottom - pad)),
+                       yMax=(top + pad if y_hi is None
+                             else max(y_hi, top + pad)))
+    return drawn
+
+
 def _mark(layout, data, marks, theme=None, per_octave=None,
-          unit_system=None):
+          unit_system=None, levels=None, records=None):
     """A reading over every plot in `layout` — the frames, the shocks,
     the cut, the filter's preview or the octave steps — as the window's
-    toggles draw it (`viz.marks.held_reading`).
+    toggles draw it (`viz.marks.held_reading`), or a PSD's confidence
+    band (`confidence_preview`, at `levels`), which is drawn flat only.
 
     Locked, because a mark you can drag is a mark that reports the drag
     to somebody, and in a standalone plot there is nobody. Returns the
@@ -2133,9 +2256,19 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
 
     if marks is None:
         return []
-    held = held_reading(data, marks)
     colors = resolve_theme(theme)
     plots = [item for item in layout.ci.items if isinstance(item, pg.PlotItem)]
+    if marks == 'confidence':
+        # a property of the spectrum rather than a setting held on it,
+        # so it has no `held_reading` and no stage counterpart
+        from ..core.data import Psd
+
+        if not isinstance(data, Psd):
+            raise TypeError('a confidence band is drawn on a PSD, not '
+                            f'on {type(data).__name__}')
+        return confidence_preview(plots, data, colors, records=records,
+                                  levels=levels, unit_system=unit_system)
+    held = held_reading(data, marks)
     if marks == 'octave':
         return octave_preview(
             plots, octave_steps(data, per_octave, unit_system), colors)
@@ -2169,6 +2302,7 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
               path: str | os.PathLike | None = None,
               marks: str | None = None,
               per_octave: int | None = None,
+              levels: Sequence[float] | None = None,
               **kwargs: Any) -> Any:
     """Plot a data array in a window, or save it to a file with `path`.
 
@@ -2187,7 +2321,11 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
     bands it would integrate to as steps, with `per_octave` bands per
     octave. Each is read from the object: the setting it holds, or else
     what its detector suggests. The frames and the shock windows are
-    drawn locked, since nothing here would receive a drag.
+    drawn locked, since nothing here would receive a drag. On an
+    averaged PSD, 'confidence' shades the chi-square band the true
+    spectrum lies in (`confidence_preview`), at the confidence `levels`
+    given, 90 and 95 percent by default, from the degrees of freedom
+    the PSD was averaged to.
     """
     # the pane owns which part of a complex ordinate is drawn, so the
     # draw reads it back rather than being told once at the call
@@ -2203,7 +2341,7 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
         build_plot(widget, data, unit_system=unit_system, theme=theme,
                    component=component, **kwargs)
         overlays.extend(_mark(widget, data, marks, theme, per_octave,
-                              unit_system))
+                              unit_system, levels, kwargs.get('records')))
 
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or repr(data), size=size,
