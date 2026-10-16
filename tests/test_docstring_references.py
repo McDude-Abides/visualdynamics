@@ -29,6 +29,8 @@ import pytest
 #: what each one is expected to answer for
 THEORY = {
     'core.srs': 'the ramp-invariant shock response spectrum filter',
+    'core.classical_pulse': 'the classical shock pulses, their tolerance '
+                            'envelope and velocity change',
     'core.octave': 'the proportional band system',
     'core.wavelet': 'the Morlet transform',
     'core.averaging': 'the averaged periodogram and its windows',
