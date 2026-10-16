@@ -54,6 +54,7 @@ from .signature_panel import SignaturePanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
 from .statistics_panel import StatisticsPanel
+from .stroke_panel import StrokePanel
 from .sweep_rate_panel import SweepRatePanel
 from .tone_panel import TonePanel
 from .toolbars import fence, shows_anything, tidy
@@ -262,6 +263,13 @@ class DataPane(QWidget):
         #: objects: a shaker's ratings do not change with the record
         self.fit_wanted: bool = False
         self.fit_settings: dict[str, Any] | None = None
+        #: and the stroke reading, the same way: a record's pulse
+        #: integrated raw against the shaker's shock ratings
+        self.stroke_wanted: bool = False
+        #: the ratings it is read against, in SI, kept across redraws
+        #: so they survive clicking away and back (a shaker's ratings
+        #: do not change with the record)
+        self.stroke_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
         #: 'curves', 'error' or 'lines' — sticky, like the other view
@@ -363,6 +371,10 @@ class DataPane(QWidget):
             ReplicationFitPanel()
         self.replication_fit_panel.hide()
         self.replication_fit_panel.changed.connect(self._fit_edited)
+        # the shaker's shock ratings beside the pulse read against them
+        self.stroke_panel: StrokePanel = StrokePanel()
+        self.stroke_panel.hide()
+        self.stroke_panel.changed.connect(self._stroke_edited)
         # the specification being written at a shape set's modal
         # coordinates, beside the plot that previews it; the toggle
         # is on the table bar, where a lone shape set's readings are
@@ -400,6 +412,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.statistics_panel)
         plot_row.addWidget(self.pulse_panel)
         plot_row.addWidget(self.replication_fit_panel)
+        plot_row.addWidget(self.stroke_panel)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -858,13 +871,26 @@ class DataPane(QWidget):
             'each candidate high-pass cutoff, against the ratings')
         self.fit_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.fit_action)
+        # whether a pulse fits on the shaker: the record integrated
+        # raw to velocity and displacement, against the shock ratings
+        # typed beside it
+        self.stroke_action: QAction = QAction(control_icon('stroke'),
+                                              'Stroke', self)
+        self.stroke_action.setCheckable(True)
+        self.stroke_action.setToolTip(
+            'Whether a pulse fits on the shaker: the acceleration '
+            'integrated raw to velocity and displacement, against the '
+            'shock stroke, velocity and force typed beside it')
+        self.stroke_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.stroke_action)
         for action in (self.averaging_action, self.filter_action,
                        self.sine_action,
                        self.truncate_action, self.kurtosis_action,
                        self.statistics_action,
                        self.shocks_action, self.wavelet_action,
                        self.pulse_action,
-                       self.fit_action):
+                       self.fit_action,
+                       self.stroke_action):
             self.reading_group.addAction(action)
         # the banded reading of a spectrum: the octave conversion
         # previewed as steps over the narrowband, its spacing in the
@@ -1012,7 +1038,8 @@ class DataPane(QWidget):
                  ('shocks_action', 'shocks_wanted', 'shock_panel'),
                  ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'),
                  ('pulse_action', 'pulse_wanted', 'pulse_panel'),
-                 ('fit_action', 'fit_wanted', 'replication_fit_panel'))
+                 ('fit_action', 'fit_wanted', 'replication_fit_panel'),
+                 ('stroke_action', 'stroke_wanted', 'stroke_panel'))
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
         """Put the acts the selection can take on this bar
@@ -1156,6 +1183,19 @@ class DataPane(QWidget):
     def showing_fit(self) -> bool:
         """Whether the replication fit is offered and checked."""
         return self.fit_action.isVisible() and self.fit_action.isChecked()
+
+    def _stroke_edited(self, settings) -> None:
+        """A shock rating moved: keep it, then draw again. Kept on the
+        pane, as the scalogram's settings are, so the ratings survive
+        clicking away to another record and back."""
+        self.stroke_settings = dict(settings)
+        self.reread.emit()
+
+    @property
+    def showing_stroke(self) -> bool:
+        """Whether the stroke reading is offered and checked."""
+        return (self.stroke_action.isVisible()
+                and self.stroke_action.isChecked())
 
     @property
     def showing_wavelet(self) -> bool:
@@ -1507,7 +1547,8 @@ class DataPane(QWidget):
         # across a selection it is not offered for, such as a spectrum,
         # which keeps its 3-D form
         flat = (self.kurtosis_wanted or self.statistics_wanted
-                or self.showing_fit or self.flat_only)
+                or self.showing_fit or self.stroke_wanted
+                or self.flat_only)
         self.waterfall_action.setVisible(offered and not flat)
         if offered and not flat:
             self.toolbar.setVisible(True)
@@ -1794,7 +1835,8 @@ class DataPane(QWidget):
         instead = reading and (self.kurtosis_wanted or self.wavelet_wanted
                                or self.statistics_wanted
                                or self.pulse_wanted
-                               or (fit and self.fit_wanted))
+                               or (fit and self.fit_wanted)
+                               or self.stroke_wanted)
         self.averaging_action.setVisible(averaging)
         self.filter_action.setVisible(averaging)
         self.filter_action.setChecked(averaging and self.filter_wanted)
@@ -1882,6 +1924,12 @@ class DataPane(QWidget):
         self.pulse_action.setChecked(shocks and self.pulse_wanted)
         if not shocks or not self.pulse_wanted:
             self.pulse_panel.hide()
+        # the stroke is offered wherever the shocks are: it reads a
+        # record's pulse, and a record is what has one
+        self.stroke_action.setVisible(reading)
+        self.stroke_action.setChecked(reading and self.stroke_wanted)
+        if not reading or not self.stroke_wanted:
+            self.stroke_panel.hide()
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
             complex_data and not (cmif and self.showing_cmif))
@@ -1949,6 +1997,7 @@ class DataPane(QWidget):
                        self.drive_point_action, self.cmif_action,
                        self.averaging_action, self.kurtosis_action,
                        self.shocks_action, self.filter_action,
+                       self.stroke_action,
                        self.truncate_action, self.octave_action,
                        self.tone_action,
                        self.sweep_rate_action,

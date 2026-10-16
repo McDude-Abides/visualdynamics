@@ -3528,6 +3528,73 @@ def plot_replication_fit(history: Any,
                         size=size)
 
 
+def plot_stroke(history: Any, channel: int | str | None = None, *,
+                stroke: float | None = None, velocity: float | None = None,
+                force: float | None = None,
+                moving_mass: float | None = None,
+                mass_ratio: float | None = None,
+                unit_system: UnitSystem | None = None, theme: Any = None,
+                path: str | os.PathLike | None = None,
+                show: bool = True, title: str | None = None,
+                size: tuple[int, int] = (1000, 900)) -> Any:
+    """Draw a shock pulse's acceleration, velocity and displacement
+    against the shaker's shock ratings.
+
+        visualdynamics.plot.plot_stroke(pulse, stroke=0.0635,
+                                        velocity=1.778, mass_ratio=0.25,
+                                        path='stroke.png')
+
+    Three rows on one clock for one channel, read by
+    `core.stroke.read_stroke`: the acceleration titled with its peak
+    and the force it asks for, the velocity integrated raw with the
+    shock velocity drawn either side of zero, and the displacement with
+    the stops of a centered armature drawn half the stroke either side
+    of rest. With `mass_ratio` the travel relative to the body is drawn
+    beside the table's, dashed. Each row's title is its reading in
+    words, against its rating where one was given.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The shock record, or a pulse from
+        `core.stroke.compensated_half_sine`.
+    channel : int or str, optional
+        The record's index or DOF; its first acceleration channel by
+        default.
+    stroke, velocity, force, moving_mass, mass_ratio : float, optional
+        The shaker's shock ratings and the masses, in SI, as
+        `core.stroke.read_stroke` takes them.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        If the record has no acceleration channel, or `channel` is not
+        one.
+    """
+    from ..core.stroke import read_stroke
+    from .stroke import build_stroke
+
+    reading = read_stroke(history, channel, stroke=stroke,
+                          velocity=velocity, force=force,
+                          moving_mass=moving_mass, mass_ratio=mass_ratio)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_stroke(widget, reading, unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{reading.dof}: stroke, velocity '
+                                       'and force',
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,

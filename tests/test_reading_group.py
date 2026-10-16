@@ -1,6 +1,6 @@
 """The readings of a record are one choice, and the bar says so.
 
-Averaging, filter, kurtosis, shocks, the wavelet, the pulse check and the replication fit
+Averaging, filter, kurtosis, shocks, the wavelet, the pulse check, the replication fit and the stroke
 are ways of reading one record, and a record is read one way at a
 time. That was always true and
 the bar did not show it: four buttons in a row, indistinguishable from
@@ -57,7 +57,8 @@ def readings(pane):
             'shocks': pane.shocks_action,
             'wavelet': pane.wavelet_action,
             'pulse': pane.pulse_action,
-            'fit': pane.fit_action}
+            'fit': pane.fit_action,
+            'stroke': pane.stroke_action}
 
 
 def test_the_readings_are_one_exclusive_group(pane):
@@ -93,10 +94,10 @@ def test_nothing_else_sits_inside_the_fence(pane):
 
 @pytest.mark.parametrize('standing', ['averaging', 'filter', 'truncate',
                                       'kurtosis', 'statistics', 'shocks',
-                                      'wavelet', 'pulse', 'fit'])
+                                      'wavelet', 'pulse', 'fit', 'stroke'])
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
                                     'kurtosis', 'statistics', 'shocks',
-                                    'wavelet', 'pulse', 'fit'])
+                                    'wavelet', 'pulse', 'fit', 'stroke'])
 def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
     """The exclusion itself, from every direction to every other.
 
@@ -124,7 +125,7 @@ def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
 
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
                                     'kurtosis', 'statistics', 'shocks',
-                                    'wavelet', 'pulse', 'fit'])
+                                    'wavelet', 'pulse', 'fit', 'stroke'])
 def test_the_flags_follow_the_buttons(pane, pump, chosen):
     """The flags the drawing code reads, which the old version updated
     by hand in each handler."""
@@ -140,7 +141,8 @@ def test_the_flags_follow_the_buttons(pane, pump, chosen):
              'shocks': pane.shocks_wanted,
              'wavelet': pane.wavelet_wanted,
              'pulse': pane.pulse_wanted,
-             'fit': pane.fit_wanted}
+             'fit': pane.fit_wanted,
+             'stroke': pane.stroke_wanted}
     assert flags == {name: name == chosen for name in flags}
 
 

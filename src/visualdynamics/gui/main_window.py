@@ -11501,6 +11501,9 @@ class MainWindow(QMainWindow):
                                            series[0][2])
         if history is not None and self.data_pane.showing_pulse:
             return self._render_pulse(history, series[0][0], series[0][2])
+        if history is not None and self.data_pane.showing_stroke:
+            return self._render_stroke(history, series[0][0],
+                                       series[0][2])
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,
@@ -16120,6 +16123,58 @@ class MainWindow(QMainWindow):
             f'{prefix}, {rating!r}, channel={fit.dof!r}, '
             f"cutoffs={tuple(settings['cutoffs'])!r}, {drawn}"
             "path='replication_fit.png', show=False)")
+
+    def _render_stroke(self, history, name=None, records=None):
+        """Whether this record's pulse fits on the shaker.
+
+        One channel at a time, as the scalogram is: the first selected
+        record when it is acceleration, else the record's first
+        acceleration channel, and the tree is settled onto it so the
+        selection says what the picture is of. The record is integrated
+        raw and read against the ratings in the panel beside it
+        (`core.stroke.read_stroke`, the call a script makes), and drawn
+        as `plot.stroke` draws it: three rows, each rating on the row it
+        limits.
+        """
+        from ..core.stroke import read_stroke
+        from ..plot.stroke import build_stroke, summary
+
+        panel = self.data_pane.stroke_panel
+        panel.set_unit_system(self.unit_system)
+        panel.set_settings(self.data_pane.stroke_settings)
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        accelerations = [i for i in range(history.num_records)
+                         if history.known_dim(i) == 'acceleration']
+        if not accelerations:
+            panel.show_reading(None)
+            return ('no acceleration channel here: a stroke is read by '
+                    'integrating acceleration')
+        channel = (records[0] if records and records[0] in accelerations
+                   else accelerations[0])
+        if name is not None and len(history.response_dof) > 1 \
+                and records != [channel]:
+            item = self._item_for_object(name)
+            if item is not None:
+                item.setExpanded(True)
+            self._select_records(name, [channel])
+        settings = panel.settings()
+        reading = read_stroke(history, channel, **settings)
+        build_stroke(self.data_pane.graphics, reading,
+                     unit_system=self.unit_system, theme=self.theme_name)
+        panel.show_reading(reading)
+        if name is not None:
+            given = ''.join(f', {key}={value!r}'
+                            for key, value in settings.items()
+                            if value is not None)
+            prefix = f'visualdynamics.plot.plot_stroke(project[{name!r}]'
+            self._journal_view(
+                prefix,
+                f'{prefix}, channel={channel}{given}, '
+                "path='stroke.png', show=False)")
+        return summary(reading, self.unit_system)
 
     def _kurtosis_bounds_moved(self, low, high):
         """Remember a dragged band, so a redraw does not put it back."""

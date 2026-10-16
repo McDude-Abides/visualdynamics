@@ -495,6 +495,20 @@ def _draw_pulse(painter, color):
     pulse.lineTo(58, 45)
     painter.drawPath(pulse)
 
+def _draw_stroke(painter, color):
+    """A displacement swinging down toward a stop and back, between two
+    stop lines: the travel a pulse needs against the travel there is."""
+    faint = QColor(color)
+    faint.setAlpha(150)
+    painter.setPen(QPen(faint, 3, Qt.PenStyle.DashLine))
+    for y in (10, 54):
+        painter.drawLine(QPointF(6, y), QPointF(58, y))
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(_curve([(6 + i, 22 + 24 * math.sin(math.pi * i / 52) ** 2)
+                             for i in range(53)]))
+
+
 def _draw_bars(painter, color):
     """A bar chart with one bar over a threshold.
 
@@ -2043,6 +2057,7 @@ def control_icon(name: str) -> QIcon:
      'drive_point': _draw_drive_point, 'cmif': _draw_cmif,
      'averaging': _draw_averaging, 'shocks': _draw_shocks,
      'pulse': _draw_pulse,
+     'stroke': _draw_stroke,
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,
