@@ -307,6 +307,7 @@ def test_the_inventory_covers_what_the_window_renders():
                          ' / viz.sinespec.plot_sine_stage'),
         '_render_events': "plot_replication(mode='overlay')",
         '_render_replication_bars': 'plot_replication',
+        '_render_replication_segments': 'plot_replication_segments',
         '_render_geometries': 'Geometry.plot / Geometry.plot_dofs',
         '_render_animation': ('Project.animate / ShapeSet.animate / '
                               'TimeHistory.animate (screenshot=, movie=)'),

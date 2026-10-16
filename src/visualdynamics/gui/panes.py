@@ -46,6 +46,7 @@ from .mesh_solids_panel import MeshSolidsPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
 from .rigid_panel import RigidBodyPanel
+from .segments_panel import SegmentsPanel
 from .shock_panel import ShockPanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
@@ -251,7 +252,7 @@ class DataPane(QWidget):
         #: where the bar charts' thresholds have been dragged to
         self.error_bounds: tuple[float, float] | None = None
         self.lines_bound: float | None = None
-        #: 'overlay' or 'waveform' — the transient's own
+        #: 'overlay', 'waveform' or 'segments' — the transient's own
         #: readings, kept apart from the random ones above because they
         #: are different questions and a single sticky choice shared
         #: between them would carry a random answer into a transient
@@ -284,6 +285,11 @@ class DataPane(QWidget):
         # the bar, whose SRS readings put it away
         self.srs_tolerance_panel: SrsTolerancePanel = SrsTolerancePanel()
         self.srs_tolerance_panel.hide()
+        # the segment marks and their tolerances, beside a run judged
+        # segment by segment; the Segments reading shows it. Made before
+        # the bar, whose replication readings put it away
+        self.segments_panel: SegmentsPanel = SegmentsPanel()
+        self.segments_panel.hide()
         self.toolbar: QToolBar = self._build_toolbar()
         # The comparison, replication and SRS readings are built
         # visible and were only ever put away by `reset_controls` —
@@ -351,6 +357,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.octave_panel)
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
+        plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
 
@@ -566,14 +573,17 @@ class DataPane(QWidget):
             else self.event_chosen.emit())
         self.event_action: QAction = toolbar.addWidget(self.event_box)
         self.event_action.setVisible(False)
-        # two readings, and only two. The waveform error is the one
-        # thing the time data alone can answer; a level error wants two
-        # PSDs and an SRS deviation wants two spectra, and those are
-        # reached by computing them and selecting the pair — where the
-        # specification's own PSD is a Specification and its SRS a
-        # ShockSpecification, so the app still knows which is which.
-        # Offering them here as well would be two ways to the same
-        # number, computed differently, agreeing only by luck.
+        # two readings of the whole run, and only two. The waveform
+        # error is the one thing the time data alone can answer; a level
+        # error wants two PSDs and an SRS deviation wants two spectra,
+        # and those are reached by computing them and selecting the
+        # pair — where the specification's own PSD is a Specification
+        # and its SRS a ShockSpecification, so the app still knows which
+        # is which. Offering them here as well would be two ways to the
+        # same number, computed differently, agreeing only by luck. The
+        # third reading is not another number for the whole run: it
+        # judges each marked segment by the rule for its kind, which is
+        # what a whole-record figure hides
         self.replication_group: QActionGroup = QActionGroup(self)
         self.replication_actions: dict[str, QAction] = {}
         for key, icon, text, tip in (
@@ -582,6 +592,11 @@ class DataPane(QWidget):
                 ('waveform', 'bars', 'Waveform Error',
                  ('How far each channel is from the target waveform, '
                   'as a share of the target')),
+                ('segments', 'shocks', 'Segments',
+                 ('Each marked segment judged by the rule for its kind: '
+                  'a stationary stretch by its ASD and variance, a long '
+                  'transient by its envelope, a shock by its SRS and '
+                  'peaks')),
                 ):
             action = QAction(control_icon(icon), text, self)
             action.setCheckable(True)
@@ -1131,8 +1146,9 @@ class DataPane(QWidget):
         self.replication_chosen.emit(which)
 
     def show_replication_views(self, offered: bool) -> None:
-        """Show or hide the two readings of a transient replication
-        (overlay, waveform error).
+        """Show or hide the readings of a transient replication
+        (overlay, waveform error, segments). Hidden, the segments'
+        panel goes with them.
 
         Only a transient specification with a record against it has
         them. While they are shown, the three readings of a random
@@ -1143,6 +1159,8 @@ class DataPane(QWidget):
         """
         for action in self.replication_actions.values():
             action.setVisible(offered)
+        if not offered:
+            self.segments_panel.hide()
         if offered:
             for action in self.comparison_actions.values():
                 action.setVisible(False)

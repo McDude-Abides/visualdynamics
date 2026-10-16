@@ -3873,8 +3873,75 @@ def plot_replication(measured: Any, specification: Any,
                         size=size)
 
 
+def plot_replication_segments(measured: Any, specification: Any,
+                              segments: Sequence[Any], *,
+                              channel: str | None = None,
+                              lag: int | None = None, playing: int = 0,
+                              unit_system: UnitSystem | None = None,
+                              theme: Any = None,
+                              path: str | os.PathLike | None = None,
+                              show: bool = True, title: str | None = None,
+                              size: tuple[int, int] = (1100, 820),
+                              **settings: Any) -> Any:
+    """A replicated run against its reference, judged segment by
+    segment: the two traces overlaid with the segments shaded, their
+    difference beneath, and the verdict by segment in a table.
+
+        visualdynamics.plot.plot_replication_segments(
+            run, reference, [(6.0, 30.0, 'stationary', 'rough road'),
+                             (31.9, 32.7, 'shock', 'pothole'),
+                             (41.0, 51.0, 'transient', 'braking')],
+            band=(5.0, 400.0), path='segments.png')
+
+    The judgement is `core.replication_segments.replication_segments`'s,
+    and every setting it takes is passed through (`taper_percent`,
+    `band`, `asd_db`, `variance_percent`, `envelope_db`, `window`,
+    `srs_db`, `peak_percent` and the rest). The reference stands back
+    in gray with the control over it; each segment is shaded across
+    both plots and labeled with its name, kind and verdict, its edges
+    in its kind's line style; the table gives the whole-record rms
+    error first, then each segment's share of the record's mean square,
+    its own rms error and each check against its tolerance.
+
+    Parameters
+    ----------
+    measured : TimeHistory
+        The run.
+    specification : TransientSpecification or TimeHistory
+        The reference it was controlled to.
+    segments : sequence
+        The marks, each a `Segment` or (start, end, kind[, name]).
+    channel, lag, playing
+        As for `core.replication_segments.aligned_traces`.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+    **settings
+        The tolerances, as `core.replication_segments.judge_segments`
+        takes them.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .replication_segments import build_replication_segments
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_replication_segments(widget, measured, specification,
+                                   segments, channel=channel, lag=lag,
+                                   playing=playing, unit_system=unit_system,
+                                   theme=theme, **settings)
+
+    dof = specification.response_dof[0] if channel is None else channel
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{dof} judged by segment',
+                        size=size)
+
+
 __all__ = ['MAX_RECORDS', 'axis_label', 'build_photos', 'build_plot',
            'build_plots',
            'plot_bars', 'plot_cmif', 'plot_coherence_map', 'plot_comparison',
            'plot_data', 'plot_mac', 'plot_photos', 'plot_replication',
+           'plot_replication_segments',
            'plot_series', 'save_plot']

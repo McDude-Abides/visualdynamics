@@ -1003,6 +1003,10 @@ class MainWindow(QMainWindow):
         self.data_pane.pair_chosen.connect(self.render_current)
         self.data_pane.replication_chosen.connect(
             lambda _which: self.render_current())
+        # the segment marks and tolerances redraw the judgement at once:
+        # the plot is the preview of the marks being made
+        self.data_pane.segments_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.event_chosen.connect(self._event_chosen)
         self.data_pane.srs_chosen.connect(
             lambda _which: self.render_current())
@@ -15990,12 +15994,15 @@ class MainWindow(QMainWindow):
             pass
         else:
             mode = self.data_pane.replication_view
-            self._journal_view(
-                'visualdynamics.plot.plot_replication('
-                f'project[{event!r}], project[{target!r}]',
-                'visualdynamics.plot.plot_replication('
-                f'project[{event!r}], project[{target!r}], {mode!r}, '
-                "path='replication.png', show=False)")
+            # the segments reading journals its own call, which carries
+            # the marks (`_render_replication_segments`)
+            if mode != 'segments':
+                self._journal_view(
+                    'visualdynamics.plot.plot_replication('
+                    f'project[{event!r}], project[{target!r}]',
+                    'visualdynamics.plot.plot_replication('
+                    f'project[{event!r}], project[{target!r}], {mode!r}, '
+                    "path='replication.png', show=False)")
         averaging = rep.averaging_for(measured, specification)
         if averaging is None:
             self.data_pane.show_events([])
@@ -16041,7 +16048,10 @@ class MainWindow(QMainWindow):
             first = held[0] if held and held[0] in dofs else dofs[0]
             pairs = [(first, event)]
         self._replication_pairs = pairs
-        if which == 'overlay':
+        if which == 'segments':
+            message = self._render_replication_segments(
+                measured, specification, pairs[0][0], pairs[0][1], lag)
+        elif which == 'overlay':
             message = self._render_events(measured, specification, pairs,
                                           averaging, lag, len(bounds))
         else:
@@ -16055,6 +16065,78 @@ class MainWindow(QMainWindow):
         # plot nor the bar chart above it is ever that
         self._show_replication_table(rows, dofs, every)
         return message + delay
+
+    def _render_replication_segments(self, measured, specification,
+                                     channel, playing, lag):
+        """The run judged segment by segment: one channel over one
+        playing of the reference, the marked segments shaded, the
+        verdict table under the plot and the verdicts in the panel
+        beside it.
+
+        One channel at a time, the first picked, because the judgement
+        is of one trace against one reference; the waveform grid under
+        the plot still holds every channel at every playing. The marks
+        and tolerances are the panel's, and every number is
+        `core.replication_segments.replication_segments`'s.
+        """
+        from ..plot.replication_segments import build_replication_segments
+
+        panel = self.data_pane.segments_panel
+        panel.show()
+        panel.duration = (specification.ordinate.shape[1]
+                          / float(specification.sample_rate))
+        marks = panel.segments()
+        settings = panel.settings()
+        self.data_pane.graphics.clear()
+        try:
+            result = build_replication_segments(
+                self.data_pane.graphics, measured, specification, marks,
+                channel=channel, lag=lag, playing=playing,
+                unit_system=self.unit_system, theme=self.theme_name,
+                **settings)
+        except ValueError as error:
+            # a mark outside the record, or too short to judge: the
+            # reason, and no verdict that would read as one
+            panel.show_result(None)
+            return str(error)
+        panel.show_result(result)
+        self._journal_replication_segments(measured, specification, marks,
+                                           channel, playing, settings)
+        return f'{channel}: {result.describe()}'
+
+    def _journal_replication_segments(self, measured, specification, marks,
+                                      channel, playing, settings):
+        """The segments reading, journaled as the headless call that
+        draws it (`_journal_view`)."""
+        def number(value):
+            # an open edge is written so the line still runs
+            if value == float('inf'):
+                return "float('inf')"
+            if value == float('-inf'):
+                return "-float('inf')"
+            return repr(float(value))
+
+        def pair(values):
+            return f'({number(values[0])}, {number(values[1])})'
+
+        try:
+            run = self.project.name_of(measured)
+            target = self.project.name_of(specification)
+        except (KeyError, ValueError):
+            return
+        given = ', '.join(f'({number(a)}, {number(b)}, {kind!r})'
+                          for a, b, kind in marks)
+        prefix = ('visualdynamics.plot.plot_replication_segments('
+                  f'project[{run!r}], project[{target!r}]')
+        tolerances = ', '.join(
+            f'{key}=' + (pair(value) if isinstance(value, tuple)
+                         else repr(value))
+            for key, value in settings.items())
+        self._journal_view(
+            prefix,
+            f'{prefix}, [{given}], channel={channel!r}, '
+            f'playing={playing!r}, {tolerances}, '
+            "path='replication_segments.png', show=False)")
 
     def _event_chosen(self):
         """The event box moved: same channels, the playing it names.

@@ -47,6 +47,9 @@ THEORY = {
                          'bandwidth and leakage of a window',
     'core.time_statistics': 'the moments, the Gaussian tails, the crossing '
                             'rate and the expected largest peak',
+    'core.replication_segments': 'the averaged periodogram, the shock '
+                                 'response spectrum and the tapered '
+                                 'cosine window each segment is read by',
 }
 
 #: and methods, where the theory lives on the call rather than the module
