@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from ..units import UnitSystem
     from .averaging import Averaging
     from .half_power import HalfPower
+    from .tone_readout import ToneReading
 
 from ..units import (
     SI,
@@ -3430,6 +3431,55 @@ class Psd(_Bands, DataArray):
         return Spectrum(self.abscissa, shapes,
                         response_dof=dofs).animate(
             geometry, frequency, **kwargs)
+
+    def read_tone(self, frequency: float, record: int = 0, *,
+             window: Any = 'hann', snap: bool = True,
+             warn: bool = True) -> ToneReading:
+        """Read the tone near `frequency` off one record of this
+        autospectrum, as an amplitude beside the spike it stands at.
+
+        The lines the tone leaks into, less the floor beside them, times
+        the line spacing, are its mean square whatever the spacing and
+        window; `core.tone_readout.read_tone` does the reading and says
+        how, and `visualdynamics.plot.plot_tone_readout` draws it.
+
+        Parameters
+        ----------
+        frequency : float
+            A frequency at or near the tone, in Hz.
+        record : int, default 0
+            Which record.
+        window : str or Averaging, default 'hann'
+            The window this spectrum was averaged with, or the
+            `Averaging` itself; a project gives the one a computed PSD
+            was made with as `Project.averaging_of`.
+        snap : bool, default True
+            Find the tone's own spike near `frequency`; False reads the
+            lines at `frequency` exactly, as a tone table states it.
+        warn : bool, default True
+            Warn a tone between lines, an uneven floor or no tone as a
+            `ToneWarning`; the notes are on the reading either way.
+
+        Returns
+        -------
+        ToneReading
+            The tone's amplitude in the square root of this spectrum's
+            units (SI, as the spectrum is stored), the spike, the floor
+            and the notes.
+
+        Raises
+        ------
+        ValueError
+            For a spectrum on uneven lines (octave bands) or written at
+            breakpoints, which has no line spacing to undo.
+        """
+        from .tone_readout import read_tone
+        if self.bandwidth is not None or self.interpolation != 'bin':
+            raise ValueError('a tone is read off the evenly spaced lines of '
+                             'an averaged spectrum; this one is banded or '
+                             'written at breakpoints')
+        return read_tone(self.abscissa, self.ordinate[record], frequency,
+                         window=window, snap=snap, warn=warn)
 
     def area(self, record: int = 0, low: float | None = None,
              high: float | None = None) -> float:

@@ -1654,6 +1654,55 @@ class Project(dict):
         return self._derive(source, self[source].compute_psds(),
                             f'{source} PSDs', recipe=('compute_psds', {}))
 
+    def averaging_of(self, name: Any) -> Any:
+        """The `Averaging` a computed spectrum was made with, from its
+        provenance, or None when it records none (an imported spectrum).
+        A spectrum computed from a record with no averaging set was each
+        record whole under a rectangle, and that is what is returned.
+
+        A spectrum does not carry its window, and a tone read off it
+        needs one (`Psd.read_tone`): the window sets how far the tone leaks
+        and how tall its spike stands. The provenance holds the
+        averaging as it was when the spectrum was computed, which is the
+        one that made it even if the record's own has moved since.
+
+        Parameters
+        ----------
+        name : str or object
+            The spectrum, by name or as the object itself.
+
+        Returns
+        -------
+        Averaging or None
+        """
+        from .core.averaging import Averaging
+
+        record = self.provenance.get(self.name_of(name), {})
+        state = record.get('state')
+        if (record.get('verb') not in ('compute_psds', 'compute_cpsds',
+                                       'compute_spectra')
+                or not state or state[0] not in ('averaging',
+                                                 'averaging+roles')):
+            return None
+        settings = state[1]
+        if state[0] == 'averaging+roles' and settings is not None:
+            settings = settings.get('averaging')
+        if not settings:
+            # no averaging set: each record was its own frame, whole and
+            # unwindowed (`TimeHistory._spectral_frame`)
+            source = self.get(record.get('source'))
+            spectrum = self.get(self.name_of(name))
+            samples = (len(source.abscissa) if source is not None
+                       else 2 * (len(spectrum.abscissa) - 1))
+            return Averaging.for_records(samples)
+        known = {key: settings[key] for key in (
+            'frame_length', 'overlap', 'window', 'frames', 'start',
+            'detrend', 'window_parameter') if key in settings}
+        try:
+            return Averaging(**known)
+        except (TypeError, ValueError):
+            return None
+
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:
         """Integrate a spectrum onto proportional octave bands (Compute

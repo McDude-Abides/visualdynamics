@@ -43,6 +43,8 @@ THEORY = {
                        'parabola that places its top between lines',
     'core.shock_check': 'the velocity check a shock record is read '
                         'through before its spectrum',
+    'core.tone_readout': 'a tone read off an autospectrum: the noise '
+                         'bandwidth and leakage of a window',
 }
 
 #: and methods, where the theory lives on the call rather than the module

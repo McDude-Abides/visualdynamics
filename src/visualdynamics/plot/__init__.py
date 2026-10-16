@@ -2874,6 +2874,99 @@ def plot_half_power(data: Any, near: float, record: int = 0, *,
                         size=size)
 
 
+def plot_tone_readout(data: Any, tones: float | Sequence[float],
+                      record: int = 0, *, window: Any = 'hann',
+                      snap: bool = True,
+                      band: tuple[float, float] | None = None,
+                      unit_system: UnitSystem | None = None,
+                      theme: Any = None,
+                      path: str | os.PathLike | None = None,
+                      show: bool = True, title: str | None = None,
+                      size: tuple[int, int] = (1000, 700)) -> Any:
+    """Draw one record of an autospectrum with each tone read off it.
+
+        visualdynamics.plot.plot_tone_readout(asd, [19.44, 38.88],
+                                              path='tones.png')
+
+    The record is drawn as `plot_series` draws it, and each tone in
+    `tones` is read by `Psd.read_tone` and drawn over it by
+    `plot.tone_readout.add_tone_readout`: a stem to the height the
+    spike stands at for this spacing and window, a triangle on it, the
+    floor taken away, and the tone's amplitude beside it with the
+    spike's height under it. A reading that warns (a tone between
+    lines, an uneven floor, no tone) warns as `read_tone` does.
+
+    Parameters
+    ----------
+    data : Psd
+        The averaged autospectrum.
+    tones : float or sequence of float
+        The frequencies to read, in Hz.
+    record : int, default 0
+        Which record of `data`.
+    window : str or Averaging, default 'hann'
+        The window the spectrum was averaged with, or its `Averaging`
+        (`Project.averaging_of` gives a computed one's).
+    snap : bool, default True
+        Find each tone's own spike near its frequency; False reads at
+        the frequencies as given.
+    band : tuple of float, optional
+        The (low, high) frequencies the view shows, in Hz; the whole
+        record when omitted. Tones crowd the left of a wide band.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .tone_readout import add_tone_readout, display_units
+
+    frequencies = ([float(tones)] if np.ndim(tones) == 0
+                   else [float(f) for f in tones])
+    readings = [data.read_tone(f, record, window=window, snap=snap)
+                for f in frequencies]
+    us = DEFAULT_SYSTEM if unit_system is None else unit_system
+    scale, dense, unit = display_units(data, record, us)
+
+    def build(widget: Any) -> Any:
+        build_plots(widget, [(None, data, [record])], unit_system=us,
+                    theme=theme)
+        plot = next(item for item in widget.ci.items
+                    if hasattr(item, 'addItem'))
+        for reading in readings:
+            add_tone_readout(plot, reading, data.abscissa,
+                             color=resolve_theme(theme)['plot_foreground'],
+                             above=True, scale=scale, density_scale=dense,
+                             unit=unit)
+        f = np.asarray(data.abscissa, dtype=np.float64)
+        low, high = ((float(f[0]), float(f[-1])) if band is None
+                     else sorted(float(edge) for edge in band))
+        log_x, log_y = plot.getViewBox().state['logMode']
+        shown = np.abs(np.asarray(data.ordinate[record], dtype=np.float64)
+                       [(f >= low) & (f <= high)]) * dense
+        shown = shown[np.isfinite(shown) & (shown > 0.0 if log_y else True)]
+        if band is not None:
+            plot.setXRange(*((np.log10(max(low, 1e-12)), np.log10(high))
+                             if log_x else (low, high)), padding=0.0)
+        if len(shown) and log_y:
+            # the band's own decades, and two more over the tallest
+            # spike for the words stacked over each triangle
+            plot.setYRange(np.log10(shown.min()) - 0.3,
+                           np.log10(shown.max()) + 2.0, padding=0.0)
+        elif len(shown):
+            plot.setYRange(0.0, 1.6 * shown.max(), padding=0.0)
+
+    spacing = readings[0].spacing if readings else 0.0
+    window_name = readings[0].window if readings else ''
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{data.response_dof[record]}: '
+                                        f'tones at {spacing:.3g} Hz lines, '
+                                        f'{window_name} window'),
+                        size=size)
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:
