@@ -12,6 +12,19 @@ The frame count is stored, not the stop time. Dragging the end of the
 analysis in the GUI adds or removes whole frames, because half a frame
 is not an average.
 
+What an average is worth follows from the same settings. An
+autospectrum averaged over n independent frames is a chi-square
+variable with 2n statistical degrees of freedom (`statistical_dof`):
+two per frame, the real and the imaginary part of each line. Frames
+that overlap are not independent, so the equivalent count is lower, by
+how much the window lets two overlapped frames share
+(`frame_correlation`). From the equivalent count follows the
+confidence band on the estimate (`chi_square_factors`,
+`confidence_bands`): the range the true spectrum lies in, at a stated
+confidence, as a factor below and a factor above the averaged value.
+These degrees of freedom are statistical. They have nothing to do with
+the measurement DOFs (node and direction) a record is taken at.
+
 References
 ----------
 These frames feed Welch's averaged periodogram, and the window choices
@@ -30,15 +43,18 @@ are Harris's.
 3. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The random error of an
    averaged estimate against the number of frames, which is what the
-   frame count sets.
+   frame count sets, and the chi-square confidence interval on an
+   autospectral density estimate.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 #: the windows offered, under scipy's own names (Brandon, 2026-08-28):
 #: the shapes come from `scipy.signal.get_window` now, and a name that
@@ -427,8 +443,232 @@ class Averaging:
             'foot': max(RAIL_TOP - glyph - (count - 1) * slot - RAIL_GAP,
                         0.25)}
 
+    def statistical_dof(self, records: int = 1) -> StatisticalDof:
+        """The statistical degrees of freedom of a spectrum averaged
+        over these frames: `statistical_dof` with this averaging's
+        frame count, window and hop, so a caller cannot pair them
+        wrongly.
+
+        Parameters
+        ----------
+        records : int, optional
+            How many records each channel holds, all cut the same way
+            and pooled, as a capture saved one record per average is.
+            Separate records share no samples, so each adds its frames'
+            degrees of freedom in full.
+
+        Returns
+        -------
+        StatisticalDof
+            The frames averaged, the nominal 2n and the equivalent
+            count discounted for overlap.
+        """
+        return statistical_dof(self.frames, self.shape(), self.hop,
+                               records=records)
+
     def filled(self, samples: int, sample_rate: float) -> Averaging:
         """This averaging with as many frames as fit in a record of
         `samples` samples, at least one."""
         return replace(self, frames=max(self.most_frames(samples,
                                                          sample_rate), 1))
+
+
+# ---- what an average is worth -------------------------------------------
+
+#: the confidence levels a band is given at when none is asked for:
+#: 90 percent, the usual reading of a test's spectrum, and 95, the
+#: stricter one
+CONFIDENCE_LEVELS = (0.90, 0.95)
+
+
+@dataclass(frozen=True)
+class StatisticalDof:
+    """How many statistical degrees of freedom an averaged autospectrum
+    has.
+
+    `frames` is how many frames were averaged, every record's together.
+    `nominal` is two per frame, 2n, which is the count when no two
+    frames share a sample. `equivalent` is the count discounted for
+    overlap, Welch's: overlapped frames carry part of the same record,
+    so they vary together and an average of them steadies less than
+    the same number of independent frames would. With no overlap the
+    two are equal.
+    """
+
+    frames: int
+    nominal: int
+    equivalent: float
+
+
+def frame_correlation(shape: ArrayLike, hop: int, apart: int = 1) -> float:
+    """How much two frames `apart` hops from each other share, as their
+    window sees it: 0 for frames that do not overlap, 1 for a frame and
+    itself.
+
+    `shape` is the window, one value per sample of a frame, and `hop`
+    is the samples from one frame's start to the next
+    (`Averaging.hop`). The value is the window's overlap correlation,
+    the sum over the shared samples of one frame's weight times the
+    other's, over the sum of the weights squared. It is the number
+    Harris tabulates for each window: a Hann window at half overlap
+    gives 1/6, about 0.167, a rectangle at half overlap 0.5.
+    """
+    weights = np.asarray(shape, dtype=float)
+    length = len(weights)
+    shift = int(hop) * int(apart)
+    if shift < 0:
+        raise ValueError('frames are apart by a whole number of hops, '
+                         'zero or more')
+    if shift >= length:
+        return 0.0
+    power = float(np.sum(weights ** 2))
+    if power == 0.0:
+        raise ValueError('a window of zeros weighs nothing')
+    return float(np.sum(weights[:length - shift] * weights[shift:]) / power)
+
+
+def statistical_dof(frames: int, shape: ArrayLike, hop: int,
+                    records: int = 1) -> StatisticalDof:
+    """The statistical degrees of freedom of an autospectrum averaged over
+    `frames` frames of the window `shape`, each `hop` samples after the
+    last, in each of `records` records.
+
+    The nominal count is two per frame. The equivalent count is Welch's
+    for overlapped frames: the variance of the average is the variance
+    of independent frames times
+
+        1 + 2 * sum over j of (1 - j/n) * c(j)**2
+
+    where n is the frame count and c(j) is the window's correlation
+    between frames j hops apart (`frame_correlation`), and the
+    equivalent count is 2n over that factor. Only the lags at which two
+    frames still share samples contribute. Records are separate pieces
+    of signal and share nothing, so each adds its frames' count in full.
+
+    The count is that of a line between zero and the Nyquist frequency.
+    The line at zero (and at Nyquist, for an even frame) is real, so it
+    carries one degree of freedom per frame rather than two. Taking out
+    each frame's mean or trend costs the lowest lines a little more.
+    Neither is folded in here: the count is the one the spectrum's
+    interior lines have, which is where the band is read.
+    """
+    # Welch (1967) gives the factor for any window and overlap; the
+    # Harris (1978) correlations are its c(j) for the common windows.
+    # The textbook ratio for Hann at half overlap (about 0.95 of 2n for
+    # many frames) is this formula's limit, not a constant to store.
+    frames, hop, records = int(frames), int(hop), int(records)
+    if frames < 1:
+        raise ValueError('an average needs at least one frame')
+    if records < 1:
+        raise ValueError('an average needs at least one record')
+    if hop < 1:
+        raise ValueError('frames start at least one sample apart')
+    weights = np.asarray(shape, dtype=float)
+    spread = 1.0
+    lag = 1
+    while lag < frames and lag * hop < len(weights):
+        shared = frame_correlation(weights, hop, lag)
+        spread += 2.0 * (1.0 - lag / frames) * shared ** 2
+        lag += 1
+    return StatisticalDof(frames=frames * records,
+                          nominal=2 * frames * records,
+                          equivalent=records * 2.0 * frames / spread)
+
+
+def chi_square_factors(dof: float, level: float = 0.90
+                       ) -> tuple[float, float]:
+    """(lower, upper): the factors the true spectrum lies between, as
+    multiples of an estimate with `dof` statistical degrees of freedom,
+    at confidence `level`.
+
+    An averaged autospectrum is the true one times a chi-square variable
+    over its degrees of freedom, so the true value lies between
+    dof / chi2(1 - a/2) and dof / chi2(a/2) times the estimate, where a
+    is one minus the level and chi2(p) is the chi-square quantile at p.
+    The band is not symmetric: the factor above is the larger, in
+    decibels as well as in ratio, because an average of few frames
+    reads low more often than it reads high. `dof` need not be a whole
+    number, since an equivalent count seldom is.
+
+    Examples: at two degrees of freedom (one frame) the 90 percent band
+    runs from 0.334 to 19.5 times the estimate; at 120 it runs from
+    0.819 to 1.25.
+    """
+    # The quantile is scipy's regularized incomplete gamma inverse,
+    # chi2(p) = 2 * gammaincinv(dof / 2, p), which is exact for any dof;
+    # the Wilson-Hilferty cube-root approximation is good to a few
+    # percent above ten degrees of freedom and poor below, which is
+    # exactly where a band matters most.
+    from scipy.special import gammaincinv
+
+    dof, level = float(dof), float(level)
+    if not dof > 0.0:
+        raise ValueError('degrees of freedom are more than zero')
+    if not 0.0 < level < 1.0:
+        raise ValueError('a confidence level is a fraction between 0 and 1')
+    tail = (1.0 - level) / 2.0
+    high_quantile = 2.0 * float(gammaincinv(dof / 2.0, 1.0 - tail))
+    low_quantile = 2.0 * float(gammaincinv(dof / 2.0, tail))
+    return dof / high_quantile, dof / low_quantile
+
+
+@dataclass(frozen=True)
+class ConfidenceBand:
+    """Where the true spectrum lies about an averaged estimate, at one
+    confidence level.
+
+    `level` is the confidence, such as 0.9. `dof` is the statistical
+    degrees of freedom the band was worked out at. `lower_factor` and
+    `upper_factor` are the multiples of the estimate the band runs
+    between (`chi_square_factors`), and `lower` and `upper` are the
+    band itself: the estimate times each factor, the same shape and in
+    the same units as the estimate it was given.
+    """
+
+    level: float
+    dof: float
+    lower_factor: float
+    upper_factor: float
+    lower: np.ndarray
+    upper: np.ndarray
+
+    @property
+    def lower_db(self) -> float:
+        """The band's lower edge in decibels from the estimate, a
+        negative number (ten times the log of the factor, as for any
+        power quantity)."""
+        return 10.0 * float(np.log10(self.lower_factor))
+
+    @property
+    def upper_db(self) -> float:
+        """The band's upper edge in decibels from the estimate, a
+        positive number."""
+        return 10.0 * float(np.log10(self.upper_factor))
+
+
+def confidence_bands(estimate: ArrayLike, dof: float,
+                     levels: Sequence[float] = CONFIDENCE_LEVELS
+                     ) -> list[ConfidenceBand]:
+    """The chi-square confidence band on an averaged autospectrum, one
+    per level in `levels`, 90 and 95 percent by default.
+
+    `estimate` is the averaged spectrum's values, any shape, and is not
+    converted: the band comes back in whatever units it was given,
+    because each edge is the estimate times a pure number. `dof` is the
+    statistical degrees of freedom the estimate was averaged to,
+    normally the equivalent count from `statistical_dof`. The band
+    belongs to an autospectrum (a PSD, or the squared magnitude of a
+    spectrum), not to a cross-spectrum or a transfer function, whose
+    errors follow other laws.
+    """
+    values = np.asarray(estimate)
+    if np.iscomplexobj(values):
+        raise ValueError('a chi-square band is on a power, which is '
+                         'real; this estimate is complex')
+    out = []
+    for level in levels:
+        low, high = chi_square_factors(dof, level)
+        out.append(ConfidenceBand(level=float(level), dof=float(dof),
+                                  lower_factor=low, upper_factor=high,
+                                  lower=values * low, upper=values * high))
+    return out

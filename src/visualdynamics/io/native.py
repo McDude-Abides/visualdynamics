@@ -383,6 +383,13 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     # midpoints between its own lines
     if getattr(data, 'bandwidth', None) is not None:
         group.create_dataset('bandwidth', data=np.asarray(data.bandwidth))
+    # what each record's average is worth. It travels because it cannot
+    # be worked out from the spectrum: the frames it came from are the
+    # source history's, which may have been re-framed since or deleted
+    if getattr(data, 'statistical_dof', None) is not None:
+        group.create_dataset('statistical_dof',
+                             data=np.asarray(data.statistical_dof,
+                                             dtype=float))
     found = getattr(data, 'shocks', None)
     if found:
         group.create_dataset('shocks', data=np.array(
@@ -467,6 +474,8 @@ def load_data(group: h5py.Group) -> DataArray:
         data.band_constraints = json.loads(str(group.attrs['band_constraints']))
     if 'scale_db' in group.attrs:
         data.scale_db = int(group.attrs['scale_db'])
+    if 'statistical_dof' in group:
+        data.statistical_dof = group['statistical_dof'][()]
     averaging = _load_averaging(group)
     if averaging is not None:
         data.averaging = averaging

@@ -145,6 +145,9 @@ Present only where they mean something:
             limit_<name>      a specification's warning and abort lines
             bandwidth         band widths, where the bins are not the
                               midpoints between lines (octave bands)
+            statistical_dof   a PSD's statistical degrees of freedom,
+                              one per record, where it was computed
+                              from a time history
             shocks            (start, duration) rows, where events were marked
             roles             strings, DOF, quantity and role in threes,
                               flat: each channel's role (reference,

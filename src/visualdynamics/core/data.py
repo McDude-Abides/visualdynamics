@@ -801,6 +801,11 @@ class DataArray:
                 setattr(self, name, [values[i] for i in keep])
         for name, values in getattr(self, 'limits', {}).items():
             self.limits[name] = values[keep]
+        # a PSD's degrees of freedom are per record, and left whole they
+        # would describe the wrong channels' averages
+        counts = getattr(self, 'statistical_dof', None)
+        if counts is not None:
+            self.statistical_dof = np.asarray(counts)[keep]
         if self.block is not None:
             # repeated-measurement labels renumber to contiguous —
             # 'avg 1, avg 3' after deleting the second capture is a
@@ -1490,6 +1495,22 @@ class TimeHistory(DataArray):
             return own
         return found
 
+    def _resolved_averaging(self, averaging=None):
+        """The averaging a computation given `averaging` actually uses:
+        that one, else the record's own, else one whole frame per record.
+
+        One statement of the fallback, read by the framing and by the
+        degrees of freedom a PSD is stamped with, so the count cannot
+        describe frames other than the ones averaged.
+        """
+        from .averaging import Averaging
+
+        if averaging is None:
+            averaging = self.averaging
+        if averaging is None:
+            averaging = Averaging.for_records(len(self.abscissa))
+        return averaging
+
     def _spectral_frame(self, averaging=None):
         """(frequencies, one-sided scale, channel -> windowed frames).
 
@@ -1508,15 +1529,10 @@ class TimeHistory(DataArray):
         which is `n` for a rectangle — so the two paths agree exactly
         where they overlap.
         """
-        from .averaging import Averaging
-
-        if averaging is None:
-            averaging = self.averaging
         step = _even_steps(self.abscissa, 'Computing PSDs')
         fs = 1.0 / step
         samples = len(self.abscissa)
-        if averaging is None:
-            averaging = Averaging.for_records(samples)
+        averaging = self._resolved_averaging(averaging)
         if not averaging.fits(samples, fs):
             most = averaging.most_frames(samples, fs)
             raise ValueError(
@@ -1998,6 +2014,11 @@ class TimeHistory(DataArray):
         'acceleration**2/frequency'; a channel with undefined units stays
         undefined, with its hint squared the same way.
 
+        Each channel's statistical degrees of freedom, discounted for
+        overlap (`Averaging.statistical_dof`), are stored on the result
+        as `Psd.statistical_dof`, so the PSD can say what its average
+        is worth (`Psd.confidence_band`) without the history beside it.
+
         Parameters
         ----------
         averaging : Averaging, optional
@@ -2017,7 +2038,8 @@ class TimeHistory(DataArray):
             fit in the record.
         """
         frequencies, scale, groups = self._spectral_frame(averaging)
-        rows, dofs, dims, hints = [], [], [], []
+        used = self._resolved_averaging(averaging)
+        rows, dofs, dims, hints, counts = [], [], [], [], []
         for (dof, dim, hint), windowed in groups.items():
             frames = scipy_fft.rfft(workers=-1, x=windowed, axis=1)
             rows.append(np.mean(np.abs(frames) ** 2, axis=0) * scale)
@@ -2025,6 +2047,11 @@ class TimeHistory(DataArray):
             dims.append(f'{dim}**2/frequency' if dim != UNKNOWN
                         else UNKNOWN)
             hints.append(f'{hint}**2/frequency' if hint else None)
+            # each of the channel's records was cut into the same
+            # frames and pooled, so the count is per channel: a history
+            # put together from unequal captures has unequal counts
+            records = len(windowed) // used.frames
+            counts.append(used.statistical_dof(records=records).equivalent)
         out = self.psd_type()(
             frequencies, np.asarray(rows, dtype=np.float64),
             response_dof=dofs, ordinate_dim=dims,
@@ -2033,6 +2060,7 @@ class TimeHistory(DataArray):
         # it came back as — the PSD of a target is a Specification, and
         # a Specification is otherwise a power law through breakpoints
         out.interpolation = 'bin'
+        out.statistical_dof = np.asarray(counts, dtype=np.float64)
         return out
 
     def psd_type(self) -> type[Psd]:
@@ -3217,6 +3245,84 @@ class Psd(_Bands, DataArray):
     #: so the curves, the error bars and the table cannot disagree
     #: about what was compared.
     scale_db: int | None = None
+
+    #: The statistical degrees of freedom of each record's average,
+    #: discounted for overlap (`core.averaging.statistical_dof`): one
+    #: number per record, or None when nothing says how the spectrum
+    #: was averaged. `TimeHistory.compute_psds` sets it. A spectrum
+    #: read from a file, banded onto octaves or merged from several
+    #: has none, because its count is not the one its source frames
+    #: had: banding sums lines and raises it, and a guess would draw a
+    #: band the data does not have. These are statistical degrees of
+    #: freedom, not the measurement DOFs in `response_dof`.
+    statistical_dof: np.ndarray | None = None
+
+    def confidence_band(self, level: float = 0.90,
+                        dof: float | ArrayLike | None = None
+                        ) -> tuple[Psd, Psd]:
+        """The chi-square confidence band on this averaged spectrum: two
+        PSDs, the band's lower and upper edges, in this spectrum's units.
+
+        Each record's edges are its values times the factors
+        `core.averaging.chi_square_factors` gives at its degrees of
+        freedom, so the band follows the spectrum line for line, and on
+        log axes it is the spectrum moved down and up by a fixed number
+        of decibels. The true spectrum lies inside it at the stated
+        confidence, line by line.
+
+        Parameters
+        ----------
+        level : float, optional
+            The confidence, a fraction: 0.90 by default, 0.95 for the
+            stricter band.
+        dof : float or array-like, optional
+            The statistical degrees of freedom, one number for every
+            record or one per record. Defaults to `statistical_dof`.
+
+        Returns
+        -------
+        tuple of (Psd, Psd)
+            The lower edge and the upper edge, each with this
+            spectrum's records, units and lines.
+
+        Raises
+        ------
+        ValueError
+            If the spectrum carries no degrees of freedom and none are
+            given, if it holds cross terms (whose error is not
+            chi-square), or if a count or the level is out of range.
+        """
+        # A cross term's magnitude has a different error law, and a
+        # band drawn on it as if chi-square would be a claim nobody
+        # computed. Refused rather than skipped, so the caller knows.
+        from .averaging import chi_square_factors
+
+        if self.reference_dof is not None and any(
+                r != d for r, d in zip(self.reference_dof,
+                                       self.response_dof)):
+            raise ValueError('a chi-square band is on an autospectrum; '
+                             'this PSD holds cross terms')
+        counts = self.statistical_dof if dof is None else dof
+        if counts is None:
+            raise ValueError(
+                'this PSD does not say what it was averaged over; pass '
+                'dof, or compute it from a time history')
+        counts = np.broadcast_to(np.asarray(counts, dtype=float),
+                                 (self.num_records,))
+        values = np.real(self.ordinate)
+        factors = np.array([chi_square_factors(n, level) for n in counts])
+        edges = []
+        for column, word in ((0, 'lower'), (1, 'upper')):
+            fields = self.record_fields()
+            fields['comment'] = [f'{level:.0%} {word} bound'] * self.num_records
+            edge = Psd(self.abscissa.copy(),
+                       values * factors[:, column][:, None],
+                       bandwidth=(None if self.bandwidth is None
+                                  else np.array(self.bandwidth)),
+                       **fields)
+            edge.interpolation = self.interpolation
+            edges.append(edge)
+        return edges[0], edges[1]
 
     def principal_shapes(self, quantity: str | None = None
                          ) -> tuple[list[str], np.ndarray, str]:
