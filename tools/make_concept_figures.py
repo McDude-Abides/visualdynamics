@@ -318,6 +318,79 @@ def srs_tolerance():
               f'{result["inside_count"]}/{result["points"]} inside, '
               f'worst {result["worst_db"]:+.1f} dB at '
               f'{result["worst_frequency"]:.0f} Hz, passed {result["passed"]}')
+def shock_check():
+    """A shock record checked before its spectrum: a ringing shock with
+    a 4 g zero shift from the moment it arrives, and a compensated
+    half-sine whose two spectra part above the pulse."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.shock_check import check_shock
+    from visualdynamics.plot import plot_shock_check
+    from visualdynamics.units import IN_LBF_S
+
+    g = 9.80665
+    rate = 102400.0
+    shown = IN_LBF_S.with_units(acceleration='g')
+    t = np.arange(int(0.25 * rate)) / rate
+
+    def record(values):
+        return TimeHistory(t, values[None], response_dof=['101Z+'],
+                           ordinate_dim=['acceleration'])
+
+    # four decaying tones from 600 Hz to 6 kHz arriving at 20 ms, the
+    # ringing a structure answers a pyrotechnic event with. Each is the
+    # rate of change of a decaying sine velocity, so the motion it
+    # describes starts and ends at rest, as a structure's does
+    after = np.clip(t - 0.02, 0.0, None)
+
+    def tone(f, level, decay):
+        w = 2 * np.pi * f
+        return level * np.exp(-after / decay) * (
+            np.cos(w * after) - np.sin(w * after) / (w * decay))
+
+    ringing = sum(tone(f, level, decay)
+                  for f, level, decay in ((600.0, 120.0, 0.012),
+                                          (1500.0, 200.0, 0.008),
+                                          (3000.0, 160.0, 0.005),
+                                          (6000.0, 110.0, 0.003)))
+    ringing = np.where(t >= 0.02, ringing, 0.0) * g
+    noise = 0.05 * g * np.random.default_rng(11).standard_normal(t.size)
+    shift = np.where(t >= 0.02, 4.0 * g, 0.0)
+    for name, values in (('good', ringing + noise),
+                         ('shifted', ringing + noise + shift)):
+        history = record(values)
+        check, = check_shock(history)
+        print(f'{name:>8}: ends at {check.end_velocity / 0.0254:7.2f} in/s, '
+              f'{100 * check.end_velocity_share:5.1f} % of its peak, '
+              f'{"flagged" if check.flagged else "passes"}')
+        if name == 'shifted':
+            plot_shock_check(history, low=10.0, high=10000.0,
+                             unit_system=shown, show=False,
+                             size=(1000, 900),
+                             path=str(OUT / 'shock-check-shifted.png'))
+
+    # a 50 g, 11 ms half-sine with a 2.5 g half-sine either side, each
+    # carrying half its area: the shaker's compensated pulse
+    duration, peak, depth = 0.011, 50.0 * g, 2.5 * g
+    compensation = peak * duration / (2.0 * depth)
+    opens = 0.125 - duration / 2.0
+
+    def half_sine(start, height, length):
+        inside = (t >= start) & (t <= start + length)
+        return np.where(inside,
+                        height * np.sin(np.pi * (t - start) / length), 0.0)
+
+    pulse = (half_sine(opens, peak, duration)
+             + half_sine(opens - compensation, -depth, compensation)
+             + half_sine(opens + duration, -depth, compensation))
+    history = record(pulse)
+    check, = check_shock(history)
+    print(f'compensated: change {check.velocity_change / 0.0254:.1f} in/s, '
+          f'ends at {100 * check.end_velocity_share:.4f} % of its peak')
+    plot_shock_check(history, low=10.0, high=10000.0, unit_system=shown,
+                     show=False, size=(1000, 900),
+                     path=str(OUT / 'shock-check-compensated.png'))
 
 
 def main():
@@ -327,6 +400,7 @@ def main():
     sine_tracking()
     sine_tracking_band()
     srs_tolerance()
+    shock_check()
     print('done')
 
 

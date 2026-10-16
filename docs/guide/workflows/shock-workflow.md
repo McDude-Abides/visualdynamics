@@ -75,6 +75,13 @@ integrates twice.
 
 ### 3. Compute the shock response spectra
 
+Before computing, read the velocity check under the SRS settings in
+the Shocks view: every acceleration channel integrated to velocity with
+nothing removed, over every window. A record whose velocity does not
+come back to rest carries a zero shift or an offset, and its spectrum
+is false at the low end; [Checking a shock record before its
+spectrum](../shock-check.md) says how to read it.
+
 Press Compute SRS in the Shocks view. It computes one SRS per
 channel per event, at the **Q** (10 by default, 5 % damping), **Peak**
 (maximax, positive or negative) and **Per octave** spacing (12 by

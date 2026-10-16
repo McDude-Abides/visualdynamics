@@ -36,6 +36,8 @@ that is not an alpha.
   and its tolerance band
 - [Judging an SRS against its tolerance](srs-tolerance.md): the band,
   the count of points inside it, and the rule applied to the count
+- [Checking a shock record before its spectrum](shock-check.md): the
+  velocity integrated raw, and the positive and negative spectra
 - [The sine sweep workflow](workflows/sine-workflow.md): tones tracked
   through a sweep and compared with the requirement
 - [The random and sine workflow](workflows/mixed-workflow.md): a sweep
