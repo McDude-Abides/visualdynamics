@@ -403,6 +403,25 @@ def _draw_octave(painter, color):
                          QPointF(right, 26 if top == 38 else 33))
 
 
+def _draw_tone(painter, color):
+    """A spike standing on a flat floor, a triangle on its top.
+
+    What the button puts on the plot, in miniature: the floor runs
+    level, the tone stands as one narrow spike, and the reading's
+    triangle sits on it at the height the spacing and window give.
+    """
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(_pen(faint, 3))
+    painter.drawLine(QPointF(6, 48), QPointF(58, 48))
+    painter.setPen(_pen(color, 4))
+    painter.drawPolyline([QPointF(26, 48), QPointF(30, 22),
+                          QPointF(34, 22), QPointF(38, 48)])
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    painter.drawPolygon([QPointF(24, 9), QPointF(40, 9), QPointF(32, 20)])
+
+
 def _draw_truncate(painter, color):
     """A trace with its ends grayed away behind two cut lines.
 
@@ -1930,6 +1949,7 @@ def control_icon(name: str) -> QIcon:
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,
      'kurtosis': _draw_kurtosis, 'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,
+     'tone': _draw_tone,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,

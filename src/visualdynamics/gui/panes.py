@@ -49,6 +49,7 @@ from .rigid_panel import RigidBodyPanel
 from .shock_panel import ShockPanel
 from .sine_panel import SinePanel
 from .srs_tolerance_panel import SrsTolerancePanel
+from .tone_panel import TonePanel
 from .toolbars import fence, shows_anything, tidy
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
@@ -175,6 +176,8 @@ class DataPane(QWidget):
     truncate_toggled = Signal(bool)
     #: the octave-band view was asked for (True) or put away (False)
     octave_toggled = Signal(bool)
+    #: the tone readout was asked for (True) or put away (False)
+    tone_toggled = Signal(bool)
     #: the fit's residual CMIF was toggled
     residual_toggled = Signal(bool)
     shocks_toggled = Signal(bool)
@@ -226,6 +229,7 @@ class DataPane(QWidget):
         self.sine_wanted: bool = False
         self.truncate_wanted: bool = False
         self.octave_wanted: bool = False
+        self.tone_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
         #: and the scalogram, the same way
@@ -301,6 +305,8 @@ class DataPane(QWidget):
         self.truncate_panel.hide()
         self.octave_panel: OctavePanel = OctavePanel()
         self.octave_panel.hide()
+        self.tone_panel: TonePanel = TonePanel()
+        self.tone_panel.hide()
         self.wavelet_panel: WaveletPanel = WaveletPanel()
         self.wavelet_panel.hide()
         self.wavelet_panel.changed.connect(self._wavelet_edited)
@@ -333,6 +339,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.truncate_panel)
         plot_row.addWidget(self.octave_panel)
         plot_row.addWidget(self.srs_tolerance_panel)
+        plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.wavelet_panel)
 
         layout = QVBoxLayout(self)
@@ -747,6 +754,19 @@ class DataPane(QWidget):
             'over the narrowband it comes from')
         self.octave_action.triggered.connect(self._choose_octave)
         toolbar.addAction(self.octave_action)
+        # and the tone read off it: a cursor on the spectrum, the tone
+        # under it read as an amplitude beside the spike it stands at,
+        # in the pane. A reading of the spectrum as it is, so a toggle
+        # with no act, like the octave preview before its button
+        self.tone_action: QAction = QAction(control_icon('tone'), 'Tones',
+                                            self)
+        self.tone_action.setCheckable(True)
+        self.tone_action.setToolTip(
+            'Read the tone under a cursor on the spectrum: its amplitude '
+            'summed from the lines it leaks into, beside the height of '
+            'its spike, which moves with the line spacing and the window')
+        self.tone_action.triggered.connect(self._choose_tone)
+        toolbar.addAction(self.tone_action)
         # ---- and out of the fence again -----------------------------
         # the fit's residual CMIF: what is left after the confirmed
         # modes are taken out — the curve Find Mode hunts. A plot
@@ -791,7 +811,7 @@ class DataPane(QWidget):
         fence(toolbar, [
             self.plot_mode_group.actions(),
             [self.waterfall_action],
-            [self.octave_action],
+            [self.octave_action, self.tone_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -904,6 +924,13 @@ class DataPane(QWidget):
         if not checked:
             self.octave_panel.hide()
         self.octave_toggled.emit(checked)
+
+    def _choose_tone(self, checked: bool) -> None:
+        """The tones button: remember it, then say so."""
+        self.tone_wanted = bool(checked)
+        if not checked:
+            self.tone_panel.hide()
+        self.tone_toggled.emit(checked)
 
     def _choose_reading(self, checked: bool) -> None:
         """The kurtosis or the wavelet button: a different *reading* of
@@ -1186,6 +1213,13 @@ class DataPane(QWidget):
         """Whether the octave-band view is checked. It applies only to
         a plain PSD or CPSD, so the caller checks that first."""
         return self.octave_action.isChecked()
+
+    @property
+    def showing_tone(self) -> bool:
+        """Whether the tone readout is checked. It applies only to a
+        plain autospectrum on evenly spaced lines, so the caller checks
+        that first."""
+        return self.tone_action.isChecked()
 
     @property
     def showing_truncate(self) -> bool:
@@ -1490,7 +1524,8 @@ class DataPane(QWidget):
                       complex_data: bool, pair: bool,
                       averaging: bool = False, shocks: bool = False,
                       residual: bool = False,
-                      octave: bool = False, sine: bool = False) -> None:
+                      octave: bool = False, sine: bool = False,
+                      tone: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1503,7 +1538,8 @@ class DataPane(QWidget):
         truncate, kurtosis, scalogram), `sine` adds the sine reading to
         them for a record with a sweep specification, and `shocks` offers
         the shock view and kurtosis. `octave` offers the octave bands of a
-        plain density, and `residual` the fit's residual CMIF. The pair,
+        plain density, `tone` the tone readout of a plain autospectrum,
+        and `residual` the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -1585,6 +1621,12 @@ class DataPane(QWidget):
         self.octave_action.setChecked(octave and self.octave_wanted)
         if not octave or not self.octave_wanted:
             self.octave_panel.hide()
+        # and the tone readout to an autospectrum on even lines, which
+        # has a line spacing to undo
+        self.tone_action.setVisible(tone)
+        self.tone_action.setChecked(tone and self.tone_wanted)
+        if not tone or not self.tone_wanted:
+            self.tone_panel.hide()
         self.residual_action.setVisible(residual)
         self.shocks_action.setChecked(shocks and self.shocks_wanted)
         if not shocks or instead:
@@ -1656,6 +1698,7 @@ class DataPane(QWidget):
                        self.averaging_action, self.kurtosis_action,
                        self.shocks_action, self.filter_action,
                        self.truncate_action, self.octave_action,
+                       self.tone_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

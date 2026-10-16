@@ -919,6 +919,11 @@ class MainWindow(QMainWindow):
             lambda _settings: self.render_current())
         self.data_pane.octave_panel.apply_asked.connect(
             self.compute_octave)
+        # the tone readout: the toggle redraws, and a window chosen in
+        # its pane re-reads the tone under the cursor where it stands
+        self.data_pane.tone_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.tone_panel.changed.connect(self._tone_window_chosen)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1013,6 +1018,15 @@ class MainWindow(QMainWindow):
         self.filter_overlays: list[Any] = []
         self.truncation_overlays: list[Any] = []
         self.octave_previews: list[Any] = []
+        #: the tone readout on the plot (`_draw_tone`): the spectrum, the
+        #: cursor, the overlay and how the tone is read; None while the
+        #: reading is not up
+        self._tone: dict[str, Any] | None = None
+        #: a window chosen in the tone pane, by spectrum name, over the
+        #: one its averaging records; and where each spectrum's cursor
+        #: was left, so a redraw finds it where it was
+        self._tone_windows: dict[str, str] = {}
+        self._tone_frequencies: dict[str, float] = {}
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -8493,6 +8507,7 @@ class MainWindow(QMainWindow):
         self._clear_truncation()
         self._refused_comparison = None
         self._clear_octave()
+        self._clear_tone()
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -10902,6 +10917,166 @@ class MainWindow(QMainWindow):
             item.removeItem(curve)
         self.octave_previews = []
 
+    def _tone_source(self, series):
+        """(name, spectrum, records) when the selection is one plain
+        autospectrum the tone readout can read: real, on evenly spaced
+        lines, not banded and not written at breakpoints. None
+        otherwise, which is also what hides the button."""
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if (not isinstance(data, Psd) or isinstance(data, Specification)
+                or data.bandwidth is not None or data.interpolation != 'bin'
+                or self._has_imaginary_part(data, records)
+                or len(data.abscissa) < 8):
+            return None
+        steps = np.diff(np.asarray(data.abscissa, dtype=float))
+        if not np.all(steps > 0) or np.ptp(steps) > 1e-6 * steps.mean():
+            return None
+        return name, data, records
+
+    def _draw_tone(self, name, psd, records):
+        """The tone readout on the flat spectrum: a cursor to drag, the
+        tone under it read and drawn (`plot.tone_readout.ToneOverlay`),
+        and the reading in the pane.
+
+        One record is read, the first on the plot: pick a sub-item in
+        the tree to read another. The window is the one the spectrum's
+        averaging recorded (`Project.averaging_of`) unless one was
+        chosen in the pane, and Hann, said to be assumed, when neither
+        is known. Returns the status line, or None to keep the plot's.
+        """
+        import pyqtgraph as pg
+        from PySide6.QtCore import Qt
+
+        from ..plot.tone_readout import ToneOverlay, display_units
+
+        plot = next((item for item in self.data_pane.graphics.ci.items
+                     if hasattr(item, 'addItem')), None)
+        if plot is None:
+            return None
+        record = int(records[0]) if records else 0
+        panel = self.data_pane.tone_panel
+        averaging = (self.project.averaging_of(name)
+                     if name in self.project else None)
+        chosen = self._tone_windows.get(name)
+        if chosen is not None:
+            window, source = chosen, 'chosen'
+        elif averaging is not None:
+            window, source = averaging.window, 'the averaging'
+        else:
+            window, source = 'hann', 'assumed'
+        panel.set_window(window, source)
+        f = np.asarray(psd.abscissa, dtype=float)
+        frequency = self._tone_frequencies.get(name)
+        if frequency is None or not f[0] <= frequency <= f[-1]:
+            # the tallest line off DC: the tone most worth reading first
+            values = np.abs(np.asarray(psd.ordinate[record]))[1:]
+            frequency = float(f[1 + int(np.nanargmax(values))])
+        log_x = plot.getViewBox().state['logMode'][0]
+        color = resolve_theme(self.theme_name)['plot_foreground']
+        cursor = pg.InfiniteLine(
+            pos=float(np.log10(frequency)) if log_x else frequency,
+            angle=90, movable=True,
+            pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
+        plot.addItem(cursor, ignoreBounds=True)
+        scale, dense, unit = display_units(psd, record, self.unit_system)
+        self._tone = {
+            'name': name, 'psd': psd, 'record': record, 'plot': plot,
+            'cursor': cursor, 'overlay': ToneOverlay(plot, color),
+            'window': (averaging if averaging is not None
+                       and averaging.window == window else window),
+            'scale': scale, 'dense': dense, 'unit': unit,
+            'log_x': log_x, 'reading': None}
+        cursor.sigPositionChanged.connect(self._tone_moved)
+        panel.show()
+        return self._tone_moved()
+
+    def _tone_moved(self, _line=None):
+        """Read the tone under the cursor, draw it, write it in the pane
+        and the status line, and journal the plot that draws it. Returns
+        the status line."""
+        state = self._tone
+        if state is None:
+            return None
+        value = float(state['cursor'].value())
+        frequency = 10.0 ** value if state['log_x'] else value
+        psd, record = state['psd'], state['record']
+        f = psd.abscissa
+        frequency = float(np.clip(frequency, f[0], f[-1]))
+        self._tone_frequencies[state['name']] = frequency
+        panel = self.data_pane.tone_panel
+        channel = str(psd.response_dof[record])
+        try:
+            # warn=False: this reads on every tick of a drag, and the
+            # notes reach the user through the pane and the label
+            reading = psd.read_tone(frequency, record,
+                                    window=state['window'], warn=False)
+        except ValueError as refusal:
+            state['reading'] = None
+            state['overlay'].clear()
+            panel.show_reading(None)
+            message = f'No tone read: {refusal}'
+            self._show_status(message)
+            return message
+        state['reading'] = reading
+        state['overlay'].show(reading, f, scale=state['scale'],
+                              density_scale=state['dense'],
+                              unit=state['unit'])
+        panel.show_reading(reading, channel, scale=state['scale'],
+                           density_scale=state['dense'], unit=state['unit'])
+        self._journal_tone(state, reading)
+        message = f'{channel}: ' + reading.describe(state['unit'],
+                                                    state['scale'])
+        self._show_status(message)
+        return message
+
+    def _tone_window_chosen(self, window):
+        """A window picked in the tone pane: kept for this spectrum and
+        the tone under the cursor read again under it."""
+        state = self._tone
+        if state is None:
+            return
+        self._tone_windows[state['name']] = window
+        averaging = self.project.averaging_of(state['name']) \
+            if state['name'] in self.project else None
+        state['window'] = (averaging if averaging is not None
+                           and averaging.window == window else window)
+        self._tone_moved()
+
+    def _journal_tone(self, state, reading):
+        """The tone reading, journaled as the headless call that draws
+        it (`_journal_view`), at the tone as read."""
+        name = state['name']
+        if name not in self.project:
+            return
+        window = state['window']
+        given = (f'project.averaging_of({name!r})'
+                 if not isinstance(window, str) else repr(window))
+        prefix = f'visualdynamics.plot.plot_tone_readout(project[{name!r}]'
+        self._journal_view(
+            prefix,
+            f'{prefix}, {round(reading.frequency, 4)!r}, '
+            f'record={state["record"]}, window={given}, '
+            "path='tones.png', show=False)")
+
+    def _clear_tone(self):
+        """Take the cursor and the overlay off, before every drawing,
+        like every other preview."""
+        state, self._tone = self._tone, None
+        if state is None:
+            return
+        try:
+            state['cursor'].sigPositionChanged.disconnect(self._tone_moved)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            state['overlay'].remove()
+            state['plot'].removeItem(state['cursor'])
+        except RuntimeError:
+            # the plot went with the drawing it belonged to
+            pass
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -11291,6 +11466,8 @@ class MainWindow(QMainWindow):
                                      and bool(self.project.sine_sweep_specifications),
                                      shocks=history is not None,
                                      octave=self._octave_source(series)
+                                     is not None,
+                                     tone=self._tone_source(series)
                                      is not None)
         if history is not None and self.data_pane.showing_wavelet:
             return self._render_wavelet(history, series[0][0],
@@ -11538,8 +11715,12 @@ class MainWindow(QMainWindow):
         # either view (Brandon, 2026-08-23) — so only the animation
         # cursor still outranks the toggle: an ODS is driven from the
         # flat plot's cursor and has no 3-D reading
+        # and the tone readout's cursor, the same way: the tone is read
+        # off the flat spectrum's lines, under a line the user drags
+        toning = (self._tone_source(series) is not None
+                  and self.data_pane.showing_tone)
         offered = (entry is not None and not pairs and not lone_fed
-                   and not cursor
+                   and not cursor and not toning
                    and self._waterfall_count(entry) >= 1)
         # a stage offered upstream stays offered: this flat pass is the
         # toggle standing down, and recomputing visibility here hid the
@@ -11618,6 +11799,9 @@ class MainWindow(QMainWindow):
         banded_source = self._octave_source(series)
         if banded_source is not None and self.data_pane.showing_octave:
             self._draw_octave(banded_source, series[0][2])
+        toned = self._tone_source(series)
+        if toned is not None and self.data_pane.showing_tone:
+            message = self._draw_tone(*toned) or message
         return message + axis_note
 
     def _paged_series(self, series, entry, pairs, lone_fed):
