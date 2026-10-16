@@ -52,6 +52,7 @@ from numpy.typing import ArrayLike
 if TYPE_CHECKING:
     from ..units import UnitSystem
     from .averaging import Averaging
+    from .half_power import HalfPower
 
 from ..units import (
     SI,
@@ -2747,6 +2748,38 @@ class Spectrum(DataArray):
         from ..viz.animate import animate_ods
         return animate_ods(geometry, self, frequency=frequency, **kwargs)
 
+    def half_power(self, near: float, record: int = 0, *,
+                   within: tuple[float, float] | None = None,
+                   warn: bool = True) -> HalfPower:
+        """Read Q from the half-power width of the peak nearest `near`
+        on one record's magnitude.
+
+        `core.half_power.read_half_power` does the reading and says how;
+        `visualdynamics.plot.plot_half_power` draws it on the record.
+
+        Parameters
+        ----------
+        near : float
+            A frequency on the peak to read, in Hz.
+        record : int, default 0
+            Which record.
+        within : tuple of float, optional
+            A (low, high) band in Hz whose tallest line is the peak.
+        warn : bool, default True
+            Warn a missing crossing or too few lines across the peak as
+            a `HalfPowerWarning`; the notes are on the reading either
+            way.
+
+        Returns
+        -------
+        HalfPower
+            The peak's frequency and height (in SI, as the record is
+            stored), its half-power crossings, Q and damping ratio.
+        """
+        from .half_power import read_half_power
+        return read_half_power(self.abscissa, self.ordinate[record], near,
+                               within=within, warn=warn)
+
 
 class Frf(DataArray):
     """Frequency response function: response per unit reference.
@@ -2813,6 +2846,38 @@ class Frf(DataArray):
         """
         from ..plot import plot_cmif
         return plot_cmif(self, shapes, **kwargs)
+
+    def half_power(self, near: float, record: int = 0, *,
+                   within: tuple[float, float] | None = None,
+                   warn: bool = True) -> HalfPower:
+        """Read Q from the half-power width of the peak nearest `near`
+        on one record's magnitude.
+
+        `core.half_power.read_half_power` does the reading and says how;
+        `visualdynamics.plot.plot_half_power` draws it on the record.
+
+        Parameters
+        ----------
+        near : float
+            A frequency on the peak to read, in Hz.
+        record : int, default 0
+            Which record.
+        within : tuple of float, optional
+            A (low, high) band in Hz whose tallest line is the peak.
+        warn : bool, default True
+            Warn a missing crossing or too few lines across the peak as
+            a `HalfPowerWarning`; the notes are on the reading either
+            way.
+
+        Returns
+        -------
+        HalfPower
+            The peak's frequency and height (in SI, as the record is
+            stored), its half-power crossings, Q and damping ratio.
+        """
+        from .half_power import read_half_power
+        return read_half_power(self.abscissa, self.ordinate[record], near,
+                               within=within, warn=warn)
 
     def animate(self, geometry: Any, frequency: float | None = None,
                 **kwargs: Any) -> Any:

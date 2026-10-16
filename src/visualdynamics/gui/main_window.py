@@ -138,6 +138,7 @@ from ..plot import (
     pair_label,
     specification_pairs,
 )
+from ..plot.half_power import HalfPowerOverlay
 from ..rotate import (
     angle_in_plane,
     angles_of,
@@ -1221,6 +1222,10 @@ class MainWindow(QMainWindow):
         self._fit_cursor = None
         self._fit_parabola = None
         self._fit_damping_label = None
+        #: the half-power reading of the peak under the cursor, drawn
+        #: (`plot.half_power.HalfPowerOverlay`) and its last reading
+        self._fit_half_power = None
+        self._fit_reading = None
         self._fit_coherence_name = None
         #: what the plot's top and bottom edges mean as damping, kept
         #: across fits — an article's plausible range rarely changes
@@ -14374,6 +14379,13 @@ class MainWindow(QMainWindow):
             color='#e5534b', anchor=(-0.15, 0.0))
         self._fit_damping_label.setZValue(41)
         plot.addItem(self._fit_damping_label, ignoreBounds=True)
+        # the half-power reading of the peak the cursor is on: the
+        # 0.707 level, its crossings and the Q they give, in the
+        # cursor's red like the rest of what follows the cursor. It is
+        # the curve's own width, beside the damping the fit searched,
+        # and the two disagreeing is worth seeing (a close pair, a
+        # shoulder)
+        self._fit_half_power = HalfPowerOverlay(plot, '#e5534b')
         self._move_fit_parabola()
         self._build_fit_range_edits(plot)
         plot.getViewBox().sigXRangeChanged.connect(self._fit_view_moved)
@@ -14401,10 +14413,12 @@ class MainWindow(QMainWindow):
                       if session.pending['overridden'] else ''))
         weighted = (f' (weighted by {self._fit_coherence_name})'
                     if self._fit_coherence_name else '')
+        reading = ('' if self._fit_reading is None
+                   else f'; half-power {self._fit_reading.describe()}')
         self._show_status(
             f'Fitting {self.fit_name}{weighted}: cursor at '
             f"{session.pending['frequency']:.2f} Hz, {damping} — {state} "
-            f'({fitted} mode{"s" * (fitted != 1)} confirmed)')
+            f'({fitted} mode{"s" * (fitted != 1)} confirmed){reading}')
 
     def _fit_view_moved(self):
         """Zooming carries the cursor with it, rather than leaving it
@@ -14502,6 +14516,20 @@ class MainWindow(QMainWindow):
             return
         frequencies, values = self.fit.pending_curve(self.unit_system)
         self._fit_parabola.setData(frequencies, values)
+        if self._fit_half_power is not None:
+            # warn=False: this reads on every tick of a drag, and the
+            # notes reach the user through the label and the status line
+            try:
+                self._fit_reading = self.fit.half_power(
+                    unit_system=self.unit_system, warn=False)
+            except ValueError:
+                # a curve the reading refuses (frequencies out of order,
+                # which a data array may hold) has no readout, and a
+                # drag handler must not raise over a display
+                self._fit_reading = None
+                self._fit_half_power.clear()
+            else:
+                self._fit_half_power.show(self._fit_reading)
         if self._fit_damping_label is not None:
             crown = int(np.argmax(values))
             self._fit_damping_label.setText(
@@ -15207,6 +15235,8 @@ class MainWindow(QMainWindow):
         self._fit_cursor = None
         self._fit_parabola = None
         self._fit_damping_label = None
+        self._fit_half_power = None
+        self._fit_reading = None
         if self._fit_range_edits:
             for edit in self._fit_range_edits:
                 edit.deleteLater()

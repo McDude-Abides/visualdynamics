@@ -39,6 +39,8 @@ THEORY = {
     'core.filters': 'filtering, integration and the drift it invents',
     'core.sine_tracking': 'the tracking filter: complex demodulation '
                           'through a Butterworth low-pass',
+    'core.half_power': 'the half-power width of a peak, and the '
+                       'parabola that places its top between lines',
 }
 
 #: and methods, where the theory lives on the call rather than the module

@@ -2666,6 +2666,76 @@ def plot_series(items: Sequence[tuple[str | None, Any, Sequence[int] | None]], u
                         title=title or 'Data', size=size)
 
 
+def plot_half_power(data: Any, near: float, record: int = 0, *,
+                    within: tuple[float, float] | None = None,
+                    unit_system: UnitSystem | None = None,
+                    theme: Any = None,
+                    path: str | os.PathLike | None = None,
+                    show: bool = True, title: str | None = None,
+                    size: tuple[int, int] = (1000, 700)) -> Any:
+    """Draw one record with the half-power reading of a peak on it.
+
+        visualdynamics.plot.plot_half_power(frf, 180.0, path='q.png')
+
+    The record is drawn as `plot_series` draws it, and the peak nearest
+    `near` (or the tallest inside `within`) is read by
+    `core.half_power.read_half_power` and drawn over it by
+    `plot.half_power.add_half_power`: the 0.707 level, the two
+    crossings, the top as read between lines, and the Q beside the
+    peak. Works on anything with a magnitude against frequency: an FRF,
+    a transmissibility, a tracked sine level. A reading with a missing
+    crossing or too few lines warns as `read_half_power` does, and the
+    label on the plot says so too.
+
+    Parameters
+    ----------
+    data : Frf or Spectrum
+        The curve, in the frequency domain.
+    near : float
+        A frequency on the peak to read, in Hz.
+    record : int, default 0
+        Which record of `data`.
+    within : tuple of float, optional
+        A (low, high) band in Hz whose tallest line is the peak.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.half_power import read_half_power
+    from .half_power import add_half_power
+
+    if getattr(data, 'abscissa_dim', None) != 'frequency':
+        raise ValueError('a half-power width is read against frequency; '
+                         f'this is a {type(data).__name__}')
+    reading = read_half_power(data.abscissa, data.ordinate[record], near,
+                              within=within)
+    us = DEFAULT_SYSTEM if unit_system is None else unit_system
+    dimension = data.ordinate_dim[record]
+    # drawn in display units, read in SI: the conversion of a magnitude
+    # is one factor, so the height scales by it and Q does not move
+    scale = (1.0 if dimension == UNKNOWN or not reading.height
+             else float(us.from_si(reading.height, dimension))
+             / reading.height)
+
+    def build(widget: Any) -> Any:
+        build_plots(widget, [(None, data, [record])], unit_system=us,
+                    theme=theme)
+        plot = next(item for item in widget.ci.items
+                    if hasattr(item, 'addItem'))
+        add_half_power(plot, reading,
+                       color=resolve_theme(theme)['plot_foreground'],
+                       scale=scale)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{data.response_dof[record]}: '
+                                        f'{reading.describe()}'),
+                        size=size)
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:

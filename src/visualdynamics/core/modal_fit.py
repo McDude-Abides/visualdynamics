@@ -50,6 +50,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .shapes import ShapeSet
 
 from ..units import UNKNOWN
+from .half_power import HALF_POWER, HalfPower, crossings, read_half_power
 
 _POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
 
@@ -566,16 +567,20 @@ class ModalFitSession:
         peak = float(q.max()) or 1.0
         height = float(self._residual_cmif()[index])
         values = np.asarray(height * q / peak, dtype=np.float64)
-        if unit_system is not None:
-            # the dimension the plotted CMIF was converted by: with one
-            # dimension across the fit rows the CMIF scales by exactly
-            # this factor, and mixed or undefined rows draw as they
-            # stand — the same rule as display_ordinate
-            dim = next((self.frf.ordinate_dim[i] for i in self.rows
-                        if self.frf.ordinate_dim[i] != UNKNOWN), None)
-            if dim is not None:
-                values = unit_system.from_si(values, dim)
-        return self.frequencies[band], values
+        return self.frequencies[band], self._displayed(values, unit_system)
+
+    def _displayed(self, values, unit_system):
+        """CMIF-valued `values` in the units the plotted CMIF is drawn
+        in, or unconverted when `unit_system` is None."""
+        if unit_system is None:
+            return values
+        # the dimension the plotted CMIF was converted by: with one
+        # dimension across the fit rows the CMIF scales by exactly this
+        # factor, and mixed or undefined rows draw as they stand — the
+        # same rule as display_ordinate
+        dim = next((self.frf.ordinate_dim[i] for i in self.rows
+                    if self.frf.ordinate_dim[i] != UNKNOWN), None)
+        return values if dim is None else unit_system.from_si(values, dim)
 
     def estimate_damping(self, frequency: float) -> float:
         """The half-power damping estimate at the line nearest
@@ -590,6 +595,51 @@ class ModalFitSession:
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
         return self._half_power(s1, index)
 
+    def half_power(self, frequency: float | None = None, *,
+                   unit_system: Any | None = None,
+                   warn: bool = True) -> HalfPower:
+        """Read Q from the half-power width of the residual CMIF peak
+        under the cursor, or at `frequency`.
+
+        This is the readout beside the fit: the peak the cursor sits on,
+        its frequency, the two half-power crossings, Q and the damping
+        ratio they give, read off the residual CMIF the cursor works on
+        (`core.half_power.read_half_power`). For one FRF the CMIF is its
+        magnitude, so the reading is that FRF's peak. It is a reading of
+        the curve, not a fit, and it differs from the fitted damping
+        where the curve is not one clean mode: a close pair reads as one
+        wide peak, and the fit's search does not. Reading it costs a
+        climb along the cached CMIF, so a cursor can show it on every
+        move.
+
+        Parameters
+        ----------
+        frequency : float, optional
+            A frequency on the peak to read, in Hz; the pending mode's
+            (the cursor's) when omitted.
+        unit_system : UnitSystem, optional
+            The height is converted to these units, as the plotted CMIF
+            is (`pending_curve`); SI when omitted.
+        warn : bool, default True
+            Warn a missing crossing or too few lines as a
+            `HalfPowerWarning`; the notes are kept on the reading either
+            way.
+
+        Returns
+        -------
+        HalfPower
+            The reading.
+        """
+        from dataclasses import replace
+
+        near = (self.pending['frequency'] if frequency is None
+                else float(frequency))
+        reading = read_half_power(self.frequencies, self._residual_cmif(),
+                                  near, warn=warn)
+        height = float(self._displayed(np.array([reading.height]),
+                                       unit_system)[0])
+        return replace(reading, height=height)
+
     def _half_power(self, s1, index):
         """Damping from the half-power points around a CMIF peak.
 
@@ -597,20 +647,11 @@ class ModalFitSession:
         borrows the other side's width; neither crossing falls back to a
         nominal 1 %.
         """
-        target = s1[index] / np.sqrt(2.0)
+        # the crossings are found where the half-power readout finds
+        # them (`core.half_power.crossings`); this kept its own loop
+        # until the readout arrived, and two loops over one rule drift
         f = self.frequencies
-
-        def crossing(step: int) -> float | None:
-            i = index
-            while 0 < i + step < len(s1) - (step > 0):
-                if s1[i + step] < target:
-                    span = s1[i] - s1[i + step]
-                    fraction = (s1[i] - target) / span if span > 0 else 0.0
-                    return f[i] + fraction * (f[i + step] - f[i])
-                i += step
-            return None
-
-        low, high = crossing(-1), crossing(+1)
+        low, high = crossings(f, s1, index, s1[index] * HALF_POWER)
         peak = f[index]
         if low is None and high is None:
             return 0.01
