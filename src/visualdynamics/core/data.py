@@ -805,7 +805,7 @@ class DataArray:
         # would describe the wrong channels' averages
         counts = getattr(self, 'statistical_dof', None)
         if counts is not None:
-            self.statistical_dof = np.asarray(counts)[keep]
+            self.statistical_dof: np.ndarray | None = np.asarray(counts)[keep]
         if self.block is not None:
             # repeated-measurement labels renumber to contiguous —
             # 'avg 1, avg 3' after deleting the second capture is a
