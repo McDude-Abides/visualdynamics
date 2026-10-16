@@ -73,6 +73,14 @@ same signal. **Automatic** on the tree bar works in this order: it
 filters the record, computes the SRS from the filtered record, and
 integrates twice.
 
+The Integrate act removes a drift below 2 Hz, which suits a record's
+motion and not a stroke estimate: a compensated pulse's displacement
+is content at a few hertz. To see whether a pulse fits on the shaker,
+choose **Stroke** on the bar instead. It integrates the record raw and
+reads the peak velocity, the travel with the shaker body counted and
+the force against the shaker's shock ratings; [Will a pulse fit on the
+shaker](../stroke.md) says how to read it.
+
 ### 3. Compute the shock response spectra
 
 Before computing, read the velocity check under the SRS settings in

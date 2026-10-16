@@ -46,6 +46,8 @@ that is not an alpha.
 - [Checking a replication reference](replication-fit.md): whether a
   shaker can play a record, and what the high-pass that makes it
   playable costs
+- [Will a pulse fit on the shaker](stroke.md): a pulse integrated raw
+  against the shaker's shock stroke, velocity and force
 - [The sine sweep workflow](workflows/sine-workflow.md): tones tracked
   through a sweep and compared with the requirement
 - [The random and sine workflow](workflows/mixed-workflow.md): a sweep

@@ -89,6 +89,9 @@ against the Gaussian and kurtosis frame by frame; see
 [time statistics](time-statistics.md)),
 `plot_replication_fit(history, rating)` (whether a shaker can play the
 record; see [checking a replication reference](replication-fit.md)),
+`plot_stroke(history)` (a pulse's acceleration, velocity and
+displacement integrated raw, against the shaker's shock ratings; see
+[will a pulse fit on the shaker](stroke.md)),
 and, for a specification comparison, `plot_bars(measured,
 specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 `plot_snr(...)` and `plot_replication(...)`. Each draws the figure the
