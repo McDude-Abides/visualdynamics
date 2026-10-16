@@ -463,6 +463,38 @@ def _draw_shocks(painter, color):
                                  (at + 6, 36), (at + 9, 44)]))
 
 
+
+def _draw_pulse(painter, color):
+    """A half-sine on a baseline inside its tolerance band.
+
+    The classical pulse check in miniature: the pulse, and the envelope
+    it has to stay inside, which is what tells it from the shocks glyph
+    beside it.
+    """
+    faint = QColor(color)
+    faint.setAlpha(70)
+    band = QPainterPath()
+    band.moveTo(6, 40)
+    band.lineTo(18, 40)
+    band.cubicTo(22, 6, 42, 6, 46, 40)
+    band.lineTo(58, 40)
+    band.lineTo(58, 50)
+    band.lineTo(46, 50)
+    band.cubicTo(40, 22, 24, 22, 18, 50)
+    band.lineTo(6, 50)
+    band.closeSubpath()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(faint))
+    painter.drawPath(band)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 4))
+    pulse = QPainterPath()
+    pulse.moveTo(6, 45)
+    pulse.lineTo(18, 45)
+    pulse.cubicTo(22, 13, 42, 13, 46, 45)
+    pulse.lineTo(58, 45)
+    painter.drawPath(pulse)
+
 def _draw_bars(painter, color):
     """A bar chart with one bar over a threshold.
 
@@ -1973,6 +2005,7 @@ def control_icon(name: str) -> QIcon:
      'waterfall': _draw_waterfall,
      'drive_point': _draw_drive_point, 'cmif': _draw_cmif,
      'averaging': _draw_averaging, 'shocks': _draw_shocks,
+     'pulse': _draw_pulse,
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,

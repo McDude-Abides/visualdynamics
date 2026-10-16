@@ -45,6 +45,7 @@ from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
+from .pulse_panel import PulsePanel
 from .rigid_panel import RigidBodyPanel
 from .segments_panel import SegmentsPanel
 from .shock_panel import ShockPanel
@@ -244,6 +245,10 @@ class DataPane(QWidget):
         #: what it is computed with, kept across redraws so a tuned
         #: range survives clicking away and back
         self.wavelet_settings: dict[str, Any] | None = None
+        #: the classical pulse check, the same way; its pulse and
+        #: tolerances kept across redraws, None until one is set
+        self.pulse_wanted: bool = False
+        self.pulse_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
         #: 'curves', 'error' or 'lines' — sticky, like the other view
@@ -327,6 +332,10 @@ class DataPane(QWidget):
         self.statistics_panel: StatisticsPanel = StatisticsPanel()
         self.statistics_panel.hide()
         self.statistics_panel.changed.connect(self._statistics_edited)
+        # the pulse a record is judged against, beside the judgement
+        self.pulse_panel: PulsePanel = PulsePanel()
+        self.pulse_panel.hide()
+        self.pulse_panel.changed.connect(self._pulse_edited)
         # the specification being written at a shape set's modal
         # coordinates, beside the plot that previews it; the toggle
         # is on the table bar, where a lone shape set's readings are
@@ -360,6 +369,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
+        plot_row.addWidget(self.pulse_panel)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -779,11 +789,23 @@ class DataPane(QWidget):
             'is in the record')
         self.wavelet_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.wavelet_action)
+        # a classical shock pulse judged against its envelope and its
+        # velocity change: a reading of the record, not a mark on it,
+        # so it replaces the trace as the wavelet does
+        self.pulse_action: QAction = QAction(control_icon('pulse'),
+                                             'Pulse Check', self)
+        self.pulse_action.setCheckable(True)
+        self.pulse_action.setToolTip(
+            'Judge a classical pulse — half-sine, sawtooth or trapezoid '
+            '— against its tolerance envelope and its velocity change')
+        self.pulse_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.pulse_action)
         for action in (self.averaging_action, self.filter_action,
                        self.sine_action,
                        self.truncate_action, self.kurtosis_action,
                        self.statistics_action,
-                       self.shocks_action, self.wavelet_action):
+                       self.shocks_action, self.wavelet_action,
+                       self.pulse_action):
             self.reading_group.addAction(action)
         # the banded reading of a spectrum: the octave conversion
         # previewed as steps over the narrowband, its spacing in the
@@ -910,7 +932,8 @@ class DataPane(QWidget):
                  ('statistics_action', 'statistics_wanted',
                   'statistics_panel'),
                  ('shocks_action', 'shocks_wanted', 'shock_panel'),
-                 ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'))
+                 ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'),
+                 ('pulse_action', 'pulse_wanted', 'pulse_panel'))
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
         """Put the acts the selection can take on this bar
@@ -1007,6 +1030,18 @@ class DataPane(QWidget):
         """Whether the time statistics are offered and checked."""
         return (self.statistics_action.isVisible()
                 and self.statistics_action.isChecked())
+    def _pulse_edited(self, settings) -> None:
+        """The pulse or a tolerance moved: keep it, then draw again —
+        on the pane, so the pulse survives clicking away and back, as
+        the scalogram's settings do."""
+        self.pulse_settings = dict(settings)
+        self.reread.emit()
+
+    @property
+    def showing_pulse(self) -> bool:
+        """Whether the pulse check is offered and checked."""
+        return (self.pulse_action.isVisible()
+                and self.pulse_action.isChecked())
 
     @property
     def showing_wavelet(self) -> bool:
@@ -1624,7 +1659,8 @@ class DataPane(QWidget):
         # five that shows one is worse than the undivided row was.
         reading = averaging or shocks
         instead = reading and (self.kurtosis_wanted or self.wavelet_wanted
-                               or self.statistics_wanted)
+                               or self.statistics_wanted
+                               or self.pulse_wanted)
         self.averaging_action.setVisible(averaging)
         self.filter_action.setVisible(averaging)
         self.filter_action.setChecked(averaging and self.filter_wanted)
@@ -1700,6 +1736,12 @@ class DataPane(QWidget):
             self.shock_panel.hide()
         if not averaging or not self.wavelet_wanted:
             self.wavelet_panel.hide()
+        # the pulse check is offered wherever the shocks are: a record
+        # that may hold a pulse
+        self.pulse_action.setVisible(shocks)
+        self.pulse_action.setChecked(shocks and self.pulse_wanted)
+        if not shocks or not self.pulse_wanted:
+            self.pulse_panel.hide()
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
             complex_data and not (cmif and self.showing_cmif))

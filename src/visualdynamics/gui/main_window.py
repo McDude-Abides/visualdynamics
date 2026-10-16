@@ -11481,6 +11481,8 @@ class MainWindow(QMainWindow):
         if history is not None and self.data_pane.showing_statistics:
             return self._render_statistics(history, series[0][0],
                                            series[0][2])
+        if history is not None and self.data_pane.showing_pulse:
+            return self._render_pulse(history, series[0][0], series[0][2])
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,
@@ -15929,6 +15931,105 @@ class MainWindow(QMainWindow):
                 f'{frequencies[0]:.3g} to {frequencies[-1]:.3g} Hz in '
                 f'{len(frequencies)} lines, '
                 f'cone {cone:.3g} s at the bottom')
+
+    def _render_pulse(self, history, name=None, records=None):
+        """A classical pulse judged against its envelope and its
+        velocity change, the pulse and tolerances in the panel beside it.
+
+        One channel at a time, as the scalogram is, chosen in the
+        project tree: the first selected record, or the object's first
+        acceleration channel when it is selected whole, and the tree is
+        settled onto it so the selection and the picture agree. The pulse
+        is the panel's, kept on the pane across redraws; a record that
+        has none yet opens on the half-sine it most resembles, rounded,
+        which is a starting point to type the test's own pulse over.
+        Every number is `core.classical_pulse.check_pulse`'s.
+        """
+        from ..core import classical_pulse as pulses
+        from ..plot.classical_pulse import build_pulse_check
+
+        pane = self.data_pane
+        panel = pane.pulse_panel
+        pane.offer_waterfall(False)
+        pane.show_waterfall(False)
+        pane.graphics.clear()
+        panel.show()
+        try:
+            channel = (records[0] if records
+                       else pulses.pulse_channel(history))
+            pulses.pulse_channel(history, channel)
+        except ValueError as refusal:
+            panel.show_check(None, str(refusal))
+            return str(refusal)
+        if name is not None and len(history.response_dof) > 1 \
+                and records != [channel]:
+            item = self._item_for_object(name)
+            if item is not None:
+                item.setExpanded(True)
+            self._select_records(name, [channel])
+        dof = str(history.response_dof[channel])
+        settings = pane.pulse_settings
+        if settings is None:
+            settings = self._suggested_pulse(history, channel)
+        # the panel shows the pulse in this window's units, and the
+        # settings come back off it, as the scalogram's do
+        panel.unit_system = self.unit_system
+        panel.set_settings(settings, emit=False)
+        settings = panel.settings()
+        pane.pulse_settings = settings
+        tolerances = {key: settings[key] for key in (
+            'band', 'duration_tolerance', 'edge_limit',
+            'velocity_tolerance', 'quiet')}
+        try:
+            pulse = pulses.ClassicalPulse(settings['shape'],
+                                          settings['peak'],
+                                          settings['duration'],
+                                          settings['edge'])
+            check = pulses.check_pulse(history, pulse, channel,
+                                       **tolerances)
+        except ValueError as refusal:
+            # a pulse the record does not hold, or one that is not a
+            # pulse: the reason, and no numbers that would read as a
+            # verdict
+            panel.show_check(None, str(refusal))
+            return f'{dof}: {refusal}'
+        build_pulse_check(pane.graphics, check,
+                          unit_system=self.unit_system,
+                          theme=self.theme_name, name=dof)
+        panel.show_check(check)
+        if name is not None:
+            given = ', '.join(f'{key}={value!r}'
+                              for key, value in tolerances.items())
+            prefix = f'visualdynamics.plot.plot_pulse_check(project[{name!r}]'
+            self._journal_view(
+                prefix,
+                f'{prefix}, {settings["shape"]!r}, {settings["peak"]!r}, '
+                f'{settings["duration"]!r}, {settings["edge"]!r}, '
+                f"channel={dof!r}, {given}, path='pulse_check.png', "
+                'show=False)')
+        return f'{dof}: {check.describe()}'
+
+    def _suggested_pulse(self, history, channel):
+        """The settings a record opens the pulse check on: the
+        half-sine it most resembles (`suggest_pulse`), its peak and
+        duration rounded to three figures in this window's units, and
+        the default tolerances; the panel's own defaults when the
+        record holds nothing that reads as a pulse."""
+        from ..core import classical_pulse as pulses
+
+        settings = self.data_pane.pulse_panel.defaults()
+        try:
+            pulse = pulses.suggest_pulse(
+                np.asarray(history.abscissa, dtype=float),
+                np.asarray(history.ordinate)[channel])
+        except ValueError:
+            return settings
+        us = self.unit_system
+        peak = float(us.from_si(pulse.peak, 'acceleration'))
+        settings['peak'] = float(us.to_si(float(f'{peak:.3g}'),
+                                          'acceleration'))
+        settings['duration'] = float(f'{pulse.duration:.3g}')
+        return settings
 
     def _kurtosis_bounds_moved(self, low, high):
         """Remember a dragged band, so a redraw does not put it back."""

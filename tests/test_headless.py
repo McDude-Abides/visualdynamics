@@ -295,6 +295,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_statistics': 'plot_time_statistics',
         '_render_wavelet': ('plot_scalogram / '
                             'viz.scalogram.plot_scalogram_stage'),
+        '_render_pulse': 'plot_pulse_check',
         '_render_replication': 'plot_replication',
         '_render_srs': "plot_bars(mode='srs')",
         '_render_srs_points': 'plot_srs_tolerance',

@@ -445,3 +445,104 @@ def test_the_view_draws_to_a_file(qt_app, tmp_path):
     plot_pulse_check(history(pulse().at(t - opens)), 'half-sine', 50 * G, T,
                      path=str(path), show=False)
     assert path.exists() and path.stat().st_size > 2000
+
+
+# ---- the reading in the window -----------------------------------------------
+
+
+def _reading(window, pump, values, name='Shot'):
+    t, _opens = record()
+    window.add_object(name, TimeHistory(
+        t, np.atleast_2d(values), response_dof=['101Z+'],
+        ordinate_dim=['acceleration']))
+    window.data_pane.waterfall_action.setChecked(False)
+    window.show_object(name)
+    pump()
+    window.data_pane.pulse_action.trigger()
+    pump()
+    return window.data_pane.pulse_panel
+
+
+def test_the_pulse_check_is_a_reading_of_a_time_history(window, pump):
+    """Offered on a record's bar, and choosing it puts the panel up on
+    the half-sine the record resembles, the check drawn and its verdict
+    in the panel and on the status line."""
+    t, opens = record()
+    panel = _reading(window, pump, pulse(peak=48.0).at(t - opens))
+    pane = window.data_pane
+    assert pane.pulse_action.isVisible()
+    assert pane.pulse_action.text() == 'Pulse Check'
+    assert pane.pulse_wanted and panel.isVisible()
+    settings = panel.settings()
+    assert settings['shape'] == 'half-sine'
+    assert settings['peak'] == pytest.approx(48.0 * G, rel=1e-3)
+    assert settings['duration'] == pytest.approx(T)
+    assert panel.verdict.text().startswith('Passes')
+    assert panel.readout.text().splitlines()[0].startswith('Peak: 48 g')
+    assert 'Passes' in window._status_text
+    plots = _plots(pane.graphics)
+    assert len(plots) == 2
+
+
+def test_the_panels_pulse_redraws_the_check(window, pump):
+    """A 40 g sawtooth read as the half-sine it was opened on fails;
+    told it is a sawtooth, it passes; told the velocity tolerance is a
+    twelfth, its full-allowance fall fails it. The edge row shows for the
+    sawtooth and not for the half-sine."""
+    t, opens = record()
+    panel = _reading(window, pump,
+                     pulse('sawtooth', 40.0, edge=0.1 * T).at(t - opens))
+    assert not panel.edge_box.isVisibleTo(panel)
+    assert panel.verdict.text().startswith('Flagged')
+    settings = panel.settings()
+    panel.set_settings(dict(settings, shape='sawtooth', peak=40.0 * G,
+                            duration=T, edge=0.0))
+    pump()
+    assert panel.edge_box.isVisibleTo(panel)
+    assert panel.names['edge'].text() == 'Fall [ms]'
+    assert panel.verdict.text() == ('Passes: every point inside the '
+                                    'envelope, velocity change +10.0 % of '
+                                    'nominal.')
+    assert 'Fall: 1.1 of 1.1 ms' in panel.readout.text()
+    panel.velocity_box.setValue(8.0)
+    pump()
+    assert panel.verdict.text() == 'Flagged: velocity change +10.0 % of nominal.'
+    assert window.data_pane.pulse_settings['velocity_tolerance'] == 0.08
+
+
+def test_a_record_with_no_acceleration_says_so(window, pump):
+    t, opens = record()
+    window.add_object('Force', TimeHistory(
+        t, np.atleast_2d(pulse().at(t - opens)), response_dof=['101Z+'],
+        ordinate_dim=['force']))
+    window.show_object('Force')
+    pump()
+    window.data_pane.pulse_action.trigger()
+    pump()
+    panel = window.data_pane.pulse_panel
+    assert 'holds none' in panel.verdict.text()
+    assert panel.readout.text() == ''
+
+
+def test_the_pulse_check_is_journaled_and_replays(window, pump, tmp_path,
+                                                  monkeypatch):
+    """Journaled as the headless call that draws it, settling in place,
+    and the line run on its own draws the figure."""
+    import visualdynamics
+    import visualdynamics.plot
+
+    t, opens = record()
+    panel = _reading(window, pump, pulse().at(t - opens))
+    panel.velocity_box.setValue(15.0)
+    pump()
+    lines = [line for line in window.project.journal
+             if line.startswith('visualdynamics.plot.plot_pulse_check(')]
+    assert len(lines) == 1, 'the view settles to the reading that stands'
+    assert "project['Shot'], 'half-sine'" in lines[0]
+    assert "channel='101Z+'" in lines[0]
+    assert 'velocity_tolerance=0.15' in lines[0]
+    monkeypatch.chdir(tmp_path)
+    room = {'visualdynamics': visualdynamics,
+            'project': {'Shot': window.objects['Shot']}}
+    exec(lines[0], room)                                 # noqa: S102
+    assert (tmp_path / 'pulse_check.png').stat().st_size > 2000
