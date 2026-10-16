@@ -101,7 +101,10 @@ autospectrum with each tone read off it, the reading the Tones cursor
 shows ([Reading a tone off an ASD](tone-readout.md)).
 `plot_replication_segments(...)` draws a replicated run judged segment
 by segment ([Judging a replication by
-segment](replication-segments.md)).
+segment](replication-segments.md)). A sine specification's sweep
+against the modes it passes is `plot_sweep_rate(specification, [(22.0,
+40.0)])`, the Sweep Rate reading ([checking a sweep
+rate](sweep-rate.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

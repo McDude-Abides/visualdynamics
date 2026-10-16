@@ -53,6 +53,9 @@ that is not an alpha.
   0.707 line, its crossings, and how many lines a peak needs
 - [Reading a tone off an ASD](tone-readout.md): why a spike's height
   is not the tone, and the tone in g peak from the lines it leaks into
+- [Checking a sweep rate against the modes it passes](sweep-rate.md):
+  the time and cycles in each half-power band, and what a fast sweep
+  does to a peak and its Q
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

@@ -643,6 +643,25 @@ def replication_segments():
             print(f'    {check.describe()}')
 
 
+def sweep_rate():
+    """A sweep from 5 to 100 Hz at 4 oct/min checked against three
+    modes: a 22 Hz mode with a Q of 40 that it passes too fast to build,
+    and two it lets build."""
+    from visualdynamics.core.sine import LOG, SineSweepSpecification, SineTone
+    from visualdynamics.core.sweep_rate import check_sweep_rate
+    from visualdynamics.plot import plot_sweep_rate
+
+    g = 9.80665
+    tone = SineTone('5 to 100 Hz at 4 oct/min', 0.0, [5.0, 100.0],
+                    [[g], [g]], [LOG], [4.0])
+    spec = SineSweepSpecification([tone], ['1Z+'], ordinate_unit='m/s**2')
+    modes = [(9.0, 10.0), (22.0, 40.0), (60.0, 15.0)]
+    for check in check_sweep_rate(spec, modes):
+        print(f'{check.describe()}')
+    plot_sweep_rate(spec, modes, theme='light', show=False, size=(1000, 620),
+                    path=str(OUT / 'sweep-rate.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -656,6 +675,7 @@ def main():
     tone_readout()
     time_statistics()
     replication_segments()
+    sweep_rate()
     print('done')
 
 

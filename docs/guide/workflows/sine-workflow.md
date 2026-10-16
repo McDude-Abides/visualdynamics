@@ -197,6 +197,14 @@ project.save('sine.vdyn')
   swept faster than it can build reads late, low and wide, and its Q
   low; [Reading Q from a peak's half-power width](../half-power.md)
   says how slow is slow enough.
+- A sweep's rate decides what it can show of a resonance. A mode needs
+  about Q cycles to build, and a log sweep at R oct/min gives it about
+  86.6 / (Q R) seconds in its half-power band; above about
+  87 fn / Q² oct/min the peak reads low, late and wide, and a Q read
+  off the level reads low. The Sweep Rate reading of the specification
+  checks every tone against the modes typed into it, and flags a Q read
+  off a level swept too fast for it;
+  [Checking a sweep rate](../sweep-rate.md) explains the arithmetic.
 - Where the levels wobble, look at the wavelet first. A ripple in an
   extracted level can come from the article (a resonance swept
   through), from the test (two tones beating in one band), or from the
