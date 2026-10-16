@@ -11,7 +11,9 @@ along each tone at the smoothing shown (`core.sine.sample_levels`, a
 few short solves, so it follows every edit). The Extract Sine Levels
 button runs the project verb with whatever is set at that moment, the
 same split as in the filter panel, since these are also settings
-carried by the record.
+carried by the record. Under the button, when the specification holds a
+dwell, the dwell readout reads it against time (`gui.dwell_panel`); a
+held tone is one point over frequency, and its story is in time.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.sine import CYCLES_LADDER, SineExtraction
+from .dwell_panel import DwellPanel
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import (
     PreviewPlot,
@@ -179,7 +182,13 @@ class SinePanel(QWidget):
         self.extract_button.clicked.connect(self.apply_asked.emit)
         grid.addWidget(self.extract_button, len(rows) + 3 + len(derived),
                        0, 1, 2)
-        grid.setRowStretch(len(rows) + 4 + len(derived), 1)
+        # the dwell readout, shown only beside a specification that
+        # holds a dwell; it lives in this panel so it comes and goes
+        # with the sine view, and reads nothing the extraction sets
+        self.dwell: DwellPanel = DwellPanel()
+        self.dwell.hide()
+        grid.addWidget(self.dwell, len(rows) + 4 + len(derived), 0, 1, 2)
+        grid.setRowStretch(len(rows) + 5 + len(derived), 1)
         commit_on_enter(self.cycles_box, self.target_box)
         self.mode_box.currentIndexChanged.connect(self._edited)
         self.cycles_box.valueChanged.connect(self._edited)
@@ -298,6 +307,7 @@ class SinePanel(QWidget):
         self.preview.apply_theme(colors)
         if self._sampled:
             self.preview.show_samples(self._sampled)
+        self.dwell.apply_theme(colors)
 
 
 def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:

@@ -4047,6 +4047,67 @@ def plot_sweep_rate(specification: Any, modes: Any, *,
                         size=size)
 
 
+def plot_dwell(history: Any, specification: Any, *, tone: str | None = None,
+               segment: int | None = None, channel: str | None = None,
+               setting: Any = None, share: float | None = None,
+               onset: float | None = None, after: float | None = None,
+               unit_system: UnitSystem | None = None, theme: Any = None,
+               path: str | os.PathLike | None = None, show: bool = True,
+               title: str | None = None,
+               size: tuple[int, int] = (1000, 620)) -> Any:
+    """Draw a dwell's level against time, the shares it is read by
+    marked.
+
+        visualdynamics.plot.plot_dwell(history, spec, channel='101Z+',
+                                       path='dwell.png')
+
+    The dwell is read by `core.dwell.read_dwell`, with the same
+    arguments, and drawn by `plot.dwell.build_dwell`: the tracked level
+    of every cycle where it stands, the steady level in gray, the share
+    dashed and its complement dotted, a filled circle where the level
+    first reaches the share and a filled triangle where the ring-down
+    falls to its complement, each named with its count of cycles in
+    the legend. The window's sine view reads the same dwell in its
+    Dwell readout.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The recording.
+    specification : SineSweepSpecification
+        What the drive followed; one of its tones holds the dwell.
+    tone, segment, channel, setting, onset, after
+        As for `core.dwell.read_dwell`.
+    share : float, optional
+        The share of the steady level the build-up is read to,
+        `core.dwell.DWELL_SHARE` by default.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.dwell import DWELL_SHARE, read_dwell
+    from .dwell import build_dwell
+
+    reading = read_dwell(history, specification, tone=tone, segment=segment,
+                         channel=channel, setting=setting,
+                         share=DWELL_SHARE if share is None else share,
+                         onset=onset, after=after)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_dwell(widget, reading, unit_system=unit_system,
+                           theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{reading.tone} at {reading.dof}, '
+                                        'level against time'),
+                        size=size)
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,

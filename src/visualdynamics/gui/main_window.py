@@ -905,6 +905,9 @@ class MainWindow(QMainWindow):
         self.data_pane.sine_panel.changed.connect(self._sine_edited)
         self.data_pane.sine_panel.apply_asked.connect(
             lambda: self.extract_sine_levels())
+        # a dwell read in the sine view is journaled as the call that
+        # draws it, as every parameterized reading is
+        self.data_pane.sine_panel.dwell.read.connect(self._journal_dwell)
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(
@@ -10872,6 +10875,26 @@ class MainWindow(QMainWindow):
         setting = history.sine_extraction or history.suggest_sine_extraction()
         panel.show_history(history, specs[0], setting)
         panel.show()
+        # and a held tone, read against time where its story is; the
+        # readout hides itself beside a specification that only sweeps
+        panel.dwell.show_dwell(history, specs[0], self.unit_system)
+
+    def _journal_dwell(self, history, specification, reading):
+        """The dwell readout, journaled as the headless call that draws
+        it (`_journal_view`): `plot_dwell` with the channel and the share
+        the readout used."""
+        try:
+            record = self.project.name_of(history)
+            sweep = self.project.name_of(specification)
+        except (KeyError, ValueError):
+            return
+        prefix = (f"visualdynamics.plot.plot_dwell(project[{record!r}], "
+                  f"project[{sweep!r}]")
+        self._journal_view(
+            prefix,
+            f'{prefix}, tone={reading.tone!r}, segment={reading.segment!r}, '
+            f'channel={reading.dof!r}, share={reading.share!r}, '
+            "path='dwell.png', show=False)")
 
     def _octave_source(self, series):
         """The one density the octave reading would band — a PSD, a

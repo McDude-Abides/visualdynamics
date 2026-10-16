@@ -59,6 +59,8 @@ THEORY = {
                             'read through before its first pass',
     'core.stroke': 'the compensated pulse and the stroke, velocity and '
                    'force it needs of a shaker',
+    'core.dwell': 'the build-up and free decay of a resonator under a '
+                  'held tone',
 }
 
 #: and methods, where the theory lives on the call rather than the module

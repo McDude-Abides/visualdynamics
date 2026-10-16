@@ -29,6 +29,14 @@ before sweeping, so the recorded sweep leaves its start frequency at
 `start_time + ramp_time`. Four tones rebuilt with exactly that lag
 matched the controller's own record to 0.0000 Hz.
 
+A dwell, a tone held at one frequency for a time, is written the way a
+controller's file writes it: a linear segment across a hair of a hertz,
+since the controller refuses a segment with no span, and so does this
+class. `SineTone.dwell` builds one, sweeping `DWELL_SWEEP` of its
+frequency over the time it holds, and `is_dwell` reads any segment that
+spans no more than `DWELL_SPAN` of its frequency as a dwell, so a file
+written upstream today reads exactly as it did.
+
 Everything is stored in SI, like every other object in core.
 """
 
@@ -52,6 +60,19 @@ from .progress import Ticker
 
 LINEAR = 0
 LOG = 1
+
+#: the widest span, as a share of its frequency, that a segment may sweep
+#: and still be read as a dwell: one part in ten thousand, 0.002 Hz at
+#: 20 Hz. A controller that refuses a zero span is given a dwell as a
+#: sweep across 0.0001 Hz or so, and that segment is a dwell in all but
+#: name
+DWELL_SPAN = 1e-4
+
+#: the span, as a share of its frequency, that `SineTone.dwell` sweeps
+#: across: a hundredth of `DWELL_SPAN`, so the frequency is held to one
+#: part in a million. Held for an hour at 20 Hz the phase it gathers
+#: differs from a true hold's by a twentieth of a cycle
+DWELL_SWEEP = 1e-6
 
 
 class SineTone:
@@ -127,6 +148,69 @@ class SineTone:
             self.limits[limit] = values
         self._check_rates()
 
+    @classmethod
+    def dwell(cls, name: str, frequency: float, amplitude: Any,
+              seconds: float, *, start_time: float = 0.0,
+              phase: Any = None, **limits: Any) -> SineTone:
+        """A tone that holds one frequency for `seconds`.
+
+        Written as a controller writes a dwell: two breakpoints, the
+        second `DWELL_SWEEP` of the frequency above the first, joined by
+        one linear segment whose rate crosses that span in `seconds`, so
+        `is_dwell` reads it and every file format carries it unchanged.
+        Raises ValueError when `seconds` is not more than zero.
+
+        Parameters
+        ----------
+        name : str
+            The tone's name.
+        frequency : float
+            Hz, more than zero.
+        amplitude : array-like
+            The level held, per control channel, shape (m,), SI.
+        seconds : float
+            How long the tone holds.
+        start_time : float, default 0.0
+            Seconds after the environment started that the tone turns
+            on.
+        phase : array-like, optional
+            Radians per channel, shape (m,).
+        **limits
+            `warning_lower`, `warning_upper`, `abort_lower` and
+            `abort_upper`, each shape (m,), held like the amplitude.
+
+        Returns
+        -------
+        SineTone
+            The dwell, one segment long.
+        """
+        seconds, frequency = float(seconds), float(frequency)
+        if not seconds > 0.0:
+            raise ValueError(f'{name}: a dwell of {seconds:g} s — a dwell '
+                             'holds for more than zero seconds')
+
+        def held(values):
+            return None if values is None else np.tile(
+                np.atleast_1d(np.asarray(values, dtype=np.float64)), (2, 1))
+
+        span = frequency * DWELL_SWEEP
+        return cls(name, start_time, [frequency, frequency + span],
+                   held(amplitude), [LINEAR], [span / seconds],
+                   phase=held(phase),
+                   **{key: held(value) for key, value in limits.items()})
+
+    def is_dwell(self, segment: int) -> bool:
+        """Whether segment `segment` holds one frequency: a sweep across
+        no more than `DWELL_SPAN` of its frequency, the form a
+        controller's file (and `SineTone.dwell`) gives a dwell."""
+        f0, f1 = self.frequency[segment], self.frequency[segment + 1]
+        return bool(abs(f1 - f0) <= DWELL_SPAN * abs(f0))
+
+    def dwell_segments(self) -> list[int]:
+        """The segments that hold one frequency (`is_dwell`), in order;
+        empty for a tone that only sweeps."""
+        return [i for i in range(len(self.segment_rate)) if self.is_dwell(i)]
+
     def _check_rates(self):
         for i in range(len(self.segment_rate)):
             f0, f1 = self.frequency[i], self.frequency[i + 1]
@@ -135,7 +219,7 @@ class SineTone:
                 raise ValueError(
                     f'{self.name}: segment {i} holds {f0} Hz — a dwell '
                     'has no sweep time; give the segment a frequency '
-                    'span, however small')
+                    'span, however small (SineTone.dwell builds one)')
             if rate == 0.0 or (f1 > f0) != (rate > 0):
                 direction = 'ascending' if f1 > f0 else 'descending'
                 raise ValueError(
@@ -386,6 +470,42 @@ class SineTone:
                             / np.log(f1 / f0))
             out[inside] = (values[i]
                            + (values[i + 1] - values[i]) * fraction[:, None])
+        return out
+
+    def level_at(self, t: Any, curve: str = 'amplitude') -> np.ndarray:
+        """The specified level at seconds `t` from the tone's start,
+        shape (len(t), m).
+
+        The same law `target` follows, read against time instead of
+        frequency: linear in time between breakpoints, which is where a
+        dwell's level lives, since over frequency a dwell is one point.
+        `curve` is 'amplitude' or one of `LIMITS`; a limit the tone does
+        not carry raises ValueError. Outside the tone's span the level
+        is NaN, as `target` is outside its sweep.
+
+        Parameters
+        ----------
+        t : array-like
+            Seconds from the tone's start.
+        curve : str, default 'amplitude'
+            Which curve.
+
+        Returns
+        -------
+        ndarray
+            The level, SI, one row per instant and a column per control
+            channel.
+        """
+        values = (self.amplitude if curve == 'amplitude'
+                  else self.limits.get(curve))
+        if values is None:
+            raise ValueError(f'{self.name} carries no {curve}')
+        t = np.atleast_1d(np.asarray(t, dtype=np.float64))
+        edges = np.concatenate(([0.0], np.cumsum(self.segment_seconds())))
+        out = np.full((len(t), values.shape[1]), np.nan)
+        for column in range(values.shape[1]):
+            out[:, column] = np.interp(t, edges, values[:, column],
+                                       left=np.nan, right=np.nan)
         return out
 
     def __eq__(self, other: object) -> bool:
