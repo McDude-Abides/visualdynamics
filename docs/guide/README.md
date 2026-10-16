@@ -43,6 +43,9 @@ that is not an alpha.
   the count of points inside it, and the rule applied to the count
 - [Checking a shock record before its spectrum](shock-check.md): the
   velocity integrated raw, and the positive and negative spectra
+- [Checking a replication reference](replication-fit.md): whether a
+  shaker can play a record, and what the high-pass that makes it
+  playable costs
 - [The sine sweep workflow](workflows/sine-workflow.md): tones tracked
   through a sweep and compared with the requirement
 - [The random and sine workflow](workflows/mixed-workflow.md): a sweep

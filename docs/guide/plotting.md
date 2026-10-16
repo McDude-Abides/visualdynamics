@@ -87,6 +87,8 @@ positive and negative spectra; see
 `plot_time_statistics(history, record)` (one channel's trace, histogram
 against the Gaussian and kurtosis frame by frame; see
 [time statistics](time-statistics.md)),
+`plot_replication_fit(history, rating)` (whether a shaker can play the
+record; see [checking a replication reference](replication-fit.md)),
 and, for a specification comparison, `plot_bars(measured,
 specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 `plot_snr(...)` and `plot_replication(...)`. Each draws the figure the

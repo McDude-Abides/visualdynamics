@@ -58,6 +58,12 @@ drop-down on the bar reaches the rest.
 ![The target waveform at one control channel, the channel drop-down
 on the bar](../images/transient-spec.png)
 
+Before the first pass, the target can be checked against the shaker
+that will play it: choose **Replication Fit** on the bar for the force
+at its largest peak and its travel and velocity at a few high-pass
+cutoffs, against the ratings. [Checking a replication
+reference](../replication-fit.md) says how to read it.
+
 ### 3. Compare waveforms
 
 Select the measured history and the specification together, and the

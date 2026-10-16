@@ -698,6 +698,61 @@ def signature():
     print(f'{"":>7}  {result.describe()}')
 
 
+def replication_fit():
+    """A road record checked against a shaker before its first pass:
+    sixty seconds at a bracket, 2 grms with a 14 g pothole, logged
+    0.001 g high, against a 2 in stroke carrying 150 lb on a body
+    twenty times as heavy."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.replication_fit import (
+        ShakerRating,
+        replication_fit,
+    )
+    from visualdynamics.plot import plot_replication_fit
+    from visualdynamics.units import IN_LBF_S
+
+    g, rate, seconds = 9.80665, 2048.0, 60.0
+    samples = round(seconds * rate)
+    t = np.arange(samples) / rate
+    # ride motion from 0.7 to 3.5 Hz on a floor to 400 Hz: white noise
+    # shaped line by line to the breakpoints, straight on log-log axes
+    frequency = np.fft.rfftfreq(samples, 1.0 / rate)
+    density = np.zeros_like(frequency)
+    breakpoints = np.array([0.7, 3.5, 6.0, 150.0, 400.0])
+    levels = np.array([0.02, 0.02, 0.015, 0.015, 0.0015])
+    inside = (frequency >= breakpoints[0]) & (frequency <= breakpoints[-1])
+    density[inside] = np.exp(np.interp(np.log(frequency[inside]),
+                                       np.log(breakpoints), np.log(levels)))
+    noise = np.random.default_rng(3404).standard_normal(samples)
+    x = np.fft.irfft(np.fft.rfft(noise) * np.sqrt(density * rate / 2.0),
+                     samples)
+    # onto and off the course over 2 s, a braking swell at 46 s, and a
+    # dozen impacts ringing the bracket's modes at 60 and 250 Hz
+    x *= np.clip(np.minimum(t, seconds - t) / 2.0, 0.0, 1.0)
+    x *= 1.0 + 0.8 * np.exp(-((t - 46.0) / 2.5) ** 2)
+    for hit, peak in ((5.2, 9.0), (9.7, 7.5), (13.1, 10.0), (17.8, 8.0),
+                      (21.4, 11.0), (26.0, 7.0), (32.0, 14.0), (36.5, 9.5),
+                      (39.9, 8.5), (52.3, 10.5), (55.6, 7.5), (57.1, 9.0)):
+        since = np.clip(t - hit, 0.0, None)
+        for mode, share in ((60.0, 0.4), (250.0, 0.6)):
+            w = 2.0 * np.pi * mode
+            x += (t >= hit) * share * peak * np.exp(-0.06 * w * since) * (
+                np.cos(w * since) - 0.06 * np.sin(w * since))
+    x = x - x.mean() + 0.001
+    record = TimeHistory(t, x[None] * g, response_dof=['1Z+'],
+                         ordinate_dim=['acceleration'])
+    rating = ShakerRating(force=17793.0, stroke=0.0508, velocity=1.778,
+                          moving_mass=68.04, body_mass=1361.0)
+    fit = replication_fit(record, rating)
+    print(f'replication fit: {fit.describe()}')
+    plot_replication_fit(record, rating,
+                         unit_system=IN_LBF_S.with_units(acceleration='g'),
+                         show=False, size=(1100, 800),
+                         path=str(OUT / 'replication-fit.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -713,6 +768,7 @@ def main():
     replication_segments()
     sweep_rate()
     signature()
+    replication_fit()
     print('done')
 
 
