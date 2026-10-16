@@ -7,7 +7,7 @@ shaker's shock stroke, velocity and force, the moving mass, and the
 moving mass over the body's mass) and, under them, what the reading
 came to: the peak acceleration and velocity, the table's peak to peak
 beside the half-sine rule, the travel with the body counted, each way
-from rest, and the force, then each demand against its rating in words.
+from center, and the force, then each demand against its rating in words.
 
 Every edit redraws the plot at once, so a rating is seen against the
 pulse while it is typed. Nothing is made: the reading is of a record
@@ -196,11 +196,11 @@ class StrokePanel(QWidget):
         self.derived['force'].setText(
             '—' if reading.force is None else amount(reading.force, 'force'))
         # the lines that judge something: each rating given, and the
-        # rest position when it matters; the numbers alone are above
-        lines = [line for line in reading.describe(us)
-                 if ' against ' in line or 'centered armature' in line]
+        # travel to the stop when it reaches one; the numbers alone are
+        # above
+        lines = [line for line in reading.describe(us) if ' against ' in line]
         if not lines:
             lines = ['No ratings given: the reading stands on its own.']
         self.readout.setText('\n'.join(lines))
-        failed = reading.fits is False or reading.fits_centered is False
+        failed = reading.fits is False
         self.readout.setStyleSheet('font-weight: 600;' if failed else '')

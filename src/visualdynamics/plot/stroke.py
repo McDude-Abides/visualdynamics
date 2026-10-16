@@ -4,8 +4,8 @@ The acceleration at the top, the velocity integrated from it raw in the
 middle, and the displacement at the bottom, all from one
 `core.stroke.StrokeReading`. Each rating is drawn on the row it limits:
 the shock velocity either side of zero on the velocity, and the stops
-on the displacement, half the stroke either side of the rest position,
-where a centered armature has them. With the body counted the travel
+on the displacement, half the stroke either side of center, where the
+armature rests. With the body counted the travel
 relative to the body is drawn beside the table's displacement, since
 that is the travel the stops see. Every row is titled with its reading
 in words, so the plot says what it shows without the panel beside it.
@@ -88,7 +88,7 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
     velocity_plot.setTitle(words, color=_tone(shares['velocity'], colors),
                            size='9pt')
 
-    # the displacement, with the stops of a centered armature
+    # the displacement, with the stops half the stroke from center
     displacement_plot = _plot(layout, 2)
     displacement_plot.setXLink(acceleration_plot)
     legend = legend_below(layout, displacement_plot, 3, colors)
@@ -105,7 +105,7 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
     if reading.stroke is not None:
         rating_lines(displacement_plot, 0.5 * reading.stroke, 'length')
         legend.addItem(pg.PlotDataItem([], [], pen=rating_pen()),
-                       'stops, armature centered')
+                       'stops, half the stroke from center')
     displacement_plot.setLabel('left', axis_label('length', us))
     displacement_plot.setLabel('bottom',
                                f'time [{us.label_html("time")}]')
@@ -117,7 +117,7 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
                   f' ({100.0 * shares["stroke"]:.0f} %)')
     over = shares['stroke']
     if reading.fits_centered is False:
-        words += ', past a stop from a centered armature'
+        words += f'; {reading.to_the_stop(us)}'
         # within the stroke peak to peak and past a stop from the
         # middle is not a pass: titled in the abort color either way
         over = max(over or 0.0, 1.0 + 1e-9)
@@ -153,7 +153,7 @@ def summary(reading: Any, unit_system: Any = None) -> str:
     lines = reading.describe(unit_system)
     verdict = {True: 'fits', False: 'does not fit',
                None: 'no ratings given'}[reading.fits]
-    if reading.fits and reading.fits_centered is False:
-        verdict = 'fits peak to peak, not from a centered armature'
+    if reading.fits_centered is False:
+        verdict += f': {reading.to_the_stop(unit_system)}'
     return f'{reading.dof}: {lines[0]}; {verdict}'
 

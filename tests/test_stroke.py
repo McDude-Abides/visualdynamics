@@ -175,7 +175,9 @@ def test_each_demand_is_a_share_of_its_rating():
     assert shares['velocity'] == pytest.approx(67.593 / 70.0, abs=1e-4)
     assert reading.force / LBF == pytest.approx(5000.0, rel=1e-6)
     assert shares['force'] == pytest.approx(5000.0 / 6000.0, rel=1e-6)
-    assert reading.fits is True
+    # every share within, and the stroke each way too with room
+    roomy = read_stroke(pulse(50.0, 0.011), **ratings(stroke=4.0 * INCH))
+    assert roomy.fits is True
 
 
 def test_a_rating_exceeded_is_said_over():
@@ -202,38 +204,56 @@ def test_a_force_rating_without_a_moving_mass_is_not_judged():
     assert not any(line.startswith('Force') for line in reading.describe())
 
 
-def test_a_one_sided_excursion_reaches_a_stop_from_a_centered_armature():
+def test_a_one_sided_travel_reaches_a_stop_inside_the_stroke():
     """The symmetric arrangement travels one way only: 1.46 in down
     with the body counted, inside a 2.5 in stroke peak to peak and past
-    the 1.25 in a centered armature has below it. It fits resting
-    0.729 in above center."""
+    the 1.25 in to the stop below center, where the armature rests. The
+    stops see the travel each way, so the pulse does not fit."""
     reading = read_stroke(pulse(50.0, 0.011), **ratings())
-    assert reading.fits is True
+    assert reading.shares()['stroke'] < 1.0
     assert reading.fits_centered is False
+    assert reading.fits is False
     assert reading.travel_down / INCH == pytest.approx(1.4576, abs=1e-4)
     assert reading.travel_up == pytest.approx(0.0, abs=1e-12)
-    assert reading.offset / INCH == pytest.approx(0.7288, abs=1e-4)
+    assert not hasattr(reading, 'offset')
     lines = reading.describe()
-    assert 'Each way from rest: 1.46 in down, 0 in up' in lines
-    assert ('From a centered armature it reaches the stop going down: it '
-            'fits only resting 0.729 in above center') in lines
+    assert 'Each way from center: 1.46 in down, 0 in up' in lines
+    assert ('One-sided travel 1.46 in against 1.25 in to the stop: OVER, '
+            '117 %. Centering the travel is the controller\'s compensation, '
+            'an asymmetric pre- and post-pulse') in lines
+    assert reading.to_the_stop() == ('one-sided travel 1.46 in against '
+                                     '1.25 in to the stop')
+    assert not any('rest' in line for line in lines)
     # with room each way, it is not said
     roomy = read_stroke(pulse(50.0, 0.011), **ratings(stroke=4.0 * INCH))
     assert roomy.fits_centered is True
-    assert not any('centered' in line for line in roomy.describe())
+    assert not any('to the stop' in line for line in roomy.describe())
 
 
-def test_a_pulse_the_other_way_travels_up_and_wants_the_armature_below():
-    """Negated, the same pulse runs 1.46 in up from rest, and the
-    armature would rest 0.729 in below center."""
+def test_a_pulse_the_other_way_reaches_the_upper_stop():
+    """Negated, the same pulse runs 1.46 in up from center."""
     record = pulse(50.0, 0.011)
     record.ordinate[0] = -record.ordinate[0]
     reading = read_stroke(record, **ratings())
     assert reading.travel_down == pytest.approx(0.0, abs=1e-12)
     assert reading.travel_up / INCH == pytest.approx(1.4576, abs=1e-4)
-    assert reading.offset / INCH == pytest.approx(-0.7288, abs=1e-4)
-    assert ('From a centered armature it reaches the stop going up: it '
-            'fits only resting 0.729 in below center') in reading.describe()
+    assert reading.fits_centered is False
+    assert reading.to_the_stop().startswith('one-sided travel 1.46 in')
+
+
+def test_travel_both_ways_names_the_side_that_reaches_the_stop():
+    """The pulse, then the same pulse at half height the other way:
+    1.17 in down and 0.58 in up, so the down side is named and the
+    travel is not one-sided."""
+    rows = pulse(50.0, 0.011).ordinate[0].real
+    both = np.concatenate([rows, -0.5 * rows[1:]])
+    record = TimeHistory(np.arange(both.size) / RATE, both[None],
+                         response_dof=['1Z+'], ordinate_dim=['acceleration'])
+    reading = read_stroke(record, stroke=2.0 * INCH)
+    assert reading.travel_down / INCH == pytest.approx(1.1661, abs=1e-4)
+    assert reading.travel_up / INCH == pytest.approx(0.5830, abs=1e-4)
+    assert reading.to_the_stop() == ('travel down 1.17 in against 1 in to '
+                                     'the stop')
 
 
 def test_a_demand_exactly_at_its_rating_is_within_it():
@@ -242,11 +262,13 @@ def test_a_demand_exactly_at_its_rating_is_within_it():
     at = read_stroke(pulse(50.0, 0.011), mass_ratio=0.25,
                      stroke=first.travel, velocity=first.peak_velocity)
     assert at.shares()['stroke'] == 1.0
-    assert at.fits is True
+    assert at.shares()['velocity'] == 1.0
     assert 'within, 100 %' in at.describe()[0]
     centered = read_stroke(pulse(50.0, 0.011), mass_ratio=0.25,
-                           stroke=2.0 * first.travel_down)
+                           stroke=2.0 * first.travel_down,
+                           velocity=first.peak_velocity)
     assert centered.fits_centered is True
+    assert centered.fits is True
     record = pulse(50.0, 0.011)
     record.ordinate[0] = -record.ordinate[0]
     upward = read_stroke(record, mass_ratio=0.25,
@@ -407,7 +429,7 @@ def test_the_view_draws_three_rows_with_each_rating_on_its_row(qt_app):
             velocity.titleLabel.text
         title = displacement.titleLabel.text
         assert 'travel with the body 1.46 in against a 2.5 in stroke' in title
-        assert 'past a stop from a centered armature' in title
+        assert 'one-sided travel 1.46 in against 1.25 in to the stop' in title
         assert 'table 1.17 in integrated, 1.17 in by the half-sine rule' \
             in title
 
@@ -425,7 +447,7 @@ def test_the_view_draws_three_rows_with_each_rating_on_its_row(qt_app):
         names = [label.text for _sample, label in
                  displacement.legend.items]
         assert names == ['table', 'relative to the body',
-                         'stops, armature centered']
+                         'stops, half the stroke from center']
     finally:
         layout.close()
 
@@ -461,10 +483,12 @@ def test_the_summary_says_whether_it_fits():
 
     record = pulse(50.0, 0.011)
     assert summary(read_stroke(record, **ratings())).endswith(
-        'fits peak to peak, not from a centered armature')
+        '; does not fit: one-sided travel 1.46 in against 1.25 in to the '
+        'stop')
     assert summary(read_stroke(record, **ratings(stroke=4.0 * INCH))) \
         .endswith('; fits')
-    assert summary(read_stroke(record, **ratings(stroke=1.0 * INCH))) \
+    assert summary(read_stroke(record, **ratings(velocity=60.0 * INCH,
+                                                 stroke=4.0 * INCH))) \
         .endswith('; does not fit')
     assert summary(read_stroke(record)).endswith('; no ratings given')
 
@@ -508,7 +532,7 @@ def test_a_time_history_offers_the_stroke_reading(window, pump):
 def test_the_ratings_redraw_the_reading(window, pump):
     """Typed in the window's units (inches here), kept in SI, and read
     at once: the 50 g pulse with a quarter-mass body fits a 2.5 in
-    stroke peak to peak and not from a centered armature."""
+    stroke peak to peak, and reaches the stop 1.25 in below center."""
     pane = _stroke_reading(window, pump)
     panel = pane.stroke_panel
     panel.boxes['stroke'].setValue(2.5)
@@ -519,7 +543,8 @@ def test_the_ratings_redraw_the_reading(window, pump):
     assert panel.derived['travel'].text() == '1.46 in'
     lines = panel.readout.text().splitlines()
     assert lines[0] == 'Travel with the body 1.46 in against 2.5 in: within, 58 %'
-    assert lines[1].startswith('From a centered armature it reaches')
+    assert lines[1].startswith('One-sided travel 1.46 in against 1.25 in '
+                               'to the stop: OVER, 117 %')
     assert panel.readout.styleSheet() == 'font-weight: 600;'
     title = _plots(pane.graphics)[2].titleLabel.text
     assert 'against a 2.5 in stroke (58 %)' in title

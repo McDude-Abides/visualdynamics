@@ -3548,10 +3548,10 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
     `core.stroke.read_stroke`: the acceleration titled with its peak
     and the force it asks for, the velocity integrated raw with the
     shock velocity drawn either side of zero, and the displacement with
-    the stops of a centered armature drawn half the stroke either side
-    of rest. With `mass_ratio` the travel relative to the body is drawn
-    beside the table's, dashed. Each row's title is its reading in
-    words, against its rating where one was given.
+    the stops drawn half the stroke either side of center, where the
+    armature rests. With `mass_ratio` the travel relative to the body
+    is drawn beside the table's, dashed. Each row's title is its
+    reading in words, against its rating where one was given.
 
     Parameters
     ----------

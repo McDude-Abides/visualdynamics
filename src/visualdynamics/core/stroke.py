@@ -41,12 +41,14 @@ Three corrections are carried with it:
   the stops is the table's displacement times one plus that ratio. The
   compensation is low in frequency, where the body moves most. Given
   `mass_ratio`, the travel is counted that way.
-- The rest position. The stroke is peak to peak, and an armature
-  resting at the middle of it has half the stroke each way. The
-  symmetric arrangement above travels one way only, to its full peak
-  to peak and back, so it can fit the stroke peak to peak and still
-  reach a stop from a centered armature. The reading says so, and how
-  far off center the armature would have to rest to fit.
+- The stops each way. The stroke is peak to peak, and the armature
+  rests at the middle of it, held there by its suspension, so the stops
+  are half the stroke away on each side. The symmetric arrangement
+  above travels one way only, to its full peak to peak and back, so it
+  can be inside the stroke peak to peak and still reach a stop. The
+  travel each way from center against half the stroke is what the
+  stops see, and the reading judges that. Centering the travel is the
+  controller's compensation, an asymmetric pre- and post-pulse.
 - The first check. The peak to peak of the nominal arrangement is
   close to A T^2 / 2 for a half-sine of peak A and duration T, which in
   the units shock is specified in is about 193 A T^2 inches with A in g
@@ -305,24 +307,15 @@ class StrokeReading:
 
     @property
     def travel_down(self) -> float:
-        """The relative travel below the rest position, in m,
-        positive."""
+        """The relative travel below center, where the armature rests,
+        in m, positive."""
         return -self.body_factor * self.lowest
 
     @property
     def travel_up(self) -> float:
-        """The relative travel above the rest position, in m,
-        positive."""
+        """The relative travel above center, where the armature rests,
+        in m, positive."""
         return self.body_factor * self.highest
-
-    @property
-    def offset(self) -> float:
-        """Where the armature would rest to have equal room each way,
-        in m from the middle of the stroke, positive up: the rest
-        position less the middle of the relative excursion, so an
-        excursion that runs only downward wants the armature resting
-        above center."""
-        return 0.5 * (self.travel_down - self.travel_up)
 
     @property
     def equivalent_duration(self) -> float:
@@ -366,20 +359,51 @@ class StrokeReading:
 
     @property
     def fits(self) -> bool | None:
-        """Whether every rating given holds the pulse; None when no
-        rating was given."""
+        """Whether every rating given holds the pulse, the stroke each
+        way from center as well as peak to peak (`fits_centered`); None
+        when no rating was given."""
         judged = [value for value in self.shares().values()
                   if value is not None]
-        return all(value <= 1.0 for value in judged) if judged else None
+        if not judged:
+            return None
+        return (all(value <= 1.0 for value in judged)
+                and self.fits_centered is not False)
 
     @property
     def fits_centered(self) -> bool | None:
         """Whether the travel stays inside half the stroke each way from
-        a centered armature; None without a stroke."""
+        center, where the armature rests and the stops are half the
+        stroke away; None without a stroke."""
         if self.stroke is None:
             return None
         half = 0.5 * self.stroke
         return self.travel_down <= half and self.travel_up <= half
+
+    def to_the_stop(self, unit_system: UnitSystem | None = None
+                    ) -> str | None:
+        """The larger travel from center against the half stroke to its
+        stop, in words, such as 'one-sided travel 1.46 in against
+        1.25 in to the stop'; None without a stroke."""
+        from ..units import DEFAULT_SYSTEM
+
+        if self.stroke is None:
+            return None
+        us = DEFAULT_SYSTEM if unit_system is None else unit_system
+        down, up = self.travel_down, self.travel_up
+        larger = max(down, up)
+        # one-sided when the other way is under a hundredth of it: the
+        # symmetric arrangement's other way is zero to the sampling
+        if min(down, up) < 0.01 * larger:
+            name = 'one-sided travel'
+        else:
+            name = f'travel {"down" if down >= up else "up"}'
+
+        def amount(value):
+            return (f'{number(float(us.from_si(value, "length")))} '
+                    f'{us.label_text("length")}')
+
+        return (f'{name} {amount(larger)} against '
+                f'{amount(0.5 * self.stroke)} to the stop')
 
     def describe(self, unit_system: UnitSystem | None = None) -> list[str]:
         """The reading in lines, the numbers in `unit_system`
@@ -412,15 +436,16 @@ class StrokeReading:
         if self.force is not None:
             lines.append(against('Force', self.force, self.force_rating,
                                  'force'))
-        lines.append(f'Each way from rest: {amount(self.travel_down, "length")}'
-                     f' down, {amount(self.travel_up, "length")} up')
+        lines.append(f'Each way from center: '
+                     f'{amount(self.travel_down, "length")} down, '
+                     f'{amount(self.travel_up, "length")} up')
         if self.fits_centered is False:
-            side = ('down' if self.travel_down > 0.5 * self.stroke else 'up')
-            lines.append(
-                f'From a centered armature it reaches the stop going '
-                f'{side}: it fits only resting '
-                f'{amount(abs(self.offset), "length")} '
-                f'{"above" if self.offset > 0 else "below"} center')
+            stop = self.to_the_stop(us)
+            share = max(self.travel_down, self.travel_up) / (0.5 * self.stroke)
+            lines.append(f'{stop[0].upper()}{stop[1:]}: OVER, '
+                         f'{100.0 * share:.0f} %. Centering the travel is '
+                         'the controller\'s compensation, an asymmetric '
+                         'pre- and post-pulse')
         lines.append(f'Peak to peak {amount(self.peak_to_peak, "length")} '
                      f'integrated, {amount(self.rule, "length")} by the '
                      'half-sine rule')

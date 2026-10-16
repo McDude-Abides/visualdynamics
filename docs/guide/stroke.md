@@ -51,19 +51,22 @@ rating not given is reported without a verdict.
 | `travel`, `travel_down`, `travel_up` | the same with the shaker body counted: the table's displacement times one plus `mass_ratio`, the moving mass over the body's mass |
 | `rule` | the half-sine rule for the record's own peak and velocity change: A T² / 2, about 193 A T² inches with A in g |
 | `force` | the moving mass times the peak acceleration |
-| `shares()`, `fits` | each demand as a share of its rating, and whether every rating given holds |
-| `fits_centered`, `offset` | whether the travel stays inside half the stroke each way from a centered armature, and where the armature would rest to have equal room |
+| `shares()`, `fits` | each demand as a share of its rating, and whether every rating given holds, the stroke each way included |
+| `fits_centered` | whether the travel stays inside half the stroke each way from center, where the stops are |
 
 The body is counted because the stroke rating is the armature's travel
 relative to the body, and a body on isolation mounts moves the other
 way by the mass ratio. The compensation is low in frequency, where the
 body moves most.
 
-The rest position is reported because the symmetric arrangement
-travels one way only, to its full peak to peak and back. It can fit
-the stroke peak to peak and still reach a stop from a centered
-armature, and the reading says so, with the rest position that would
-give it equal room.
+The travel each way is judged because the armature rests at center,
+held there by its suspension, so the stops are half the stroke away on
+each side. The symmetric arrangement travels one way only, to its full
+peak to peak and back, so it can be inside the stroke peak to peak and
+still reach a stop. The travel each way from center against half the
+stroke is what the stops see, and the verdict says so in words.
+Centering the travel is the controller's compensation, an asymmetric
+pre- and post-pulse.
 
 The half-sine rule is reported beside the integration as the first
 check it is. On the nominal pulse it reads 0.16 % high on every pulse
@@ -100,15 +103,16 @@ plot_stroke(pulse, **ratings, path='stroke.png')
 The table moves 1.17 in peak to peak and the body adds a quarter, so
 the stops see 1.46 in: 58 % of the stroke. The velocity peaks at
 67.6 in/s, 97 % of its rating, and the force is 5,000 lbf, 83 % of its
-own. Every rating holds, and the velocity is the one with no room. The
-travel runs 1.46 in down from rest and none up, so from a centered
-armature, with 1.25 in to the stop each way, it reaches the lower stop;
-it fits resting 0.729 in above center.
+own. Peak to peak, every rating holds. But the travel runs 1.46 in down
+from center and none up, against 1.25 in to the stop each way: one-sided
+travel 1.46 in against 1.25 in to the stop, 117 %. The pulse as
+compensated here does not fit; compensation that centers the travel
+would put about 0.73 in each way, inside the stops.
 
 ![The compensated 50 g, 11 ms half-sine in three rows: the pulse, its
 velocity inside the 70 in/s rating lines, and the table's displacement
 with the travel relative to the body dashed beneath it, past the lower
-stop of a centered armature](images/stroke-readout.png)
+stop half the stroke below center](images/stroke-readout.png)
 
 To check the force at the top of a tolerance band, build the nominal
 pulse at the band's upper edge (1.2 times the peak for a band of plus
@@ -119,10 +123,10 @@ pulse at the band's upper edge (1.2 times the peak for a band of plus
 Select a time history and choose **Stroke** on the bar. The plot shows
 the first selected acceleration channel in three rows, each rating on
 the row it limits: the shock velocity either side of zero, and the
-stops half the stroke either side of rest. The panel beside it takes
+stops half the stroke either side of center. The panel beside it takes
 the ratings in the window's units (zero is no rating) and reads out
 the peaks, the peak to peak beside the half-sine rule, the travel with
-the body, each way from rest, the force, and each demand against its
+the body, each way from center, the force, and each demand against its
 rating in words. Every edit redraws at once. The ratings are kept when
 another record is selected, since a shaker's ratings do not change with
 the record, and the reading is journaled as its `plot_stroke` call.
@@ -137,7 +141,7 @@ the record, and the reading is journaled as its `plot_stroke` call.
 - The ratings. Many shaker sheets give a shock velocity and a shock
   stroke above the continuous figures; where only continuous figures
   are given, those are the ratings.
-- The armature's rest position and the body's mass, which the
-  controller does not know either. Where the reading puts a pulse close
+- The body's mass, and the compensation the controller will actually
+  build, which the symmetric arrangement only stands in for. Where the reading puts a pulse close
   to the stroke, measure the displacement on a calibration load before
   the article goes on.
