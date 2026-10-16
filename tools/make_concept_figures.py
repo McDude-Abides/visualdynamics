@@ -421,6 +421,57 @@ def averaging_confidence():
     print(f'DOF {worth.nominal} nominal, {worth.equivalent:.1f} equivalent')
 
 
+def tone_readout():
+    """One composite read at 1 Hz and at 4 Hz lines: a 1 grms floor from
+    5 to 500 Hz with tones of 0.12, 1.944, 2.5 and 1.5 g peak added. The
+    spikes move with the spacing; the amplitudes read off the lines do
+    not, and the small tone at the floor's edge is called uncertain."""
+    import warnings
+
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_tone_readout
+
+    fs, seconds, g = 2048.0, 60.0, 9.80665
+    tones = ((4.86, 0.12), (19.44, 1.944), (38.88, 2.50), (58.32, 1.50))
+    rng = np.random.default_rng(3304)
+    n = int(fs * seconds)
+    spectrum = np.fft.rfft(rng.standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    spectrum[(f < 5.0) | (f > 500.0)] = 0.0
+    x = np.fft.irfft(spectrum, n)
+    x = x / np.sqrt(np.mean(x ** 2))
+    t = np.arange(n) / fs
+    for frequency, amplitude in tones:
+        x = x + amplitude * np.sin(2.0 * np.pi * frequency * t + frequency)
+    history = TimeHistory(t, x[None] * g, response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    for block, name in ((2048, 'tone-readout-1hz.png'),
+                         (512, 'tone-readout-4hz.png')):
+        averaging = Averaging(frame_length=block, overlap=0.5,
+                              window='hann').filled(n, fs)
+        asd = history.compute_psds(averaging)
+        asd.log_abscissa = True
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            plot_tone_readout(asd, [4.86, 19.44, 58.32], window=averaging,
+                              snap=False,
+                              band=(2.0, 200.0), show=False,
+                              size=(1000, 600), path=str(OUT / name))
+            for frequency, amplitude in tones:
+                reading = asd.read_tone(frequency, window=averaging,
+                                        snap=False)
+                state = ('uncertain' if reading.uncertain else
+                         'between lines' if reading.between_lines else '')
+                print(f'{asd.abscissa[1]:g} Hz lines, {frequency:5.2f} Hz '
+                      f'({amplitude:.3f} g): {reading.amplitude / g:.3f} g '
+                      f'peak, spike {reading.spike / g ** 2:.4f} g2/Hz, '
+                      f'{reading.on_line / g ** 2:.4f} on a line, floor '
+                      f'{reading.floor / g ** 2:.5f} {state}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -430,6 +481,7 @@ def main():
     srs_tolerance()
     shock_check()
     averaging_confidence()
+    tone_readout()
     print('done')
 
 

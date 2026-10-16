@@ -46,6 +46,8 @@ that is not an alpha.
   controller's band and detector, and why its level differs
 - [Reading Q from a peak's half-power width](half-power.md): the
   0.707 line, its crossings, and how many lines a peak needs
+- [Reading a tone off an ASD](tone-readout.md): why a spike's height
+  is not the tone, and the tone in g peak from the lines it leaks into
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

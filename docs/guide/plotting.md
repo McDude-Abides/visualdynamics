@@ -93,6 +93,9 @@ shock response spectrum against its tolerance band, point by point
 `plot_half_power(frf, 180.0)` draws one record with the half-power
 reading of a peak on it, the reading the fitting screen's cursor shows
 ([Reading Q from a peak's half-power width](half-power.md)).
+`plot_tone_readout(asd, [19.44, 58.32], window=...)` draws an
+autospectrum with each tone read off it, the reading the Tones cursor
+shows ([Reading a tone off an ASD](tone-readout.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

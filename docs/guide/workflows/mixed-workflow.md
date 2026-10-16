@@ -124,6 +124,12 @@ rather than working up half of what was asked for;
   tone's level is read with the random as noise. The random report
   states this, because a reader deciding whether an exceedance is real
   needs to know what else was in the band.
+- A tone's spike on the random's PSD is not its level. Its height moves
+  with the line spacing and the window; the tone itself is read off the
+  same PSD by summing the lines it leaks into, less the floor, as the
+  **Tones** reading on the bar does
+  ([Reading a tone off an ASD](../tone-readout.md)). The sine half's
+  tracked levels remain the levels the report judges.
 - Each report has its own verdict. The random report's is read off the
   octave-band comparison, and the level beside it is labeled **Random
   test level**: the random half's comparison is scaled to its
