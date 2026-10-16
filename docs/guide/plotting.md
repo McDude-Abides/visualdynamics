@@ -84,7 +84,10 @@ drawn at a picture's width whatever the record's length; the
 and, for a specification comparison, `plot_bars(measured,
 specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 `plot_snr(...)` and `plot_replication(...)`. Each draws the figure the
-app shows, and each takes `path=`. The 3-D forms are in
+app shows, and each takes `path=`. `plot_srs_tolerance(...)` draws a
+shock response spectrum against its tolerance band, point by point
+([Judging an SRS against its tolerance](srs-tolerance.md)), and takes
+`path=` too. The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and
 `sinespec.plot_sine_stage(specification, levels)` puts measured sine

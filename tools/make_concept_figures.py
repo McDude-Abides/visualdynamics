@@ -279,12 +279,54 @@ def sine_tracking_band():
         print(f'{setting.describe():>34}: drawn')
 
 
+def srs_tolerance():
+    """A shock spectrum judged point by point: a requirement written at
+    three breakpoints, a maximax spectrum on it but for a narrow, deep
+    dip, and a negative spectrum that falls away at the top. The dip
+    leaves the RMS reading well inside 3 dB and fails the points rule."""
+    import numpy as np
+
+    from visualdynamics.core.compliance import srs_errors, srs_tolerance
+    from visualdynamics.core.data import ShockSpecification, Srs
+    from visualdynamics.plot import plot_srs_tolerance
+
+    spec = ShockSpecification.from_breakpoints(
+        [10.0, 100.0, 2000.0], [10.0, 100.0, 100.0], '101Z+',
+        ordinate_unit='g')
+    f = spec.abscissa
+    octaves = np.log2(f / 10.0)
+    # a little ripple, as a synthesized pulse leaves, and a dip a third
+    # of an octave wide and 5 dB deep near 400 Hz
+    db = 0.6 * np.sin(2.0 * np.pi * octaves / 1.5)
+    db -= 5.0 * np.exp(-0.5 * (np.log2(f / 400.0) / 0.12) ** 2)
+    maximax = Srs(f, spec.ordinate * 10.0 ** (db / 20.0),
+                  response_dof=['101Z+'], ordinate_dim=['acceleration'],
+                  kind='maximax')
+    # the negative spectrum on the requirement to the knee, then falling
+    # 6 dB an octave from 400 Hz: a pulse whose other side is small
+    fall = -0.4 - 6.0 * np.clip(np.log2(f / 400.0), 0.0, None)
+    negative = Srs(f, spec.ordinate * 10.0 ** (fall / 20.0),
+                   response_dof=['101Z+'], ordinate_dim=['acceleration'],
+                   kind='negative')
+    plot_srs_tolerance([maximax, negative], spec, outer=(-3.0, 6.0),
+                       show=False, size=(1000, 640),
+                       path=str(OUT / 'srs-tolerance.png'))
+    for data in (maximax, negative):
+        result = srs_tolerance(spec, data, outer=(-3.0, 6.0))
+        (_dof, _event, rms_db), = srs_errors(spec, data)
+        print(f'{data.kind:>9}: RMS {rms_db:+.2f} dB, '
+              f'{result["inside_count"]}/{result["points"]} inside, '
+              f'worst {result["worst_db"]:+.1f} dB at '
+              f'{result["worst_frequency"]:.0f} Hz, passed {result["passed"]}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
     compliance()
     sine_tracking()
     sine_tracking_band()
+    srs_tolerance()
     print('done')
 
 

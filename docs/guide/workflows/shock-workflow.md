@@ -21,6 +21,7 @@ The recording ships with the repository (`testdata/plate/shock.nc4`).
 | Compute the SRS | Compute SRS in the Shocks view | `project.compute_srs('Time History')` |
 | The required SRS | import it, with its tolerance | `ShockSpecification(...)` from `visualdynamics.core.data` |
 | Compare | select SRS and specification together | `plot_series([srs, spec])`, `plot_bars(srs, spec, 'srs')` from `visualdynamics.plot` |
+| Judge the tolerance | | `srs_tolerance(spec, srs)` from `visualdynamics.core.compliance`, `plot_srs_tolerance(srs, spec)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | Generate Report on the bar, with the project row selected | `project.generate_report('shock')` |
 | Or all of it at once | Automatic on the tree bar, once the project has its type | `project.work_up()` |
@@ -105,6 +106,13 @@ shaded, the four events' deviations tabled, the stepped-up series
 closing on the specification event by
 event](../images/shock-spec.png)
 
+The bars are an RMS summary and not the tolerance check, which counts
+the points of each spectrum inside the band and applies the test
+document's rule to the count. A spectrum with a narrow, deep dip can
+read well inside 3 dB on the bars and still fail it. That check is
+`srs_tolerance` and its picture `plot_srs_tolerance`, described in
+[Judging an SRS against its tolerance](../srs-tolerance.md).
+
 ### 5. Geometry, photos, report
 
 Drag the article's geometry in, declare its units, add the setup
@@ -181,7 +189,9 @@ project.save('shock.vdyn')
 - The tolerance itself. The demonstration specification uses ±6 dB
   (+6 dB and −3 dB is a common convention). A real specification
   carries its own band, and the shading in every comparison comes from
-  the specification object, not from a setting.
+  the specification object, not from a setting. The rule about how
+  many points must lie inside it is the test document's, and is given
+  to `srs_tolerance` as its arguments.
 - Q, and what the spectrum means. An SRS is computed at one
   amplification: a spectrum at Q = 10 says nothing about what the same
   shock does to a Q = 50 article. The Q is stored on the spectrum and
