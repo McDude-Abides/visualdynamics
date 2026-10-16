@@ -56,6 +56,8 @@ that is not an alpha.
 - [Checking a sweep rate against the modes it passes](sweep-rate.md):
   the time and cycles in each half-power band, and what a fast sweep
   does to a peak and its Q
+- [Comparing signatures before and after a test](signature-comparison.md):
+  each mode's frequency and amplitude shift, judged against limits
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

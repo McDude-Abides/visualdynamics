@@ -104,7 +104,9 @@ by segment ([Judging a replication by
 segment](replication-segments.md)). A sine specification's sweep
 against the modes it passes is `plot_sweep_rate(specification, [(22.0,
 40.0)])`, the Sweep Rate reading ([checking a sweep
-rate](sweep-rate.md)).
+rate](sweep-rate.md)). `plot_signature(before, after, modes)` draws
+two signatures with a window on each mode for its limits and the table
+of shifts beside ([comparing signatures](signature-comparison.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

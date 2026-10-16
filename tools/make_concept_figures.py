@@ -662,6 +662,42 @@ def sweep_rate():
                     path=str(OUT / 'sweep-rate.png'))
 
 
+def signature():
+    """Two signatures of a two-mode article, before and after a test,
+    compared mode by mode: a global first mode that drops 3.3 percent
+    in frequency and 28 percent in height, and a local mode near
+    400 Hz that moves further and does not count."""
+    import numpy as np
+
+    from visualdynamics.core.data import Frf
+    from visualdynamics.core.signature import SignatureMode, compare_signatures
+    from visualdynamics.plot import plot_signature
+
+    def transmissibility(f, modes):
+        # each mode a resonator on the moving base, seen at the point
+        # by its share of the motion
+        out = np.zeros(f.shape, dtype=complex)
+        for fn, q, share in modes:
+            r, zeta = f / fn, 0.5 / q
+            out += share * (1 + 2j * zeta * r) / (1 - r ** 2 + 2j * zeta * r)
+        return out
+
+    f = np.arange(1, 2401) * 0.25
+    signatures = [
+        Frf(f, transmissibility(f, modes)[None], response_dof=['101X+'],
+            reference_dof=['1X+'],
+            ordinate_dim=['acceleration/acceleration'])
+        for modes in ([(84.07, 21.1, 0.85), (412.0, 30.0, 0.15)],
+                      [(81.32, 15.25, 0.85), (377.0, 20.0, 0.15)])]
+    modes = [84.0, SignatureMode(412.0, counts=False)]
+    plot_signature(*signatures, modes, show=False, size=(1300, 640),
+                   path=str(OUT / 'signature.png'))
+    result = compare_signatures(*signatures, modes)
+    for shift in result.shifts:
+        print(f'{shift.mode.label():>7}: {shift.describe()}')
+    print(f'{"":>7}  {result.describe()}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -676,6 +712,7 @@ def main():
     time_statistics()
     replication_segments()
     sweep_rate()
+    signature()
     print('done')
 
 

@@ -211,6 +211,12 @@ project.save('sine.vdyn')
   extraction. The scalogram shows which: a resonance is a bright patch
   at a fixed frequency, beating is ribbing where ridges pass close, and
   neither is the extractor's doing.
+- A survey before the test and one after it are compared mode by
+  mode, not by eye. Two tracked levels (or two FRFs) selected together
+  offer the **Signature** reading: each mode's frequency and amplitude
+  shift against the plan's limits, a window drawn on each mode. See
+  [comparing signatures before and after a
+  test](../signature-comparison.md).
 - Ramp time is part of the trajectory. A tone leaves its start
   frequency at `start_time + ramp_time`, and the extracted clock is
   aligned to the tone's onset, so a lead-in before the sweep starts is
