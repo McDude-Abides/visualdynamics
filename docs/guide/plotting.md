@@ -104,12 +104,17 @@ The toggles that draw a reading over the data are an argument:
 ```python
 history.plot(marks='filter')        # also 'averaging', 'shocks', 'truncation'
 psd.plot(marks='octave', per_octave=3)   # the bands it would integrate to
+psd.plot(marks='confidence')            # its chi-square band, 90 and 95 %
 psd.plot_waterfall(marks='octave', screenshot='bands.png')   # on the stage
 ```
 
 Each reading is taken from the object the same way the app takes it:
 from the settings the object holds, or from the ones its detector
 would suggest. In a script the marks are locked and cannot be dragged.
+The confidence band is the exception: it is not a setting but what the
+PSD's own average is worth, read from the degrees of freedom it carries
+([What an average is worth](averaging-confidence.md)), and it is drawn
+flat only.
 
 ## Copying what is shown
 

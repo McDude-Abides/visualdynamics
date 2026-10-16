@@ -63,7 +63,10 @@ window the controller used, read from the file. The start and the
 number of frames are worked out from the record: where the run is at
 level, and how many frames that stretch holds. This is the same answer
 the view's **Detect** button gives, and the view marks those frames on
-the trace before you press the button.
+the trace before you press the button. Beside the number of averages,
+the view shows what they are worth: the degrees of freedom, nominal and
+discounted for overlap, and the 90 percent confidence band they give
+(see [What an average is worth](../averaging-confidence.md)).
 
 ![The control PSDs: eight acceleration channels and the drive forces,
 averaged over the run's own frames](../images/random-psds.png)

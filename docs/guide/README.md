@@ -58,6 +58,8 @@ that is not an alpha.
   spreadsheet, and its rules
 - [How a PSD means its area](psd-reading.md): bandwidth, integration,
   and what the numbers mean
+- [What an average is worth](averaging-confidence.md): the degrees of
+  freedom of an averaged PSD, and the confidence band they give
 - [How a comparison is judged](compliance.md): the one cell rule,
   every pairing of PSD and specification, and the edge cases
 - [Reports](reports.md): symbolic bindings, live text, and one file out

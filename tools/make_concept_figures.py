@@ -391,6 +391,34 @@ def shock_check():
     plot_shock_check(history, low=10.0, high=10000.0, unit_system=shown,
                      show=False, size=(1000, 900),
                      path=str(OUT / 'shock-check-compensated.png'))
+def averaging_confidence():
+    """What an average is worth: a resonance under random excitation,
+    averaged over sixteen Hann frames at three-quarter overlap, drawn
+    with the chi-square band its equivalent degrees of freedom give."""
+    import numpy as np
+    from scipy.signal import iirpeak, lfilter
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.units import SI
+
+    rate = 2048.0
+    averaging = Averaging(frame_length=512, overlap=0.75, window='hann',
+                          frames=16)
+    noise = np.random.default_rng(11).standard_normal(averaging.span)
+    # one resonance at 200 Hz over a flat floor, so the band is seen
+    # riding a peak as well as a plateau
+    b, a = iirpeak(200.0, 8.0, fs=rate)
+    x = 0.2 * noise + lfilter(b, a, noise)
+    history = TimeHistory(np.arange(averaging.span) / rate, x[None],
+                          response_dof=['101Z+'],
+                          ordinate_dim=['acceleration'])
+    history.averaging = averaging
+    psd = history.compute_psds()
+    psd.plot(marks='confidence', unit_system=SI, show=False,
+             path=str(OUT / 'averaging-confidence.png'))
+    worth = averaging.statistical_dof()
+    print(f'DOF {worth.nominal} nominal, {worth.equivalent:.1f} equivalent')
 
 
 def main():
@@ -401,6 +429,7 @@ def main():
     sine_tracking_band()
     srs_tolerance()
     shock_check()
+    averaging_confidence()
     print('done')
 
 
