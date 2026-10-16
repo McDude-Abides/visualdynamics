@@ -1889,8 +1889,63 @@ class TimeHistory(DataArray):
         Srs
             One curve per channel per shock (a `ShockSpecification` for
             a target, see `srs_type`).
+
+        Raises
+        ------
+        ValueError
+            If `kind` is not one of `srs.KINDS`.
         """
-        from .srs import DEFAULT_Q, PER_OCTAVE, maximax, octave_frequencies
+        from .srs import KINDS
+
+        if kind not in KINDS:
+            raise ValueError(f'an SRS keeps one of {", ".join(KINDS)}; '
+                             f'{kind!r} is none of them')
+        return self.compute_srs_polarities(shocks, low, high, per_octave,
+                                           q)[kind]
+
+    def compute_srs_polarities(self, shocks: Sequence[Any] | None = None,
+                               low: float | None = None,
+                               high: float | None = None,
+                               per_octave: int | None = None,
+                               q: float | None = None) -> dict[str, Srs]:
+        """The positive, negative and maximax spectra together, from one
+        pass of the filter.
+
+        The windows, the band and the curves are those of `compute_srs`,
+        which is this call keeping one of the three. Each oscillator's
+        highest and lowest response come out of the same pass
+        (`srs.peaks`), so the three spectra cost what one does, and they
+        are worth reading together: a shock whose response is nearly all
+        in one direction shows it as a gap between the positive and the
+        negative spectrum that the maximax alone hides. The negative
+        spectrum is reported as a positive magnitude, so the two are
+        drawn on one log axis.
+
+        Parameters
+        ----------
+        shocks : sequence of Shock, optional
+            The windows to use in place of the record's own.
+        low, high : float, optional
+            The natural-frequency band, in Hz; `srs_band` when omitted.
+        per_octave : int, optional
+            Frequency lines per octave; `srs.PER_OCTAVE` (12) when
+            omitted.
+        q : float, optional
+            The oscillator amplification; `srs.DEFAULT_Q` when omitted.
+
+        Returns
+        -------
+        dict of str to Srs
+            'positive', 'negative' and 'maximax', in that order, each one
+            curve per channel per shock and each carrying its own `kind`.
+        """
+        # Added with the shock check (2026-10-16), which draws the
+        # positive and negative spectra together: one `compute_srs` per
+        # polarity would run the filter three times over the same record
+        # for numbers the first pass already holds. `compute_srs` keeps
+        # one of these, so the windows, band and labels have one
+        # statement.
+        from .srs import DEFAULT_Q, KINDS, PER_OCTAVE, octave_frequencies
         from .srs import peaks as srs_peaks
 
         rate = self.sample_rate
@@ -1903,29 +1958,30 @@ class TimeHistory(DataArray):
             low, high, PER_OCTAVE if per_octave is None else per_octave)
         q = DEFAULT_Q if q is None else float(q)
 
-        rows, dofs, dims, hints, blocks = [], [], [], [], []
+        rows = {kind: [] for kind in KINDS}
+        dofs, dims, hints, blocks = [], [], [], []
         for i, record in enumerate(self.ordinate):
             for k, window in enumerate(windows):
                 first, last = window.bounds(rate)
-                cut = record.real[first:last]
-                if kind == 'maximax':
-                    rows.append(maximax(cut, frequencies, rate, q=q))
-                else:
-                    highest, lowest = srs_peaks(cut, frequencies, rate, q=q)
-                    rows.append(highest if kind == 'positive' else -lowest)
+                highest, lowest = srs_peaks(record.real[first:last],
+                                            frequencies, rate, q=q)
+                rows['positive'].append(highest)
+                rows['negative'].append(-lowest)
+                rows['maximax'].append(np.maximum(highest, -lowest))
                 dofs.append(self.response_dof[i])
                 dims.append(self.ordinate_dim[i])
                 hints.append(self.dimension_hint[i])
                 blocks.append(f'shock {k + 1}' if named
                               else (None if self.block is None
                                     else self.block[i]))
-        return self.srs_type()(
-            frequencies, np.asarray(rows, dtype=np.float64),
-            response_dof=dofs, ordinate_dim=dims,
-            dimension_hint=hints,
-            block=blocks if named or self.block is not None else None,
+        return {kind: self.srs_type()(
+            frequencies, np.asarray(rows[kind], dtype=np.float64),
+            response_dof=list(dofs), ordinate_dim=list(dims),
+            dimension_hint=list(hints),
+            block=(list(blocks) if named or self.block is not None
+                   else None),
             q=q, kind=kind,
-            comment=f'{kind} SRS at Q={q:g}')
+            comment=f'{kind} SRS at Q={q:g}') for kind in KINDS}
 
     def compute_psds(self, averaging: Averaging | None = None) -> Psd:
         """One-sided auto-power spectral density per channel, averaged

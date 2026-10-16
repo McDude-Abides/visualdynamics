@@ -3038,6 +3038,103 @@ def plot_snr(signal: Any, floor: Any, *,
                         size=size)
 
 
+def plot_shock_check(history: Any, channel: str | None = None, *,
+                     shock: int = 0, shocks: Sequence[Any] | None = None,
+                     tolerance: float | None = None,
+                     q: float | None = None, per_octave: int | None = None,
+                     low: float | None = None, high: float | None = None,
+                     unit_system: UnitSystem | None = None,
+                     theme: Any = None,
+                     path: str | os.PathLike | None = None,
+                     show: bool = True, title: str | None = None,
+                     size: tuple[int, int] = (1000, 900)) -> Any:
+    """Draw a shock record's velocity check beside its spectra.
+
+        visualdynamics.plot.plot_shock_check(history, '101Z+',
+                                             path='check.png')
+
+    Three rows for one channel over one window: the acceleration, its
+    velocity integrated raw (`core.shock_check`), and the positive and
+    negative shock response spectra drawn together. The velocity row
+    is titled with the verdict in words and shades the band either side
+    of zero that the velocity has to end inside. A record whose
+    velocity does not come back to rest is not one to report a
+    spectrum from, and this is where that is seen before the spectrum
+    is read.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The shock record.
+    channel : str, optional
+        The DOF drawn; the record's first acceleration channel by
+        default.
+    shock : int, default 0
+        Which window, counting from 0, of `TimeHistory.srs_windows`.
+    shocks : sequence of Shock, optional
+        Windows to use in place of the record's own.
+    tolerance : float, optional
+        How far from rest the velocity may end, as a share of its peak;
+        `core.shock_check.RETURN_SHARE` by default.
+    q : float, optional
+        The oscillator amplification; `core.srs.DEFAULT_Q` by default.
+    per_octave : int, optional
+        Natural-frequency lines per octave; `core.srs.PER_OCTAVE` (12)
+        by default.
+    low, high : float, optional
+        The natural-frequency band, in Hz; `TimeHistory.srs_band` of
+        the window by default.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        If the record has no acceleration channel, `channel` is not
+        one, or `shock` names no window.
+    """
+    from dataclasses import replace
+
+    from ..core.shock_check import RETURN_SHARE, check_shock
+    from .shock_check import build_shock_check
+
+    windows = history.srs_windows(shocks)
+    if not 0 <= shock < len(windows):
+        raise ValueError(f'the record has {len(windows)} window'
+                         f'{"s" * (len(windows) != 1)}; there is no '
+                         f'window {shock}')
+    window = [windows[shock]]
+    checks = check_shock(history, shocks=window,
+                         tolerance=(RETURN_SHARE if tolerance is None
+                                    else tolerance))
+    dof = checks[0].dof if channel is None else channel
+    found = [check for check in checks if check.dof == dof]
+    if not found:
+        raise ValueError(f'{dof} is not an acceleration channel of this '
+                         'record, and only acceleration is checked')
+    check = found[0]
+    spectra = history.compute_srs_polarities(window, low, high,
+                                             per_octave, q)
+    # the check counts windows within the one it was given; named back
+    # to the record's own count so the picture says which event it is
+    check = replace(check, window=shock)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_shock_check(widget, history, check, spectra,
+                          unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{dof}, shock {shock + 1}: '
+                                        'velocity check and spectra'),
+                        size=size)
+
+
 def plot_scalogram(history: Any, channel: int = 0, *,
                    low: float | None = None, high: float | None = None,
                    per_octave: int | None = None,

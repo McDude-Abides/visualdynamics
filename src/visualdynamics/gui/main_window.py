@@ -11025,7 +11025,23 @@ class MainWindow(QMainWindow):
         panel.origin = float(history.abscissa[0])
         panel.set_shocks(found, locked=locked)
         panel.show_band(*history.srs_band())
+        self._check_shocks(history)
         panel.show()
+
+    def _check_shocks(self, history):
+        """State the velocity check of the windows on show in the
+        panel: the same `core.shock_check` reading a script calls, over
+        the windows the SRS would be computed from."""
+        from ..core.shock_check import check_shock, summarize
+
+        try:
+            checks = check_shock(history)
+        except ValueError:
+            # nothing here is acceleration, so there is nothing to
+            # integrate and nothing to say
+            checks = []
+        self.data_pane.shock_panel.show_check(
+            summarize(checks), any(check.flagged for check in checks))
 
     def _clear_shocks(self):
         self._clear_overlays('shock_overlays')
@@ -11077,6 +11093,7 @@ class MainWindow(QMainWindow):
             overlay.common = shared
         self.data_pane.shock_panel.set_shocks(
             history.shocks, locked=bool(history.split_into_frames))
+        self._check_shocks(history)
         self._refresh_stale_badges()
         self._report_content_changed(settling=True)
         # the stage's slabs are rebuilt with the scene, so an edit

@@ -41,6 +41,8 @@ THEORY = {
                           'through a Butterworth low-pass',
     'core.half_power': 'the half-power width of a peak, and the '
                        'parabola that places its top between lines',
+    'core.shock_check': 'the velocity check a shock record is read '
+                        'through before its spectrum',
 }
 
 #: and methods, where the theory lives on the call rather than the module

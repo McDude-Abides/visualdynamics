@@ -49,6 +49,11 @@ from numpy.typing import ArrayLike
 #: this one, but it is a choice and it belongs on the object.
 DEFAULT_Q = 10.0
 
+#: the peaks an SRS can keep: the oscillator's largest response in the
+#: positive direction, its largest in the negative (reported as a
+#: magnitude), and the larger of the two
+KINDS = ('positive', 'negative', 'maximax')
+
 #: octave fraction the natural frequencies are spaced at. A twelfth is
 #: fine enough that a lightly damped peak is not stepped over and
 #: coarse enough to stay quick.

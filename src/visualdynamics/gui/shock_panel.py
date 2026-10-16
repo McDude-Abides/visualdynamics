@@ -8,7 +8,8 @@ events again, Add adds a window the detector missed, Remove deletes the
 selected one, and Same length for all gives every window one length.
 
 Below the table are the SRS settings (Q, which peak, and lines per
-octave) and the band the windows support. Compute SRS computes the
+octave), the band the windows support, and the velocity check of every
+acceleration channel over every window (`core.shock_check`). Compute SRS computes the
 spectra with whatever is set at that moment, through the project verb a
 script calls, as the averaging panel does for a PSD.
 """
@@ -182,6 +183,19 @@ class ShockPanel(QWidget):
         layout.addLayout(grid)
         commit_on_enter(self.q_box, self.per_octave_box)
 
+        # the velocity check, read before the spectrum is computed: a
+        # record whose velocity does not come back to rest carries a
+        # zero shift or an offset, and its spectrum is false at the low
+        # end. Read only — the windows above are what it is read over.
+        self.check_label: QLabel = QLabel('')
+        self.check_label.setWordWrap(True)
+        self.check_label.setToolTip(
+            'Each acceleration channel integrated to velocity with '
+            'nothing removed, read over each window from rest.\n'
+            'A velocity that does not come back to rest is flagged.')
+        self.check_label.hide()
+        layout.addWidget(self.check_label)
+
         # the act these windows parameterize, right where they are set
         self.srs_button: QPushButton = QPushButton('Compute SRS')
         self.srs_button.setToolTip(
@@ -326,6 +340,14 @@ class ShockPanel(QWidget):
         return {'q': float(self.q_box.value()),
                 'kind': str(self.kind_box.currentData()),
                 'per_octave': int(self.per_octave_box.value())}
+
+    def show_check(self, text: str, flagged: bool = False) -> None:
+        """Show the velocity check's words, `core.shock_check.summarize`,
+        in bold when a window is flagged; hidden when there are none."""
+        self.check_label.setText(text)
+        self.check_label.setStyleSheet('font-weight: 600;' if flagged
+                                       else '')
+        self.check_label.setVisible(bool(text))
 
     def show_band(self, low: float, high: float) -> None:
         """Show the frequency band, in Hz, the current windows support."""
