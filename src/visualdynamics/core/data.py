@@ -4103,6 +4103,128 @@ class ShockSpecification(Bounded, Srs):
 
     PLAIN = Srs
 
+    @classmethod
+    def from_breakpoints(cls, frequencies: ArrayLike, levels: ArrayLike,
+                         response_dof: str | Sequence[str], *,
+                         per_octave: int | None = None,
+                         q: float | None = None, kind: str = 'maximax',
+                         ordinate_dim: str = 'acceleration',
+                         ordinate_unit: str | None = None,
+                         warning: tuple[float, float] | None = None,
+                         abort: tuple[float, float] | None = None
+                         ) -> ShockSpecification:
+        """A requirement written as breakpoints, read onto the points of
+        its spacing, with its bands as limits.
+
+            spec = ShockSpecification.from_breakpoints(
+                [10.0, 100.0, 2000.0], [10.0, 100.0, 100.0], '101Z+',
+                ordinate_unit='g', warning=(-1.5, 3.0), abort=(-3.0, 6.0))
+
+        A shock requirement is usually written as a few breakpoints
+        joined by straight lines on log axes (a rising slope in dB per
+        octave, a knee and a plateau), with its Q, its spacing and its
+        type stated beside it. The points are the spacing's, from the
+        first breakpoint up, `per_octave` to an octave, the last one at
+        or below the last breakpoint, so every point lies on the curve
+        the breakpoints draw (`compliance.log_interpolate`). That
+        spacing is the one a tolerance is counted at, so a measured
+        spectrum computed at the same `per_octave` from the same lowest
+        frequency lands on the requirement's points one for one.
+
+        Each band, given as dB below and above the requirement, becomes
+        a pair of limit curves: `warning` the warning limits and `abort`
+        the abort limits. A tolerance written as an inner and an outer
+        band is the two of them, inner as the warning, outer as abort.
+
+        Parameters
+        ----------
+        frequencies : array-like
+            The breakpoints' frequencies in Hz, increasing.
+        levels : array-like
+            The level at each breakpoint, one row per channel, in
+            `ordinate_unit`. A single row (which may be one-dimensional)
+            is the requirement at every channel named.
+        response_dof : str or sequence of str
+            The DOF each row is required at.
+        per_octave : int, optional
+            Points to an octave; `srs.PER_OCTAVE` when omitted.
+        q : float, optional
+            The amplification the requirement is written at;
+            `srs.DEFAULT_Q` when omitted.
+        kind : str, default 'maximax'
+            The spectrum's type: 'maximax', 'positive' or 'negative'.
+        ordinate_dim : str, default 'acceleration'
+            The quantity the levels are of.
+        ordinate_unit : str, optional
+            The unit the levels are written in; SI when omitted.
+        warning, abort : (float, float), optional
+            A band in dB below and above the requirement, kept as that
+            pair of limits.
+
+        Returns
+        -------
+        ShockSpecification
+            The requirement on its points, with the limits given.
+
+        Raises
+        ------
+        ValueError
+            For fewer than two breakpoints, frequencies that are not
+            positive and increasing, levels that are not positive, or a
+            band whose lower edge is not below its upper.
+        """
+        from .compliance import _band_db, log_interpolate
+        from .srs import DEFAULT_Q, PER_OCTAVE
+
+        corners = np.asarray(frequencies, dtype=float)
+        rows = np.atleast_2d(np.asarray(levels, dtype=float))
+        if corners.ndim != 1 or corners.size < 2:
+            raise ValueError('a requirement needs at least two breakpoints')
+        if not (np.all(corners > 0.0) and np.all(np.diff(corners) > 0.0)):
+            raise ValueError('the breakpoints\' frequencies must be positive '
+                             'and increasing')
+        if rows.shape[1] != corners.size:
+            raise ValueError(f'{rows.shape[1]} levels for {corners.size} '
+                             'breakpoints')
+        if not np.all(rows > 0.0):
+            raise ValueError('a required level must be positive')
+        if ordinate_unit is not None:
+            scale, offset = si_transform(ordinate_unit, ordinate_dim)
+            rows = rows * scale + offset
+        step = PER_OCTAVE if per_octave is None else int(per_octave)
+        # whole steps only, so the last point stays on the curve: the
+        # nearest whole number of steps, as `octave_frequencies` takes,
+        # can land past the last breakpoint, where nothing is written
+        steps = int(np.floor(np.log2(corners[-1] / corners[0]) * step + 1e-9))
+        points = corners[0] * 2.0 ** (np.arange(steps + 1) / float(step))
+        # a band a whole number of octaves wide ends on its breakpoint,
+        # and 2**k can round a hair past it, where the curve is not
+        # written and the last point would read NaN
+        points = np.minimum(points, corners[-1])
+        ordinate = np.vstack([log_interpolate(points, corners, row)
+                              for row in rows])
+        dofs = ([response_dof] * ordinate.shape[0]
+                if isinstance(response_dof, str) else list(response_dof))
+        if ordinate.shape[0] == 1 and len(dofs) > 1:
+            # one requirement at several channels, as a shock is often
+            # required alike on every axis
+            ordinate = np.repeat(ordinate, len(dofs), axis=0)
+        count = ordinate.shape[0]
+        limits = {}
+        for name, band in (('warning', warning), ('abort', abort)):
+            if band is None:
+                continue
+            below, above = _band_db(name, band)
+            limits[f'{name}_lower'] = ordinate * 10.0 ** (below / 20.0)
+            limits[f'{name}_upper'] = ordinate * 10.0 ** (above / 20.0)
+        q = DEFAULT_Q if q is None else float(q)
+        return cls(points, ordinate, response_dof=dofs,
+                   ordinate_dim=[ordinate_dim] * count,
+                   ordinate_unit=(None if ordinate_unit is None
+                                  else [ordinate_unit] * count),
+                   comment=f'{kind} SRS at Q={q:g}, {step} to the octave',
+                   q=q, kind=kind, **limits)
+
 
 class TransientSpecification(TimeHistory):
     """What a transient test was controlled to: a target time history.
