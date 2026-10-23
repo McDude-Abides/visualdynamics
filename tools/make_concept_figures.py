@@ -827,7 +827,7 @@ def transmissibility():
     0.6 g rms of noise the input did not cause on the response channel,
     analyzed at 2.5 Hz lines with 119 Hann frames at half overlap. H1
     and the ASD ratio are one curve where the coherence is high; above
-    about 1 kHz the ratio lifts away, and H1's band widens instead."""
+    about 1 kHz the ratio parts from H1, and H1's band widens."""
     import numpy as np
 
     from visualdynamics.core.averaging import Averaging

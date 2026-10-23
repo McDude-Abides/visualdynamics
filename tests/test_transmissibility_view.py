@@ -145,8 +145,8 @@ def test_moving_the_cursor_reads_the_line_under_it(window, pump):
     assert point.frequency == pytest.approx(1500.0, abs=2.5)
     derived = pane.transmissibility_panel.derived
     assert derived['frequency'].text() == f'{point.frequency:.4g} Hz'
-    assert derived['over'].text() == f'{point.overstatement_db:+.2f} dB'
-    assert point.overstatement_db > 1.0, 'the noise lifts the ratio here'
+    assert derived['gap'].text() == f'{point.ratio_to_h1_db:+.2f} dB'
+    assert point.ratio_to_h1_db > 1.0, 'the noise lifts the ratio here'
     assert derived['error'].text() == f'±{100 * point.error:.1f} %'
     marks = state['overlay']
     assert marks.ratio_mark.getOriginalDataset()[1][0] == pytest.approx(

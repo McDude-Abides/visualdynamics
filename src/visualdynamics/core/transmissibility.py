@@ -3,7 +3,7 @@ what the cross-spectrum estimate is worth.
 
 Transmissibility is the motion at one point over the motion at another,
 a response over an input, at each frequency. From random data it is
-computed two ways, and both are commonly labelled transmissibility.
+computed two ways, and both are commonly labeled transmissibility.
 
 The ASD ratio divides the response's autospectrum by the input's and
 takes the root, because an autospectrum is a squared quantity:
@@ -35,10 +35,24 @@ and dividing by |H1| squared leaves one over the coherence, so
 
 at every line. The ratio and H1 agree where the coherence is near one
 and part company where it falls, the ratio always above: at a coherence
-of 0.68 it reads 1.7 dB over H1, at 0.29 it reads 5.4 dB over. That
-excess is uncorrelated content counted as response, not motion of the
-article, which is why a transmissibility drawn without saying which of
-the two it is has not said what it is.
+of 0.68 it reads 1.7 dB over H1, at 0.29 it reads 5.4 dB over. The gap
+is the coherence restated, minus ten times its log, and it says the
+coherence is under one, not why, nor which of the two is nearer the
+truth. That depends on where the content the input did not cause is:
+
+- on the response (a noise floor, a rattle, another source), H1 is
+  unbiased and the ratio reads high, by one over the root of the
+  coherence;
+- on the input channel (its sensor's noise), H1 reads low, by the
+  coherence, and the ratio low by its root, so the ratio is the nearer
+  of the two. With 6 g rms of noise on the input of a survey whose
+  truth is 0.100 at 1 kHz, H1 reads 0.073 and the ratio 0.084;
+- leakage at a sharp resonance, a nonlinearity or a second input lower
+  the coherence too, and bias both.
+
+A transmissibility drawn without saying which of the two it is has not
+said what it is, and the gap between them is a reason to look at the
+measurement, not a correction to apply to either.
 
 What H1 is worth at a line follows from its coherence and the number of
 averages behind it. The normalized random error of its magnitude is
@@ -96,6 +110,7 @@ from typing import Any
 import numpy as np
 
 from ..units import UNKNOWN
+from .data import TimeHistory, channel_quantities, ordinary_coherence
 
 #: the random error past which the first-order expression says only
 #: that the estimate is poor. The expression is a small-error result;
@@ -177,10 +192,12 @@ class TransmissibilityPoint:
         return self.magnitude * (1.0 + self.spread * self.error)
 
     @property
-    def overstatement_db(self) -> float:
-        """How far the ASD ratio reads over |H1|, in decibels of a
-        magnitude: minus ten times the log of the coherence, since the
-        ratio is |H1| over the root of the coherence."""
+    def ratio_to_h1_db(self) -> float:
+        """The ASD ratio to |H1|, in decibels of a magnitude: minus ten
+        times the log of the coherence, since the ratio is |H1| over the
+        root of the coherence. It says the coherence is under one, not
+        which of the two estimates is nearer the truth (the module's
+        introduction sets out why)."""
         if not self.magnitude > 0.0:
             return float('nan')
         return 20.0 * float(np.log10(self.asd_ratio / self.magnitude))
@@ -201,7 +218,7 @@ class TransmissibilityPoint:
         return (f'{self.frequency:.4g} Hz: H1 {self.magnitude * scale:.4g}'
                 f'{unit} ({error}, coherence {self.coherence:.3f}); '
                 f'ASD ratio {self.asd_ratio * scale:.4g}{unit}, '
-                f'{self.overstatement_db:+.1f} dB over H1')
+                f'{self.ratio_to_h1_db:+.1f} dB from H1')
 
 
 @dataclass(frozen=True, eq=False)
@@ -232,6 +249,24 @@ class TransmissibilityReading:
     notes: tuple[str, ...] = ()
 
     @property
+    def is_transmissibility(self) -> bool:
+        """Whether the two channels measure one quantity, so the reading
+        is a transmissibility, motion over motion. A force reference
+        makes H1 an FRF (acceleration over force, say), and undeclared
+        quantities leave it unsaid."""
+        if self.dimension == UNKNOWN or '/' not in self.dimension:
+            return False
+        out, into = channel_quantities(self.dimension)
+        return out == into
+
+    @property
+    def title(self) -> str:
+        """What to call the reading: 'Transmissibility' where it is one
+        (`is_transmissibility`), else 'ASD ratio and H1'."""
+        return ('Transmissibility' if self.is_transmissibility
+                else 'ASD ratio and H1')
+
+    @property
     def magnitude(self) -> np.ndarray:
         """|H1| at every line."""
         return np.abs(self.h1)
@@ -248,9 +283,10 @@ class TransmissibilityReading:
         return frf_random_error(self.coherence, self.averages)
 
     @property
-    def overstatement_db(self) -> np.ndarray:
-        """How far the ASD ratio reads over |H1| at every line, in
-        decibels: minus ten times the log of the coherence."""
+    def ratio_to_h1_db(self) -> np.ndarray:
+        """The ASD ratio to |H1| at every line, in decibels: minus ten
+        times the log of the coherence. Like the coherence, it does not
+        say which of the two is nearer the truth."""
         with np.errstate(divide='ignore', invalid='ignore'):
             return 20.0 * np.log10(self.asd_ratio / self.magnitude)
 
@@ -295,7 +331,7 @@ class TransmissibilityReading:
         """What was read, in a few words: the two channels and the
         averages."""
         pair = (f'{self.response} over {self.reference}'
-                if self.response or self.reference else 'transmissibility')
+                if self.response or self.reference else self.title)
         return (f'{pair}: H1 and the ASD ratio from {self.frames} frames, '
                 f'{self.averages:.4g} independent averages')
 
@@ -319,8 +355,13 @@ def read_transmissibility(frequency: Any, gxx: Any, gyy: Any, gxy: Any,
     for its labels.
 
     A line where the input has no power has no H1, no ratio and no
-    coherence: all three are not a number there. A coherence a few
-    parts in 1e12 over one is the arithmetic and is held at one.
+    coherence: all three are not a number there. A line where the
+    response has no power has an H1 and a ratio of zero and no
+    coherence. A line where any of the three spectra is not a finite
+    number (a sample in the record that is not one) has no reading
+    either, and is noted as such rather than as missing power. The
+    coherence is `ordinary_coherence`'s, the one a CPSD's coherence is,
+    and H1 is `TimeHistory.compute_frfs`'s single-reference H1.
     """
     f = np.asarray(frequency, dtype=np.float64)
     gxx = np.real(np.asarray(gxx)).astype(np.float64)
@@ -340,16 +381,17 @@ def read_transmissibility(frequency: Any, gxx: Any, gyy: Any, gxy: Any,
     if not averages > 0.0:
         raise ValueError('the averages an estimate is worth are more than '
                          'zero')
-    powered = gxx > 0.0
+    finite = np.isfinite(gxx) & np.isfinite(gyy) & np.isfinite(gxy)
+    powered = finite & (gxx > 0.0)
+    # H1 as the FRF computation makes it with one reference, a 1 x 1
+    # input matrix per line, handed only the lines it can divide by
+    h1 = TimeHistory._frf_h1(np.where(powered, gxx, 1.0)[:, None, None],
+                             np.where(powered, gxy, 0.0)[:, None], None)
+    h1 = np.where(powered, h1[:, 0], np.nan + 0j)
     with np.errstate(divide='ignore', invalid='ignore'):
-        h1 = np.where(powered, gxy / gxx, np.nan + 0j)
         ratio = np.where(powered, np.sqrt(np.maximum(gyy, 0.0) / gxx),
                          np.nan)
-        both = powered & (gyy > 0.0)
-        coherence = np.where(both, np.abs(gxy) ** 2 / (gxx * gyy),
-                             np.where(powered, 0.0, np.nan))
-    coherence = np.where(np.isfinite(coherence),
-                         np.clip(coherence, 0.0, 1.0), np.nan)
+    coherence = ordinary_coherence(gxx, gyy, gxy)
 
     notes = []
     if frames != round(averages):
@@ -357,17 +399,41 @@ def read_transmissibility(frequency: Any, gxx: Any, gyy: Any, gxy: Any,
                      f'{averages:.4g} independent averages; the error is '
                      f'read at that count')
     error = frf_random_error(coherence, averages)
-    large = np.isfinite(coherence) & ~(error <= SMALL_ERROR)
+    defined = np.isfinite(coherence)
+    large = defined & ~(error <= SMALL_ERROR)
     if large.any():
         span = f[large]
-        notes.append(f'{int(large.sum())} of {int(np.isfinite(coherence).sum())} '
+        notes.append(f'{int(large.sum())} of {int(defined.sum())} '
                      f'lines, from {span.min():.4g} to {span.max():.4g} Hz, '
                      f'have a random error over '
                      f'{100.0 * SMALL_ERROR:.0f} %, where its expression '
                      f'says the estimate is poor rather than how poor')
-    if not powered.all():
-        notes.append(f'{int((~powered).sum())} lines carry no input power '
+    if not finite.all():
+        which = [name for name, values in (('input', gxx), ('response', gyy))
+                 if not np.isfinite(values).all()] or ['cross']
+        notes.append(f'{int((~finite).sum())} lines are not finite numbers '
+                     f'in the {" and ".join(which)} spectrum: the record '
+                     f'holds a sample that is not a number, and there is '
+                     f'no reading there')
+    unpowered = finite & ~powered
+    if unpowered.any():
+        notes.append(f'{int(unpowered.sum())} lines carry no input power '
                      f'and have no reading')
+    dead = powered & ~(gyy > 0.0)
+    if dead.any():
+        notes.append(
+            'the response carries no power at any line the input drives: '
+            'a channel that recorded nothing, so H1 and the ratio read '
+            'zero and the coherence is undefined'
+            if dead.sum() == powered.sum() else
+            f'{int(dead.sum())} lines carry no response power: H1 and the '
+            f'ratio read zero there and the coherence is undefined')
+    if dimension != UNKNOWN and '/' in str(dimension):
+        out, into = channel_quantities(str(dimension))
+        if out != into:
+            notes.append(f'the response is {out} and the reference {into}, '
+                         f'so H1 is an FRF in {out} over {into}, not a '
+                         f'transmissibility, which is motion over motion')
     return TransmissibilityReading(
         frequency=f, h1=h1, asd_ratio=ratio, coherence=coherence,
         frames=frames, averages=averages, response=str(response),

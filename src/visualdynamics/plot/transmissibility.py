@@ -9,9 +9,9 @@ words, never by hue alone:
 
 - H1 solid, named 'H1 = Gxy/Gxx' in words;
 - the ASD ratio dashed, named 'ASD ratio √(Gyy/Gxx), magnitude only':
-  it has no phase, and it counts uncorrelated content on the response
-  as response, so it reads over H1 by one over the root of the
-  coherence;
+  it has no phase, and it reads over H1 by one over the root of the
+  coherence, which says the two disagree and not which is nearer the
+  truth (`core.transmissibility`);
 - the band dotted at both edges with a faint fill between, named with
   how many errors it reaches and the averages it was read at. Where the
   band reaches zero it has no lower edge, and the lower dotted line

@@ -377,7 +377,8 @@ class DataPane(QWidget):
         self.octave_panel.hide()
         self.tone_panel: TonePanel = TonePanel()
         self.tone_panel.hide()
-        self.transmissibility_panel: TransmissibilityPanel =             TransmissibilityPanel()
+        self.transmissibility_panel: TransmissibilityPanel = \
+            TransmissibilityPanel()
         self.transmissibility_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
@@ -954,8 +955,9 @@ class DataPane(QWidget):
             'Draw the ASD-ratio transmissibility, the root of the '
             'response ASD over the input ASD, dashed beside H1, with the '
             "band H1's random error puts about it from its coherence "
-            'and averages: the ratio reads high wherever uncorrelated '
-            'noise is on the response, and H1 does not')
+            'and averages: the two part wherever the coherence falls, '
+            'the ratio always the higher; which is nearer the truth '
+            'depends on which channel the noise is on')
         self.transmissibility_action.triggered.connect(
             lambda checked=False: self._choose_toggle('transmissibility',
                                                       checked))

@@ -257,6 +257,45 @@ def channel_quantities(dim: str) -> tuple[str, str]:
     return numerator, denominator or numerator
 
 
+def ordinary_coherence(gpp: ArrayLike, gqq: ArrayLike,
+                       gpq: ArrayLike) -> np.ndarray:
+    """The ordinary coherence of one pair of channels at every line,
+    |Gpq|² / (Gpp Gqq), from their cross spectrum and their two
+    autospectra.
+
+    One statement of the ratio for everything that reads it
+    (`Cpsd.coherence`, `core.transmissibility`), so the coherence beside
+    a CPSD and the one a transmissibility reading is judged by cannot
+    differ in how they treat an edge. A ratio of powers cannot exceed
+    one, so a value a few parts in 1e12 over is the arithmetic and is
+    held at one, and nothing reads under zero. Where either autospectrum
+    is not above zero, or any of the three is not a finite number, the
+    coherence is undefined and is not a number: a line no one drove, a
+    channel that recorded nothing and a sample that is not a number are
+    not a coherence of zero.
+
+    Parameters
+    ----------
+    gpp, gqq : array-like
+        The two autospectra, one value per line (the real part is read).
+    gpq : array-like
+        The cross spectrum between them, the same shape.
+
+    Returns
+    -------
+    numpy.ndarray
+        The coherence, 0 to 1, or not a number where it is undefined.
+    """
+    gpp = np.real(np.asarray(gpp)).astype(np.float64)
+    gqq = np.real(np.asarray(gqq)).astype(np.float64)
+    gpq = np.asarray(gpq, dtype=np.complex128)
+    defined = (np.isfinite(gpp) & np.isfinite(gqq) & np.isfinite(gpq)
+               & (gpp > 0.0) & (gqq > 0.0))
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+        value = np.abs(gpq) ** 2 / (gpp * gqq)
+    return np.where(defined, np.clip(value, 0.0, 1.0), np.nan)
+
+
 #: the viewer's choice of frequency axis for every plot, stage and
 #: report figure: True for decades, False for hertz, None to leave each
 #: kind of data to its own convention (an SRS in decades, the rest
@@ -2781,11 +2820,15 @@ class TimeHistory(DataArray):
 
         The ratio is the root of the response's autospectrum over the
         reference's; H1 is their cross-spectrum over the reference's
-        autospectrum. The ratio counts whatever is on the response that
-        the reference did not cause as response, so it reads over |H1|
-        by one over the root of the coherence, at every line; the error
-        of |H1| follows from the coherence and the averages
-        (`core.transmissibility` sets out both). The three spectra come
+        autospectrum. The two are tied by the coherence: the ratio is
+        |H1| over the root of the coherence at every line, so it never
+        reads under H1, and the gap between them says the coherence is
+        under one without saying why. Noise on the response lifts the
+        ratio and leaves H1; noise on the reference pulls H1 down by the
+        coherence and the ratio by its root, so there the ratio is the
+        nearer of the two. The error of |H1| follows from the coherence
+        and the averages (`core.transmissibility` sets out both). The
+        three spectra come
         from the frames `compute_psds` averages and `compute_frfs`
         estimates from, so this H1 is `compute_frfs(method='H1')`'s for
         the pair and this coherence the ordinary one
@@ -2819,8 +2862,9 @@ class TimeHistory(DataArray):
         ------
         ValueError
             If there is not exactly one reference, the response is not
-            a response channel of this history, or there are fewer than
-            two averages.
+            a response channel of this history, there are fewer than
+            two averages, or either channel holds a sample that is not a
+            finite number in the frames read.
         """
         from .transmissibility import read_transmissibility
 
@@ -2847,13 +2891,27 @@ class TimeHistory(DataArray):
                 f'{drives[0][0]}: the responses are '
                 + ', '.join(sorted({keys[i][0] for i in responses})))
         x, y = drive[0], found[0]
+        gxx, gyy = np.real(cross(x, x)), np.real(cross(y, y))
+        for role, channel, power in (('reference', x, gxx),
+                                     ('response', y, gyy)):
+            # one sample that is not a number spreads through its frame's
+            # transform to every line, and every line of the average
+            # with it: read on, it would say the input has no power or
+            # the coherence is nil, which is a statement about the
+            # record's storage and not about the article
+            if not np.isfinite(power).all():
+                raise ValueError(
+                    f'the {role} channel {keys[channel][0]} holds samples '
+                    'that are not finite numbers in the frames read, so '
+                    'its spectrum is not a number at any line; trim the '
+                    'record or move the frames past them')
         used = self._resolved_averaging(averaging)
         # the frames of every record were pooled, each record cut the
         # same way, so the count is the averaging's times the records
         worth = used.statistical_dof(records=max(frames // used.frames, 1))
         return read_transmissibility(
-            frequencies, np.real(cross(x, x)), np.real(cross(y, y)),
-            cross(x, y), frames, worth.equivalent / 2.0,
+            frequencies, gxx, gyy, cross(x, y), frames,
+            worth.equivalent / 2.0,
             response=keys[y][0], reference=keys[x][0],
             dimension=self._ratio(keys[y][1], keys[x][1]))
 
@@ -4017,11 +4075,11 @@ class Psd(_Bands, DataArray):
                 continue
             if str(p) not in autos or str(q) not in autos:
                 continue
-            with np.errstate(divide='ignore', invalid='ignore'):
-                value = (np.abs(ordinate[i]) ** 2
-                         / (np.real(ordinate[autos[str(p)]])
-                            * np.real(ordinate[autos[str(q)]])))
-            rows.append(np.clip(np.nan_to_num(value, nan=0.0), 0.0, 1.0))
+            # an undefined line reads zero in a Coherence record, as it
+            # always has here
+            value = ordinary_coherence(ordinate[autos[str(p)]],
+                                       ordinate[autos[str(q)]], ordinate[i])
+            rows.append(np.nan_to_num(value, nan=0.0))
             responses.append(p)
             references.append(q)
         if not rows:

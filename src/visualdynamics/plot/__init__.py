@@ -3106,7 +3106,7 @@ def plot_transmissibility(reading: Any, *, spread: float = 1.0,
     Drawn by `plot.transmissibility.build_transmissibility`: above, on
     log axes, H1 solid, the ASD ratio dashed and the band dotted with a
     faint fill, each named in the legend, so the reader sees where the
-    two agree and where the ratio lifts away; beneath, the coherence the
+    two agree and where they part; beneath, the coherence the
     band was read from. The window's FRF view draws the same reading
     over an FRF with its Transmissibility toggle.
 
