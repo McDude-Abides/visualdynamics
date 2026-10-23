@@ -105,6 +105,11 @@ specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 app shows, and each takes `path=`. `plot_srs_tolerance(...)` draws a
 shock response spectrum against its tolerance band, point by point
 ([Judging an SRS against its tolerance](srs-tolerance.md)).
+`plot_breakpoints(specification)` draws one channel of a random
+specification with each segment's slope and area written on it and
+the running rms beneath, as the specification sheet's *Areas and
+running rms* does ([Writing a random specification by
+slope](breakpoint-slopes.md)).
 `plot_shock_check(history)` draws a shock record's raw velocity beside
 its positive and negative spectra, a figure the app does not show: the
 Shocks view states the same check in words

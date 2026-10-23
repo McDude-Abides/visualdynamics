@@ -30,6 +30,9 @@ that is not an alpha.
   how it differs from the classical batch methods
 - [The random vibration workflow](workflows/random-workflow.md): from
   a controller run to a compliance report
+- [Writing a random specification by slope](breakpoint-slopes.md): a
+  level, a slope in dB per octave and the next frequency, each
+  segment's area and the running rms
 - [Reading a record's time statistics](time-statistics.md): the
   moments, the rail, the tails against the Gaussian, the expected
   largest peak and the kurtosis frame by frame

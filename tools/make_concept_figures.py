@@ -907,6 +907,29 @@ def sine_distortion():
           f'{check.frequency[over].max():.0f} Hz; {check.describe()}')
 
 
+def breakpoint_slopes():
+    """A random specification entered by slope, read by segment: a
+    level at 20 Hz, plus 3 dB per octave to 80 Hz, flat to 500 Hz,
+    minus 3 dB per octave to 2000 Hz. The falling segment, short on
+    log axes, is 60 percent of the area, and the running rms climbs
+    most steeply there."""
+    from visualdynamics.core.author import SpecificationDraft
+    from visualdynamics.core.breakpoints import OCTAVE_DB
+    from visualdynamics.plot import plot_breakpoints
+
+    g2 = 9.80665 ** 2
+    draft = SpecificationDraft(['1Z+'], ['acceleration'], [20.0, 80.0],
+                               [[0.01 * g2, 0.04 * g2]], entry='slopes')
+    draft = draft.with_slope_breakpoint(500.0, 0.0)
+    draft = draft.with_slope_breakpoint(2000.0, -OCTAVE_DB)
+    plot_breakpoints(draft, show=False, size=(1000, 700),
+                     path=str(OUT / 'breakpoint-slopes.png'))
+    reading = draft.reading(0)
+    print('areas, g^2:', ', '.join(f'{a / g2:.2f}' for a in reading.areas),
+          '| running rms, g:',
+          ', '.join(f'{r / 9.80665:.2f}' for r in reading.running))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -927,6 +950,7 @@ def main():
     dwell()
     transmissibility()
     sine_distortion()
+    breakpoint_slopes()
     print('done')
 
 

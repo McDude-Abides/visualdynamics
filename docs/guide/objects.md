@@ -648,7 +648,13 @@ per channel, each pair's coherence and phase (a pair left unstated is
 absent, and independence is a statement too), *Add breakpoint* and
 *Remove breakpoint*, *Scale selected* with a box that raises or lowers
 the selected levels by a number of decibels, and an *All pairs* row
-that states one coherence and phase for every pair. While the sheet is
+that states one coherence and phase for every pair. *Enter: Levels* or
+*Slopes* chooses how the levels are typed: a level at every breakpoint,
+or a level at the first and a slope in decibels per octave into each
+one after it, the level there computed. *Areas and running rms* writes
+each segment's area on the plot, draws the rms accumulated from the
+low end under it, and reads both out under the breakpoints
+([Writing a random specification by slope](breakpoint-slopes.md)). While the sheet is
 open the plot is the 2-D one, since every editing gesture happens
 there, and the 3-D stage is off until the sheet closes.
 
