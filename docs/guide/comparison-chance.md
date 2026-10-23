@@ -44,24 +44,37 @@ in the same place average after average, is a real excursion.
 Some test documents allow adjacent control lines to be combined for
 judging a tolerance. The powers of N adjacent lines are added into one
 wider band and judged against the limits' power over the same band.
-The sum of N independent lines is worth about N times a line's degrees
-of freedom, so the chance scatter shrinks while an excursion that holds
-across neighboring lines survives. The combination changes how the
-test is judged, not the test, and is agreed before it.
+The sum is worth more degrees of freedom than one line, so the chance
+scatter shrinks while an excursion that holds across neighboring lines
+survives. The combination changes how the test is judged, not the
+test, and is agreed before it.
 
-A group's degrees of freedom are Satterthwaite's for a weighted sum,
+How much more the sum is worth depends on the window. A window spreads
+each line's power into its neighbors, so the estimates at adjacent
+lines vary together: not at all under a rectangle without overlap, and
+by 0.44 at one line apart under a Hann window. The PSD carries this
+correlation from the averaging it was computed with
+(`Psd.line_correlation`, from `core.averaging.line_correlation`), and a
+group's degrees of freedom are those of a sum of correlated estimates,
 
-    (sum of a_i)**2 / (sum of a_i**2 / n_i)
+    (sum of a_i)**2 n / (sum over i, j of a_i a_j r(|i - j|))
 
-where a_i is the power the target asks of each line and n_i its degrees
-of freedom. On a flat stretch that is exactly N times a line's; where
-the target slopes across a group it is a little less, because the louder
-lines carry more of the sum. Lines are taken as independent, which they
-are under a rectangular window and nearly are under the others: a
-windowed line shares a little of its neighbors' power, so a combined
-group is worth slightly less than this. A group does not reach across a
-stretch the specification leaves unwritten, and the last group of a
-stretch may hold fewer lines.
+where a_i is the power the target asks of each line, n a line's degrees
+of freedom and r the correlation between lines that far apart. With no
+correlation it is Satterthwaite's, exactly N times a line's on a flat
+stretch and a little less where the target slopes across a group,
+because the louder lines carry more of the sum. Under a Hann window,
+the default, eight lines averaged over sixty half-overlapped frames are
+worth 488 degrees of freedom, not the 910 that eight lines of 113.8
+would add to, and white noise averaged that way measures the same; read
+as independent, a narrow band would see about five times the groups
+outside that chance predicted. The same holds for a cell of a
+specification coarser than the lines, which is a sum of the lines under
+it. A PSD that does not carry its correlation (one read from a file
+without it) has its summed lines taken as independent, and the result
+says so in a note. A group does not reach across a stretch the
+specification leaves unwritten, and the last group of a stretch may
+hold fewer lines.
 
 ## In the window
 
@@ -151,4 +164,6 @@ A pair that cannot be compared is refused as `compare` refuses it. A
 PSD on proportional bands is refused as well, since each band holds a
 different number of lines and so a different number of degrees of
 freedom; compare the narrowband spectrum. A PSD that does not say how
-it was averaged is refused until its degrees of freedom are given.
+it was averaged is refused until its degrees of freedom are given. A
+cross term is refused, as the confidence band refuses it: the
+chi-square law is an autospectrum's.

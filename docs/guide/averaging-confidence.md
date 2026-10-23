@@ -119,7 +119,10 @@ shaded behind it](images/averaging-confidence.png)
 The functions underneath are in `visualdynamics.core.averaging`:
 `statistical_dof` and `frame_correlation` for the count, and
 `chi_square_factors` and `confidence_bands` for the band, on plain
-arrays.
+arrays. `line_correlation` gives how the window ties neighboring lines
+together, which a sum of adjacent lines is worth less for
+([Lines outside a band by chance](comparison-chance.md)); a computed
+PSD carries it as `Psd.line_correlation`.
 
 The legend names each band with its confidence and the count it was
 worked out at, such as **90 % confidence, 17.17 DOF**, and each level's
