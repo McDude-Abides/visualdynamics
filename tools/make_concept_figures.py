@@ -1177,6 +1177,36 @@ def sine_frequency():
           f'Hz; {check.describe()}')
 
 
+def resample():
+    """A record taken from 81,920 to 5,120 samples a second: a 0.1 g
+    tone at 300 Hz on a light floor, and a 1 g sensor resonance at
+    4,600 Hz above the new Nyquist frequency, which folds to 520 Hz."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.resample import read_resample
+    from visualdynamics.plot import plot_resample
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    rate, samples, g = 81920.0, 16 * 8192, 9.80665
+    t = np.arange(samples) / rate
+    floor = 0.005 * np.random.default_rng(14).standard_normal(samples)
+    y = (0.1 * np.sin(2 * np.pi * 300.0 * t)
+         + np.sin(2 * np.pi * 4600.0 * t) + floor)
+    history = TimeHistory(t, y[None] * g, response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    reading = read_resample(history, 5120.0, frequencies=[4600.0])
+    print(f'  {reading.describe()}')
+    fold = reading.folds[0]
+    print(f'  at 520 Hz: bare {fold.bare / g ** 2:.4g}, after '
+          f'{fold.after / g ** 2:.4g}, filtered {fold.filtered / g ** 2:.3g}'
+          f' g^2/Hz; gain at the span {reading.gain_at_span:.2f} dB, at '
+          f'{reading.lowest_fold:g} Hz {reading.gain_at_fold:.1f} dB')
+    plot_resample(history, 5120.0, frequencies=[4600.0],
+                  unit_system=DEFAULT_SYSTEM, show=False, size=(1000, 700),
+                  path=str(OUT / 'resample.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1204,6 +1234,7 @@ def main():
     rms_check()
     sine_profile()
     sine_frequency()
+    resample()
     print('done')
 
 

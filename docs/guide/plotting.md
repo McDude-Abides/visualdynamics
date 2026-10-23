@@ -99,6 +99,10 @@ record; see [checking a replication reference](replication-fit.md)),
 `plot_stroke(history)` (a pulse's acceleration, velocity and
 displacement integrated raw, against the shaker's shock ratings; see
 [will a pulse fit on the shaker](stroke.md)),
+`plot_resample(history, rate)` (the record's spectrum taken to a lower
+rate, filtered first, bare and low-passed after, with the span, the
+dropped lines and the folds marked; see
+[taking a record to a lower sample rate](resample.md)),
 and, for a specification comparison, `plot_bars(measured,
 specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 `plot_snr(...)` and `plot_replication(...)`. Each draws the figure the

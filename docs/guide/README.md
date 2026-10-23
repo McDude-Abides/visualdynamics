@@ -53,6 +53,9 @@ that is not an alpha.
   playable costs
 - [Will a pulse fit on the shaker](stroke.md): a pulse integrated raw
   against the shaker's shock stroke, velocity and force
+- [Taking a record to a lower sample rate](resample.md): the
+  anti-alias filter first, the span and the dropped lines, and where
+  content above the new Nyquist frequency folds
 - [The sine sweep workflow](workflows/sine-workflow.md): tones tracked
   through a sweep and compared with the requirement
 - [The random and sine workflow](workflows/mixed-workflow.md): a sweep

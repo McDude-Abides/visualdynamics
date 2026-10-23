@@ -347,6 +347,13 @@ project.save('random.vdyn')
   (0 holds it unscaled), and clear the field to detect it again. The
   data itself is never changed. A script that calls `compare_all`
   without a scale gets a `ScaleWarning` when a scale was detected.
+- Whether a recorder's file was taken to a lower rate before it was
+  compared. A file decimated with no filter carries everything above
+  its new Nyquist frequency folded into its band, and a narrow peak
+  there can be an alias. **Resample** on a time history's bar shows
+  what a resampling does to the record's spectrum, and
+  `history.resample(rate)` filters before it decimates; see
+  [taking a record to a lower sample rate](../resample.md).
 - What the run was allowed to do. The warning and abort lines come
   from the specification. Whether a brush against the warning line
   matters is for the test engineer to write in the conclusions.
