@@ -69,6 +69,8 @@ THEORY = {
                             'the tracked tone it is read against',
     'core.breakpoints': 'a slope in dB per octave as a power law, and the '
                         'area under each segment of a breakpoint table',
+    'core.chance': 'the chi-square scatter of an averaged autospectrum '
+                   'and the degrees of freedom of lines combined',
 }
 
 #: and methods, where the theory lives on the call rather than the module

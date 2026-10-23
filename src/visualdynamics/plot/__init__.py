@@ -3544,6 +3544,64 @@ def plot_breakpoints(specification: Any, *, channel: str | None = None,
                         size=size)
 
 
+def plot_chance(measured: Any, specification: Any, *,
+                channel: str | None = None, combine: int = 1,
+                dof: float | None = None, scale_db: float | None = None,
+                theme: Any = None,
+                path: str | os.PathLike | None = None,
+                show: bool = True, title: str | None = None,
+                size: tuple[int, int] = (1000, 700)) -> Any:
+    """One channel of a random comparison as its miss from the target in
+    dB, line by line, with the lines outside each band counted beside
+    the number chance alone puts there at the comparison's degrees of
+    freedom.
+
+        asd = history.compute_psds()
+        visualdynamics.plot.plot_chance(asd, spec, combine=8,
+                                        path='chance.png')
+
+    The reading is `core.chance.compare_chance`'s: the target at zero,
+    the warning edges dashed and the abort edges solid about it, the
+    measurement over the target as a step across each line (or group of
+    `combine` lines, drawn over the single lines in gray), and each line
+    outside marked with a triangle pointing the way it is out, hollow
+    past the warning band and filled past abort. The title and the
+    legend give each count and its expectation.
+
+    Parameters
+    ----------
+    measured : Psd
+        The averaged autospectrum, on narrowband lines.
+    specification : Specification
+        The specification it was controlled to, with its bands.
+    channel : str, optional
+        The channel drawn; the first the two have in common by default.
+    combine, dof, scale_db
+        As for `core.chance.compare_chance`: lines judged together, one
+        line's degrees of freedom (read from the PSD when omitted), and
+        the comparison's scale.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .chance import _record_pair, build_chance
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_chance(widget, specification, measured, channel=channel,
+                     combine=combine, dof=dof, scale_db=scale_db,
+                     theme=theme)
+
+    label = _record_pair(specification, measured, channel)[0]
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{label} against chance',
+                        size=size)
+
+
 def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
                   low: float | None = None, high: float | None = None,
                   theme: Any = None,
