@@ -385,6 +385,12 @@ def _merge_data(objects):
     if all(count is not None for count in counts):
         merged.statistical_dof = np.concatenate(
             [np.asarray(count, dtype=np.float64) for count in counts])
+    # one correlation describes every record, so it survives a merge
+    # only when every source was averaged the same way
+    shared = [getattr(obj, 'line_correlation', None) for obj in objects]
+    if all(found is not None and np.array_equal(found, shared[0])
+           for found in shared):
+        merged.line_correlation = np.asarray(shared[0], dtype=np.float64)
     return merged
 
 

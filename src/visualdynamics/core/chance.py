@@ -41,10 +41,27 @@ estimates weighted by the power each line was asked for,
 
 which is exactly N times a line's on a flat stretch and a little less
 where the target slopes across the group, since the louder lines carry
-more of the sum. Lines are taken as independent, which they are under
-a rectangular window and nearly are under the others: neighboring
-lines of a windowed estimate share a little of each other's power, so
-a combined group is worth slightly less than this.
+more of the sum. That holds for independent lines, which a windowed
+average's are not.
+
+**Neighboring lines are not independent.** A window spreads each line's
+power into its neighbors, so the estimates at adjacent lines vary
+together, and a sum of them steadies less than independent lines would.
+The PSD carries how much (`Psd.line_correlation`, worked out from its
+window, hop and frame count by `core.averaging.line_correlation`): 0
+for a rectangle without overlap, 0.44 at one line apart for a Hann
+window. With it the variance of a sum of lines weighted a_i is
+
+    sum over i, j of a_i a_j r(|i - j|) / n
+
+and its degrees of freedom are (sum of a_i)² n over that sum, which is
+Satterthwaite's above when r is 0 past the line itself. Eight lines of
+a Hann window at half overlap are worth 4.3 times a line's, not eight;
+white noise averaged that way measures the same. The same holds for a
+cell of the specification coarser than the lines, which is a sum of
+the lines under it. A PSD that does not carry its correlation (read
+from a file without it, or built by hand) has its lines taken as
+independent, and the result says so.
 
 References
 ----------
@@ -61,6 +78,11 @@ estimates are Satterthwaite's.
    110-114. [doi:10.2307/3002019](https://doi.org/10.2307/3002019)
    The equivalent degrees of freedom of a weighted sum of chi-square
    variables.
+3. Harris, F. J. (1978). "On the Use of Windows for Harmonic Analysis
+   with the Discrete Fourier Transform." *Proceedings of the IEEE*,
+   66(1), 51-83.
+   [doi:10.1109/PROC.1978.10837](https://doi.org/10.1109/PROC.1978.10837)
+   The correlation a window leaves between adjacent lines.
 """
 
 from __future__ import annotations
@@ -204,6 +226,20 @@ def _groups(cells: list[dict[str, Any]], counted: np.ndarray,
     return out
 
 
+def _sum_dof(weights: np.ndarray, dof: float,
+             correlation: np.ndarray) -> float:
+    """The degrees of freedom of a sum of adjacent lines, each worth
+    `dof` and weighted by `weights` (the power asked of each), whose
+    estimates vary together by `correlation` at 0, 1, 2, ... lines
+    apart: (sum of the weights)² `dof` over the sum over every pair of
+    lines of their weights times their correlation."""
+    spread = float(np.sum(weights ** 2))
+    for apart in range(1, min(len(correlation), len(weights))):
+        spread += 2.0 * float(correlation[apart]) * float(
+            np.sum(weights[:-apart] * weights[apart:]))
+    return float(np.sum(weights)) ** 2 * dof / spread
+
+
 def _summed(values: np.ndarray, groups: list[list[int]]) -> np.ndarray:
     """Each group's sum; NaN where any of its cells is not finite."""
     return np.array([float(np.sum(values[g])) for g in groups], dtype=float)
@@ -228,8 +264,10 @@ def compare_chance(specification: Specification, measured: DataArray,
 
     With `combine` N the judged lines are taken N adjacent at a time,
     their powers added and judged against the limits' power over the
-    same stretch, each group at its own degrees of freedom (Satterthwaite's
-    for the sum, N times a line's on a flat stretch). A group does not
+    same stretch, each group at its own degrees of freedom: those of a
+    sum of correlated lines (Satterthwaite's, with the PSD's
+    `line_correlation`), N times a line's only for independent lines on
+    a flat stretch. A group does not
     reach across a gap the specification leaves unwritten, and the last
     one in a stretch may hold fewer lines. Some test documents allow this
     for judging a tolerance; it changes how the test is judged, not the
@@ -257,8 +295,9 @@ def compare_chance(specification: Specification, measured: DataArray,
     dict
         'lines' (how many lines, or groups, were judged), 'band' (low and
         high, Hz), 'scale_db', 'dof' (one line's), 'combine', 'judged_dof'
-        (the median group's DOF: one line's times `combine` on a flat
-        stretch). For each pair the specification carries, as
+        (the median group's DOF: one line's times `combine` for
+        independent lines on a flat stretch, fewer for windowed ones).
+        For each pair the specification carries, as
         '{pair}_lines', '{pair}_below' and '{pair}_above': how many were
         outside the pair, under its lower edge and over its upper one; and
         '{pair}_expected', '{pair}_expected_below' and
@@ -274,9 +313,12 @@ def compare_chance(specification: Specification, measured: DataArray,
         A pair that cannot be compared returns {'lines': 0, 'refused':
         reason}, as `compare` does, and so does a measurement on
         proportional bands, whose bands each hold a different number of
-        lines, or one whose DOF is neither given nor carried. One with
-        nothing to compare returns {'lines': 0}. Compared with neither
-        side's units declared, the result carries 'note'.
+        lines, a cross term (whose error is not chi-square, as
+        `Psd.confidence_band` refuses it), or one whose DOF is neither
+        given nor carried. One with nothing to compare returns
+        {'lines': 0}. Compared with neither side's units declared, or
+        summing lines of a PSD that does not carry its
+        `line_correlation`, the result carries 'note'.
 
     Raises
     ------
@@ -284,7 +326,13 @@ def compare_chance(specification: Specification, measured: DataArray,
         When `combine` is not a whole number of at least one, or `dof`
         is not more than zero.
     """
-    from .compliance import comparable, comparison_scale_db, judge, units_check
+    from .compliance import (
+        beyond,
+        comparable,
+        comparison_scale_db,
+        judge,
+        units_check,
+    )
 
     if isinstance(combine, bool) or int(combine) != combine or combine < 1:
         raise ValueError('lines are combined a whole number at a time, '
@@ -305,6 +353,12 @@ def compare_chance(specification: Specification, measured: DataArray,
             'the chance of a line reading outside is worked out on '
             'narrowband lines; each proportional band holds a different '
             'number of them, so compare the narrowband spectrum')}
+    # the chi-square law is an autospectrum's, as the confidence band's
+    if not measured.is_autospectrum(measured_record):
+        return {'lines': 0, 'refused': (
+            'the chance of a line reading outside is the chi-square law of '
+            'an autospectrum; this record is a cross term '
+            f'({measured.record_label(measured_record)})')}
     if dof is None:
         counts = getattr(measured, 'statistical_dof', None)
         if counts is None:
@@ -329,19 +383,26 @@ def compare_chance(specification: Specification, measured: DataArray,
     if not counted.any():
         return {'lines': 0}
     left, right = measured.bin_bounds()
-    cell_dof = np.array([dof * _lines_in(cell, left, right) for cell in cells])
+    held_in = np.array([_lines_in(cell, left, right) for cell in cells])
     groups = _groups(cells, counted, combine)
+    correlation = getattr(measured, 'line_correlation', None)
+    independent = correlation is None
+    correlation = (np.ones(1) if independent
+                   else np.asarray(correlation, dtype=float).reshape(-1))
 
     target = _summed(asked, groups)
     got = _summed(held, groups)
-    # Satterthwaite: the sum of estimates a_i X_i / n_i, each X_i a
-    # chi-square on n_i, has the mean and variance of a chi-square on
-    # (sum a_i)^2 / sum(a_i^2 / n_i), weighted by the power asked of
+    # Satterthwaite: the sum of estimates a_i X_i / n, each X_i a
+    # chi-square on n, has the mean and variance of a chi-square on
+    # (sum a_i)^2 n / sum(a_i a_j r_ij), weighted by the power asked of
     # each line because that is what each estimate averages to when
-    # the truth sits on the target
-    group_dof = np.array([float(np.sum(asked[g])) ** 2
-                          / float(np.sum(asked[g] ** 2 / cell_dof[g]))
-                          for g in groups])
+    # the truth sits on the target, and with r the correlation the
+    # window leaves between lines. A cell holding several lines spreads
+    # its power evenly over them; the lines of a group run on from one
+    # cell to the next.
+    group_dof = np.array([_sum_dof(np.concatenate(
+        [np.full(held_in[k], asked[k] / held_in[k]) for k in g]),
+        dof, correlation) for g in groups])
     with np.errstate(divide='ignore', invalid='ignore'):
         miss_db = 10.0 * np.log10(got / target)
 
@@ -374,8 +435,9 @@ def compare_chance(specification: Specification, measured: DataArray,
                                np.zeros(len(groups), dtype=bool),
                                np.zeros(len(groups)))
                 continue
-            limit = judge(specification, measured, spec_record,
-                          measured_record, name, over, scale_db)['asked']
+            found = judge(specification, measured, spec_record,
+                          measured_record, name, over, scale_db)
+            limit = found['asked']
             usable = np.isfinite(limit) & (limit > 0.0)
             # a group is judged against an edge only where every one of
             # its cells has that edge: a limit missing from part of a
@@ -386,7 +448,10 @@ def compare_chance(specification: Specification, measured: DataArray,
             with np.errstate(divide='ignore', invalid='ignore'):
                 edge_db = np.where(whole, 10.0 * np.log10(bound / target),
                                    np.nan)
-                outside = whole & ((got > bound) if over else (got < bound))
+            # uncombined, the cells out are `judge`'s own; a group is
+            # read by the same rule on its sums
+            outside = (whole & found['out'][[g[0] for g in groups]]
+                       if combine == 1 else whole & beyond(got, bound, over))
             share = np.zeros(len(groups))
             if whole.any():
                 chance = chance_outside(
@@ -410,8 +475,13 @@ def compare_chance(specification: Specification, measured: DataArray,
         table[f'{pair}_above'] = above
         table[f'{pair}_chance'] = below_chance + above_chance
     out['groups'] = table
-    if note is not None:
-        out['note'] = note
+    notes = [] if note is None else [note]
+    if independent and (combine > 1 or bool(np.any(held_in[counted] > 1))):
+        notes.append('the PSD does not say how its window ties neighboring '
+                     'lines together, so the lines summed are taken as '
+                     'independent, and read high if they were windowed')
+    if notes:
+        out['note'] = '; '.join(notes)
     return out
 
 

@@ -22,6 +22,9 @@ how much the window lets two overlapped frames share
 confidence band on the estimate (`chi_square_factors`,
 `confidence_bands`): the range the true spectrum lies in, at a stated
 confidence, as a factor below and a factor above the averaged value.
+The window also spreads each line's power into its neighbors, so the
+estimates at adjacent lines vary together (`line_correlation`), and a
+sum of adjacent lines is worth less than their counts added.
 These degrees of freedom are statistical. They have nothing to do with
 the measurement DOFs (node and direction) a record is taken at.
 
@@ -466,6 +469,24 @@ class Averaging:
         return statistical_dof(self.frames, self.shape(), self.hop,
                                records=records)
 
+    def line_correlation(self, most: int = 64) -> np.ndarray:
+        """How the averaged power at lines one, two, ... apart varies
+        together: `line_correlation` with this averaging's window, hop
+        and frame count.
+
+        Parameters
+        ----------
+        most : int, optional
+            The farthest separation, in lines, worked out.
+
+        Returns
+        -------
+        numpy.ndarray
+            The correlation at separations 0, 1, 2, ..., starting at 1.
+        """
+        return line_correlation(self.shape(), self.hop, self.frames,
+                                most=most)
+
     def filled(self, samples: int, sample_rate: float) -> Averaging:
         """This averaging with as many frames as fit in a record of
         `samples` samples, at least one."""
@@ -573,6 +594,84 @@ def statistical_dof(frames: int, shape: ArrayLike, hop: int,
     return StatisticalDof(frames=frames * records,
                           nominal=2 * frames * records,
                           equivalent=records * 2.0 * frames / spread)
+
+
+#: the smallest correlation between lines worth keeping: past it a
+#: separation adds less than a part in ten thousand to the variance of a
+#: sum of a hundred lines
+LINE_CORRELATION_FLOOR = 1e-6
+
+
+def line_correlation(shape: ArrayLike, hop: int, frames: int = 1,
+                     most: int = 64) -> np.ndarray:
+    """How much the averaged power at two lines varies together, at each
+    separation in lines: 1 at a separation of 0, and the correlation
+    coefficient between the two estimates after it.
+
+    A window is a product in time, so it is a convolution in frequency:
+    each line of a windowed frame holds some of its neighbors' power,
+    and the estimates at nearby lines are not independent. For a
+    stationary Gaussian signal whose spectrum is smooth across a few
+    lines, the covariance of the squared magnitudes at lines k and k + d
+    of frames a and b is the squared magnitude of their cross term, so
+    for an average of `frames` frames, each `hop` samples after the last,
+    the correlation at separation d is
+
+        sum over j of v(j) |W_j(d)|**2  /  sum over j of v(j) |W_j(0)|**2
+
+    where W_j(d) is the transform, at the frame's d-th line, of the
+    window times itself shifted j hops, and v(j) is 1 at j = 0 and
+    2 (1 - j/frames) after it. The denominator is Welch's overlap sum
+    (`statistical_dof`), so the two agree. A rectangle without overlap
+    gives no correlation at all; a Hann window gives 4/9 at one line
+    apart and 1/36 at two for a single frame, which is the square of the
+    window's own adjacent-line correlation, 2/3 (Harris).
+
+    The correlation is what a sum of adjacent lines is worth: the sum of
+    N lines of n degrees of freedom each, with these correlations, has
+    the degrees of freedom of N n / (1 + 2 sum over d of (1 - d/N) r(d)),
+    about 1.8 times fewer than N n for eight lines of a Hann window.
+
+    Parameters
+    ----------
+    shape : array_like
+        The window, one value per sample of a frame.
+    hop : int
+        Samples from one frame's start to the next (`Averaging.hop`).
+    frames : int, optional
+        How many frames are averaged.
+    most : int, optional
+        The farthest separation, in lines, worked out.
+
+    Returns
+    -------
+    numpy.ndarray
+        The correlation at separations 0 to the last one at or above
+        `LINE_CORRELATION_FLOOR`, at most `most`; it starts at 1.
+    """
+    weights = np.asarray(shape, dtype=float)
+    length = len(weights)
+    frames, hop, most = int(frames), int(hop), int(most)
+    if frames < 1:
+        raise ValueError('an average needs at least one frame')
+    if hop < 1:
+        raise ValueError('frames start at least one sample apart')
+    if most < 0:
+        raise ValueError('lines are apart by a whole number, zero or more')
+    if not np.any(weights):
+        raise ValueError('a window of zeros weighs nothing')
+    keep = min(most, length - 1) + 1
+    total = np.zeros(keep)
+    lag = 0
+    while lag < frames and lag * hop < length:
+        shift = lag * hop
+        shared = weights[:length - shift] * weights[shift:]
+        power = np.abs(np.fft.fft(shared, n=length)[:keep]) ** 2
+        total += (1.0 if lag == 0 else 2.0 * (1.0 - lag / frames)) * power
+        lag += 1
+    correlation = total / total[0]
+    kept = np.flatnonzero(correlation >= LINE_CORRELATION_FLOOR)
+    return correlation[:int(kept[-1]) + 1]
 
 
 def chi_square_factors(dof: float, level: float = 0.90

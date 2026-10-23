@@ -2151,7 +2151,10 @@ class TimeHistory(DataArray):
         Each channel's statistical degrees of freedom, discounted for
         overlap (`Averaging.statistical_dof`), are stored on the result
         as `Psd.statistical_dof`, so the PSD can say what its average
-        is worth (`Psd.confidence_band`) without the history beside it.
+        is worth (`Psd.confidence_band`) without the history beside it,
+        and how the window ties neighboring lines together
+        (`Averaging.line_correlation`) as `Psd.line_correlation`, so a
+        sum of adjacent lines can say what it is worth too.
 
         Parameters
         ----------
@@ -2195,6 +2198,7 @@ class TimeHistory(DataArray):
         # a Specification is otherwise a power law through breakpoints
         out.interpolation = 'bin'
         out.statistical_dof = np.asarray(counts, dtype=np.float64)
+        out.line_correlation = used.line_correlation()
         return out
 
     def psd_type(self) -> type[Psd]:
@@ -3513,6 +3517,16 @@ class Psd(_Bands, DataArray):
     #: `response_dof`.
     statistical_dof: np.ndarray | None = None
 
+    #: How the averaged power at lines 0, 1, 2, ... apart varies
+    #: together, from the window, hop and frame count it was averaged
+    #: with (`core.averaging.line_correlation`): 1 first, then the
+    #: correlation at each separation, the same for every record since
+    #: every record was cut into the same frames. None when nothing
+    #: says how the spectrum was averaged, on the same terms as
+    #: `statistical_dof`. A sum of adjacent lines is worth less than
+    #: their counts added by as much as these say (`core.chance`).
+    line_correlation: np.ndarray | None = None
+
     def confidence_band(self, level: float = 0.90,
                         dof: float | ArrayLike | None = None
                         ) -> tuple[Psd, Psd]:
@@ -3613,8 +3627,9 @@ class Psd(_Bands, DataArray):
     def is_autospectrum(self, record: int | None = None) -> bool:
         """Whether a record is an autospectrum, a channel against itself:
         one DOF and one quantity on both sides. Only such a record has a
-        chi-square band (`confidence_band`) or a tone to read
-        (`tone_refusal`).
+        chi-square band (`confidence_band`), a tone to read
+        (`tone_refusal`) or a chance of reading outside a band
+        (`core.chance`).
 
         Parameters
         ----------

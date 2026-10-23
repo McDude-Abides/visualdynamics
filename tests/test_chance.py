@@ -228,6 +228,101 @@ def test_the_counts_are_the_comparisons_own_on_averaged_noise():
     assert abs(counted - expected) < 4.0 * math.sqrt(expected)
 
 
+def _white_noise(window, overlap, channels, seed, frames=60):
+    """`channels` of white noise of unit variance averaged over
+    `frames` frames of 1024 samples at 5120 Hz, and a flat
+    specification on its density with warning edges 0.5 dB either side
+    and no abort pair."""
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    rate = 5120.0
+    averaging = Averaging(frame_length=1024, overlap=overlap, window=window,
+                          frames=frames)
+    rng = np.random.default_rng(seed)
+    history = TimeHistory(np.arange(averaging.span) / rate,
+                          rng.standard_normal((channels, averaging.span)),
+                          response_dof=[f'{i + 1}Z+' for i in range(channels)],
+                          ordinate_dim='acceleration')
+    history.averaging = averaging
+    spec = flat_spec(warning=0.5, abort=None, channels=channels)
+    spec.ordinate = spec.ordinate * 2.0 / rate
+    for name in list(spec.limits):
+        spec.limits[name] = spec.limits[name] * 2.0 / rate
+    return spec, history.compute_psds()
+
+
+def test_combined_hann_lines_are_worth_what_white_noise_measures():
+    """Brandon's review: under a Hann window, the default, adjacent
+    lines correlate at 0.44, so eight of them combined are worth far
+    less than eight times a line. At half overlap over sixty frames a
+    line is worth 113.8 degrees of freedom and a group of eight 488.4,
+    not 910.3; white noise measures the same, and the groups outside
+    plus or minus 0.5 dB come to what chance predicts at 488, about five
+    times what lines taken as independent would."""
+    spec, psd = _white_noise('hann', 0.5, channels=32, seed=3)
+    one = compare_chance(spec, psd, scale_db=0, combine=8)
+    assert one['dof'] == pytest.approx(113.784, abs=1e-3)
+    assert one['judged_dof'] == pytest.approx(488.44, abs=0.01)
+    assert 'note' not in one, 'the PSD says how its lines are tied'
+    # the measured worth of a sum of eight lines: 2 mean² / variance
+    sums = np.real(psd.ordinate)[:, 10:394].reshape(32, -1, 8).sum(axis=2)
+    measured = 2.0 * np.mean(sums) ** 2 / np.var(sums)
+    assert measured == pytest.approx(one['judged_dof'], rel=0.1)
+    assert measured != pytest.approx(910.3, rel=0.3)
+    counted = expected = alone = 0.0
+    loose = psd.line_correlation
+    for i in range(32):
+        result = compare_chance(spec, psd, i, i, scale_db=0, combine=8)
+        counted += result['warning_lines']
+        expected += result['warning_expected']
+        psd.line_correlation = None
+        alone += compare_chance(spec, psd, i, i, scale_db=0,
+                                combine=8)['warning_expected']
+        psd.line_correlation = loose
+    assert abs(counted - expected) < 4.0 * math.sqrt(expected)
+    assert counted > 3.0 * alone
+
+
+def test_a_rectangle_leaves_combined_lines_their_counts_added():
+    """Unwindowed and unoverlapped, lines are independent: the PSD says
+    so, and eight are worth eight times one."""
+    spec, psd = _white_noise('boxcar', 0.0, channels=1, seed=5)
+    assert psd.line_correlation.tolist() == [1.0]
+    assert compare_chance(spec, psd, scale_db=0, combine=8)['judged_dof'] == \
+        pytest.approx(960.0)
+
+
+def test_correlated_lines_combined_and_in_a_coarse_cell_are_worth_less():
+    """Lines correlated at 0.25 one apart: two combined are worth
+    (1 + 1)² n / (2 + 2 x 0.25), 1.6 times a line. A cell four lines
+    wide, correlated at 0.5, holds 16 n / (4 + 2 x 0.5 x 3), 16/7 of a
+    line."""
+    psd = lines()
+    psd.line_correlation = np.array([1.0, 0.25])
+    result = compare_chance(flat_spec(), psd, scale_db=0, combine=2)
+    assert result['groups']['dof'][1:-1] == pytest.approx(1.6 * DOF)
+    f = np.array([20.0, 40.0, 60.0, 80.0])
+    values = np.ones((1, 4))
+    spec = Specification(f, values, response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         warning_lower=values * 0.5, warning_upper=values * 2.0)
+    spec.interpolation = 'bin'
+    fine = Psd(2.5 + 5.0 * np.arange(21), np.ones((1, 21)),
+               response_dof=['1Z+'], ordinate_dim='acceleration**2/frequency')
+    fine.line_correlation = np.array([1.0, 0.5])
+    coarse = compare_chance(spec, fine, dof=30.0, scale_db=0)
+    assert coarse['groups']['lines'].tolist() == [4, 4, 4, 4]
+    assert coarse['groups']['dof'] == pytest.approx(np.full(4, 30.0 * 16.0 / 7.0))
+    assert 'note' not in coarse
+
+
+def test_lines_summed_without_a_correlation_are_said_to_be_taken_independent():
+    result = compare_chance(flat_spec(), lines(), scale_db=0, combine=8)
+    assert 'taken as independent' in result['note']
+    assert 'note' not in compare_chance(flat_spec(), lines(), scale_db=0)
+
+
 # ---- combining lines ---------------------------------------------------------
 
 
@@ -339,6 +434,69 @@ def test_a_psd_that_does_not_say_its_count_is_refused_until_given():
     assert given['dof'] == 100.0
     assert given['warning_expected'] == pytest.approx(
         389 * chance_outside(100.0, -1.5, 1.5).total)
+
+
+def test_a_line_on_its_limit_is_inside_as_compare_reads_it():
+    """Lines on a specification of their own lines, two of them exactly
+    on the warning edge above and two a part in a million past it: the
+    two on it are inside, alone and as a pair, as `compare` counts, and
+    the two past it are out, alone and as a pair."""
+    f = DF * np.arange(1, 9)
+    edge = 10.0 ** 0.15
+    values = np.ones((1, 8))
+    spec = Specification(f, values, response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         warning_lower=values / edge, warning_upper=values * edge)
+    spec.interpolation = 'bin'
+    level = np.ones(8)
+    level[[2, 3]] = edge
+    level[[6, 7]] = edge * (1.0 + 1e-6)
+    psd = Psd(f, level[None, :], response_dof=['1Z+'],
+              ordinate_dim='acceleration**2/frequency')
+    psd.statistical_dof = np.array([DOF])
+    single = compare_chance(spec, psd, scale_db=0)
+    assert np.flatnonzero(single['groups']['warning_above']).tolist() == [6, 7]
+    assert single['warning_above'] == compliance.compare(
+        spec, psd, scale_db=0)['warning_lines'] == 2
+    paired = compare_chance(spec, psd, scale_db=0, combine=2)
+    assert paired['groups']['lines'].tolist() == [2, 2, 2, 2]
+    assert np.flatnonzero(paired['groups']['warning_above']).tolist() == [3]
+
+
+def test_the_count_is_the_measured_records_own():
+    """Two records averaged to different counts: the second is read at
+    its own, not the first's."""
+    psd = Psd(DF * np.arange(401), np.ones((2, 401)),
+              response_dof=['1Z+', '2Z+'],
+              ordinate_dim='acceleration**2/frequency')
+    psd.statistical_dof = np.array([120.0, 30.0])
+    spec = flat_spec(channels=2)
+    assert compare_chance(spec, psd, 0, 0, scale_db=0)['dof'] == 120.0
+    second = compare_chance(spec, psd, 1, 1, scale_db=0)
+    assert second['dof'] == 30.0
+    assert second['warning_expected'] == pytest.approx(
+        389 * chance_outside(30.0, -1.5, 1.5).total)
+
+
+def test_a_cross_term_is_refused_as_the_confidence_band_refuses_it():
+    """The chi-square law is an autospectrum's: a cross spectrum between
+    two channels, and force against acceleration at one DOF, are both
+    refused."""
+    f = DF * np.arange(401)
+    between = Psd(f, np.ones((1, 401)) + 0.5j, response_dof=['1Z+'],
+                  reference_dof=['2Z+'],
+                  ordinate_dim='acceleration**2/frequency')
+    between.statistical_dof = np.array([DOF])
+    refused = compare_chance(flat_spec(), between, scale_db=0)
+    assert refused['lines'] == 0
+    assert 'cross term (1Z+/2Z+)' in refused['refused']
+    assert not between.is_autospectrum(0) and lines().is_autospectrum()
+    drive = Psd(f, np.ones((1, 401)), response_dof=['1Z+'],
+                reference_dof=['1Z+'],
+                ordinate_dim='acceleration*force/frequency')
+    assert not drive.is_autospectrum(0)
+    with pytest.raises(ValueError, match='cross terms'):
+        between.confidence_band(dof=DOF)
 
 
 def test_a_count_given_outranks_the_psds():

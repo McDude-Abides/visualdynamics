@@ -404,6 +404,11 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
         group.create_dataset('statistical_dof',
                              data=np.asarray(data.statistical_dof,
                                              dtype=float))
+    # and how its window ties neighboring lines, for the same reason
+    if getattr(data, 'line_correlation', None) is not None:
+        group.create_dataset('line_correlation',
+                             data=np.asarray(data.line_correlation,
+                                             dtype=float))
     found = getattr(data, 'shocks', None)
     if found:
         group.create_dataset('shocks', data=np.array(
@@ -511,6 +516,8 @@ def load_data(group: h5py.Group) -> DataArray:
         data.scale_db = int(group.attrs['scale_db'])
     if 'statistical_dof' in group:
         data.statistical_dof = group['statistical_dof'][()]
+    if 'line_correlation' in group:
+        data.line_correlation = group['line_correlation'][()]
     averaging = _load_averaging(group)
     if averaging is not None:
         data.averaging = averaging

@@ -27,6 +27,7 @@ from visualdynamics.core.averaging import (
     chi_square_factors,
     confidence_bands,
     frame_correlation,
+    line_correlation,
     statistical_dof,
     window_shape,
 )
@@ -238,6 +239,44 @@ def test_a_complex_estimate_has_no_chi_square_band():
         confidence_bands(np.array([1.0 + 1.0j]), 10.0)
 
 
+# ---- how neighboring lines vary together ---------------------------------
+
+
+def test_a_rectangle_leaves_lines_independent_and_a_hann_does_not():
+    """One frame of a rectangle: no correlation past the line itself.
+    One frame of a Hann window: 4/9 at one line apart and 1/36 at two,
+    the squares of its adjacent-line correlations 2/3 and 1/6, and
+    nothing past."""
+    assert line_correlation(np.ones(256), 256).tolist() == [1.0]
+    hann = line_correlation(window_shape('hann', 256), 256)
+    assert hann == pytest.approx([1.0, 4.0 / 9.0, 1.0 / 36.0], abs=1e-12)
+
+
+def test_overlapped_frames_share_their_lines_too():
+    """A Hann window at half overlap over sixty frames: the correlation
+    rises a little at one line apart (0.4587), and the variance of a sum
+    of eight lines is 1.864 times that of independent ones. Its first
+    term is the Welch sum `statistical_dof` divides by, so the two read
+    one average."""
+    averaging = Averaging(frame_length=1024, overlap=0.5, window='hann',
+                          frames=60)
+    found = averaging.line_correlation()
+    assert found[0] == 1.0
+    assert found[1] == pytest.approx(0.45874, abs=1e-5)
+    assert found[2] == pytest.approx(0.03929, abs=1e-5)
+    spread = 1.0 + 2.0 * sum((1.0 - d / 8.0) * found[d]
+                             for d in range(1, min(8, len(found))))
+    assert spread == pytest.approx(1.8636, abs=1e-4)
+    assert len(line_correlation(averaging.shape(), averaging.hop, 60,
+                                most=1)) == 2
+
+
+@pytest.mark.parametrize('frames, hop', [(0, 64), (3, 0)])
+def test_a_correlation_of_nothing_is_refused(frames, hop):
+    with pytest.raises(ValueError):
+        line_correlation(window_shape('hann', 64), hop, frames)
+
+
 # ---- carried by the PSD --------------------------------------------------
 
 
@@ -261,6 +300,8 @@ def test_a_computed_psd_carries_its_count():
     assert psd.statistical_dof.shape == (psd.num_records,)
     assert np.allclose(psd.statistical_dof,
                        averaging.statistical_dof().equivalent)
+    # and how its window ties its lines, the same for every record
+    assert np.array_equal(psd.line_correlation, averaging.line_correlation())
     # the averaging passed in, not the history's own, is the one counted
     other = Averaging(frame_length=128, frames=4, window='boxcar')
     assert np.allclose(history.compute_psds(other).statistical_dof, 8.0)
@@ -318,6 +359,31 @@ def test_a_psd_that_does_not_say_how_it_was_averaged_has_no_band():
     history, _averaging = _white(frames=10, overlap=0.5)
     banded = history.compute_psds().to_octave(3)
     assert banded.statistical_dof is None
+    assert banded.line_correlation is None
+    assert psd.line_correlation is None
+
+
+def test_the_line_correlation_travels_with_the_psd(tmp_path):
+    """Saved and opened again, merged with a PSD averaged the same way,
+    the correlation is kept; merged with one averaged otherwise, the
+    merge cannot say, and has none."""
+    from visualdynamics.core.merge import merge
+
+    history, _averaging = _white(frames=10, overlap=0.5, channels=2)
+    psd = history.compute_psds()
+    project = visualdynamics.Project('Lines')
+    project.add('PSD', psd)
+    project.save(tmp_path / 'lines.vdyn')
+    back = visualdynamics.Project.open(tmp_path / 'lines.vdyn')['PSD']
+    assert np.array_equal(back.line_correlation, psd.line_correlation)
+    other = history.compute_psds()
+    other.response_dof = ['3X+', '4X+']
+    assert np.array_equal(merge([psd, other]).line_correlation,
+                          psd.line_correlation)
+    plain = history.compute_psds(Averaging(frame_length=256, frames=4,
+                                           window='boxcar'))
+    plain.response_dof = ['5X+', '6X+']
+    assert merge([psd, plain]).line_correlation is None
 
 
 def test_cross_terms_have_no_chi_square_band():

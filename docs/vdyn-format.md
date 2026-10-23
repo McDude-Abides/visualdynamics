@@ -148,6 +148,10 @@ Present only where they mean something:
             statistical_dof   a PSD's statistical degrees of freedom,
                               one per record, where it was computed
                               from a time history
+            line_correlation  where it was computed from a time history,
+                              how its window ties neighboring lines:
+                              the correlation at 0, 1, 2, ... lines
+                              apart, starting at 1, one for every record
             shocks            (start, duration) rows, where events were marked
             roles             strings, DOF, quantity and role in threes,
                               flat: each channel's role (reference,

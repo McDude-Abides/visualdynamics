@@ -489,7 +489,7 @@ def judge(specification: Specification, measured: DataArray,
         asked = held = np.zeros(0)
     with np.errstate(invalid='ignore'):
         judged = np.isfinite(asked) & (asked > 0.0) & np.isfinite(held)
-        out = judged & ((held > asked) if over else (held < asked))
+        out = judged & beyond(held, asked, over)
     left, right = measured.bin_bounds()
     lines = np.zeros(left.shape, dtype=bool)
     level = np.full(left.shape, np.nan)
@@ -511,6 +511,16 @@ def judge(specification: Specification, measured: DataArray,
     return {'cells': found, 'asked': asked, 'held': held, 'out': out,
             'judged': judged, 'lines': lines, 'level': level,
             'start': start, 'stop': stop, 'scale_db': float(scale_db)}
+
+
+def beyond(held: ArrayLike, asked: ArrayLike, over: bool) -> np.ndarray:
+    """Where a measured power is past a limit's: more than an upper
+    limit (`over` True), less than a lower one. A power exactly on the
+    limit is inside. The one rule `judge` reads every cell by, and
+    `core.chance` its groups of cells."""
+    held, asked = np.asarray(held, dtype=float), np.asarray(asked, dtype=float)
+    with np.errstate(invalid='ignore'):
+        return (held > asked) if over else (held < asked)
 
 
 def covered(lines: ArrayLike, low: float, high: float,
