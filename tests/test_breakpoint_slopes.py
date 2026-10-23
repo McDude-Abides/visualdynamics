@@ -120,6 +120,50 @@ def test_minus_one_takes_the_logarithm_and_minus_three_db_the_general_form():
     assert 0.5 * (0.04 + 0.01) * 1500.0 == pytest.approx(37.5)
 
 
+def test_a_minus_one_segment_followed_by_another_takes_the_logarithm_whole():
+    """The logarithmic case has two homes in `log_log_areas`: the whole
+    segment, accumulated into the running total at the breakpoints, and
+    the partial segment a band ends inside. A minus-one segment that is
+    the last of its table only ever reaches the second, so the table
+    here carries one on to a flat segment after it."""
+    f = [*F, 4000.0]
+    w = [*W, 0.01]
+    assert segment_slopes(f, w)[2] == pytest.approx(-OCTAVE_DB, rel=1e-13)
+    areas = segment_areas(f, w)
+    assert areas == pytest.approx([*AREAS, 0.01 * 2000.0], rel=1e-12)
+    # the running rms at 2000 Hz is the cumulative area through the
+    # minus-one segment whole, and past it the flat segment adds 20 g²
+    tail = running_rms(f, w, [2000.0, 3000.0, 4000.0])
+    assert tail ** 2 == pytest.approx(
+        [sum(AREAS), sum(AREAS) + 10.0, sum(AREAS) + 20.0], rel=1e-12)
+    reading = read_breakpoints(f, w)
+    assert reading.running[2] == pytest.approx(RUNNING[2], rel=1e-12)
+    assert reading.rms ** 2 == pytest.approx(sum(AREAS) + 20.0, rel=1e-12)
+    # and from slopes: minus 3.0103 into 2000 Hz, then flat to 4000 Hz
+    typed = levels_from_slopes(f, 0.01, [OCTAVE_DB, 0.0, -OCTAVE_DB, 0.0])
+    assert segment_areas(f, typed) == pytest.approx(areas, rel=1e-12)
+
+
+def test_the_cited_worked_example_reads_the_same():
+    """The worked example of the reference in `core.breakpoints`
+    (Irvine, Integration of the Power Spectral Density Function, Rev B):
+    10 Hz at 0.002, 100 and 1000 Hz at 0.04, 2000 Hz at 0.02 g²/Hz. It
+    prints areas of 1.726, 36.000 and 27.726 g² and 8.09 grms. Its first
+    exponent is rounded there to 1.3 from log(20)/log(10) = 1.30103,
+    which is the whole of the difference from the 1.7296 here."""
+    f = [10.0, 100.0, 1000.0, 2000.0]
+    w = [0.002, 0.04, 0.04, 0.02]
+    areas = segment_areas(f, w)
+    assert areas == pytest.approx([1.7296, 36.0, 27.7259], abs=1e-4)
+    rounded = 0.002 / 10.0 ** 1.3 / 2.3 * (100.0 ** 2.3 - 10.0 ** 2.3)
+    assert rounded == pytest.approx(1.726, abs=5e-4), 'its own figure, at n = 1.3'
+    assert read_breakpoints(f, w).rms == pytest.approx(8.09, abs=5e-3)
+    # its Appendix A: 0.04 at 350 Hz, minus 3 dB per octave to 2000 Hz
+    # is 0.007, and plus 3 dB per octave down from 80 to 20 Hz is 0.01
+    assert level_at_slope(350.0, 0.04, 2000.0, -3.0) == pytest.approx(0.007, abs=5e-4)
+    assert level_at_slope(80.0, 0.04, 20.0, 3.0) == pytest.approx(0.01, abs=5e-4)
+
+
 def test_the_running_rms_climbs_from_zero_to_the_total():
     at = [10.0, 20.0, 80.0, 500.0, 2000.0, 3000.0]
     assert running_rms(F, W, at) == pytest.approx([0.0, 0.0, *RUNNING,

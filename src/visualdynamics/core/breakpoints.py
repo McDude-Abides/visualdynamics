@@ -53,19 +53,19 @@ hertz and rms in its square root; nothing here converts units.
 
 References
 ----------
-The slope in decibels per octave, the power law it stands for, and the
-area under a power-law segment are standard results of random
-vibration practice; these are where they and their use are set out.
+The slope in decibels per octave as a power-law exponent, the level it
+reaches, and the closed-form area under each segment, with its
+logarithmic case at an exponent of minus one, are standard results of
+random vibration practice; this is where they are set out with a
+worked example, which `tests/test_breakpoint_slopes.py` repeats.
 
-1. Steinberg, D. S. (2000). *Vibration Analysis for Electronic
-   Equipment*, 3rd ed. Wiley. The rms acceleration of a random input
-   from its breakpoint table, segment by segment, the area under a
-   sloped segment written from its slope in decibels per octave, and
-   the logarithmic form at minus 3 dB per octave.
-2. IEC 60068-2-64:2019, *Environmental testing - Part 2-64: Tests -
-   Test Fh: Vibration, broadband random and guidance*. A test profile
-   given as breakpoints, levels and slopes in decibels per octave, and
-   its rms value.
+1. Irvine, T. (2000). ["Integration of the Power Spectral Density
+   Function"](https://www.vibrationdata.com/tutorials2/psdinteg.pdf),
+   Revision B. The area under a segment that is a straight line
+   on log-log axes, in its two cases (its equation 11), the overall
+   rms as the root of the summed areas, and, in its Appendix A, the
+   level a slope in decibels per octave reaches over any frequency
+   ratio (equation A-12).
 """
 
 from __future__ import annotations
