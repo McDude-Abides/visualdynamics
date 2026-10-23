@@ -237,6 +237,13 @@ project.save('sine.vdyn')
   the build-up, the steady level and the ring-down after the stop,
   each in cycles ([Reading a dwell against time](../dwell.md)). The
   sine view's Dwell readout shows them beside the record.
+- The extracted level is the tone and nothing else, as the controller's
+  is. What the control channel carried besides it (harmonics from a
+  rattle or an amplifier at its limit, noise) is read by the distortion
+  check, the unfiltered RMS against the tracked tone at every line,
+  against a limit ([Checking a sine record for
+  distortion](../sine-distortion.md)). Once the levels are extracted,
+  the sine view's Distortion readout shows it beside the record.
 - Where the levels wobble, look at the wavelet first. A ripple in an
   extracted level can come from the article (a resonance swept
   through), from the test (two tones beating in one band), or from the

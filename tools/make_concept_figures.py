@@ -862,6 +862,51 @@ def transmissibility():
         print(f'{point.describe("g/g")}; truth {truth:.4g}')
 
 
+def sine_distortion():
+    """A 1 g sweep from 100 to 500 Hz at 100 Hz/s with a third harmonic
+    at 10 % of the tone all the way and at 50 % from 250 to 350 Hz, as a
+    rattle would add, sampled at 4096 Hz: the distortion against
+    frequency, over the limit only through the rattle."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.sine import (
+        SineSweepSpecification,
+        SineTone,
+        extract_sine,
+    )
+    from visualdynamics.core.sine_distortion import check_distortion
+    from visualdynamics.plot import plot_sine_distortion
+
+    g, rate = 9.80665, 4096.0
+    tone = SineTone('Up', 0.5, [100.0, 500.0], [[g]] * 2, [0], [100.0])
+    spec = SineSweepSpecification([tone], ['1Z+'], ordinate_unit='m/s**2')
+    n = int(6.0 * rate)
+    x = np.zeros(n)
+    argument = tone.argument(1.0 / rate)
+    drive = tone.frequency_at(np.arange(len(argument)) / rate)
+    third = np.where((drive >= 250.0) & (drive <= 350.0), 0.5, 0.1)
+    start = int(0.5 * rate)
+    x[start:start + len(argument)] = g * (np.cos(argument)
+                                          + third * np.cos(3.0 * argument))
+    history = TimeHistory(np.arange(n) / rate, x[None, :],
+                          response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'],
+                          ordinate_unit=['m/s**2'])
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    plot_sine_distortion(history, spec, levels, show=False,
+                         size=(1000, 600),
+                         path=str(OUT / 'sine-distortion.png'))
+    check = check_distortion(history, spec, levels)
+    quiet = (check.frequency > 150.0) & (check.frequency < 230.0)
+    over = check.over[0]
+    print(f'sine distortion: ratio {np.median(check.ratio[0][quiet]):.4f} '
+          f'and {100 * np.median(check.distortion[0][quiet]):.1f} % at '
+          f'150-230 Hz; {int(over.sum())} of {over.size} lines over, '
+          f'{check.frequency[over].min():.0f} to '
+          f'{check.frequency[over].max():.0f} Hz; {check.describe()}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -881,6 +926,7 @@ def main():
     stroke_readout()
     dwell()
     transmissibility()
+    sine_distortion()
     print('done')
 
 
