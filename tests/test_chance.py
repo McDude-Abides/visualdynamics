@@ -492,3 +492,109 @@ def test_the_view_refuses_what_it_cannot_read(qt_app):
     finally:
         layout.close()
 
+
+# ---- the reading in the window -----------------------------------------------
+
+
+def _chance_reading(window, pump):
+    """The plate's specification and its computed PSDs selected, on the
+    Chance reading."""
+    from conftest import prepared_comparison, select_objects
+
+    spec, psd = prepared_comparison(window, pump)
+    select_objects(window, pump, spec, psd)
+    window.data_pane.comparison_actions['chance'].trigger()
+    pump()
+    return spec, psd
+
+
+def test_chance_is_a_reading_of_a_comparison(window, pump):
+    """Offered beside the spectra and the two bar charts; choosing it puts
+    the panel up with one channel's counts beside their expectations,
+    the same numbers `compare_chance` gives, and the title on the status
+    line."""
+    from visualdynamics.plot.chance import title_text
+
+    spec, psd = _chance_reading(window, pump)
+    pane = window.data_pane
+    assert pane.comparison_actions['chance'].isVisible()
+    assert pane.comparison_actions['chance'].text() == 'Chance'
+    assert pane.comparison_view == 'chance'
+    panel = pane.chance_panel
+    assert panel.isVisible()
+    label = window._compliance_channels[0]
+    s, m = window.objects[spec], window.objects[psd]
+    row = next(r for r in compliance.matched_records(s, m) if r[0] == label)
+    expected = compare_chance(s, m, row[1], row[2],
+                              scale_db=window.project.comparison_scale(s, psd))
+    assert panel.derived['dof'].text() == f'{expected["dof"]:.4g}'
+    assert panel.derived['lines'].text() == str(expected['lines'])
+    paragraphs = panel.readout.text().split('\n\n')
+    assert paragraphs[0] == describe_chance(expected, 'warning') or \
+        paragraphs[0] == describe_chance(expected, 'abort')
+    assert title_text(expected, label) in window._status_text
+    plot = pane.graphics.getItem(0, 0)
+    assert plot.titleLabel.text == title_text(expected, label)
+
+
+def test_the_panels_combination_redraws_the_reading(window, pump):
+    _chance_reading(window, pump)
+    panel = window.data_pane.chance_panel
+    panel.combine_box.setValue(4)
+    pump()
+    assert panel.derived['lines'].text().endswith('groups of 4')
+    assert ', 4 lines combined at ' in window._status_text
+    names = [label.text for _sample, label in
+             window.data_pane.graphics.getItem(0, 0).legend.items]
+    assert '4 lines combined' in names
+
+
+def test_a_count_typed_stands_for_the_psds(window, pump):
+    _chance_reading(window, pump)
+    panel = window.data_pane.chance_panel
+    assert panel.dof_box.text() == 'from the PSD'
+    panel.set_settings(dof=2.0)
+    pump()
+    assert panel.derived['dof'].text() == '2'
+    assert ' at 2 DOF:' in window._status_text
+
+
+def test_a_psd_without_a_count_says_so_in_the_panel(window, pump):
+    _spec, psd = _chance_reading(window, pump)
+    window.objects[psd].statistical_dof = None
+    window.render_current()
+    pump()
+    panel = window.data_pane.chance_panel
+    assert panel.derived['dof'].text() == '—'
+    assert 'does not say how many degrees of freedom' in panel.readout.text()
+    panel.set_settings(dof=50.0)
+    pump()
+    assert panel.derived['dof'].text() == '50'
+
+
+def test_the_panel_goes_with_the_reading(window, pump):
+    _chance_reading(window, pump)
+    pane = window.data_pane
+    pane.comparison_actions['curves'].trigger()
+    pump()
+    assert not pane.chance_panel.isVisible()
+    pane.comparison_actions['chance'].trigger()
+    pump()
+    assert pane.chance_panel.isVisible()
+    window.tree.setCurrentItem(window.test_item)
+    pump()
+    assert not pane.chance_panel.isVisible()
+
+
+def test_the_chance_reading_is_journaled_as_its_plot_call(window, pump):
+    spec, psd = _chance_reading(window, pump)
+    window.data_pane.chance_panel.set_settings(combine=8)
+    pump()
+    label = window._compliance_channels[0]
+    scale = window.project.comparison_scale(window.objects[spec], psd)
+    found = [line for line in window.project.journal
+             if line.startswith('visualdynamics.plot.plot_chance(')]
+    assert found == [
+        (f'visualdynamics.plot.plot_chance(project[{psd!r}], '
+         f'project[{spec!r}], channel={label!r}, combine=8, dof=None, '
+         f"scale_db={scale!r}, path='chance.png', show=False)")]

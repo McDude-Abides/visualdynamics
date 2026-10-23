@@ -836,6 +836,34 @@ def _draw_percent_bars(painter, color):
     painter.drawLine(QPointF(8, 32), QPointF(58, 32))
 
 
+def _draw_chance(painter, color):
+    """Lines scattered about a target between two dashed edges, one of
+    them out: the Chance reading's button, how many lines the scatter
+    of an average puts outside a band. Dots rather than bars, so it is
+    told from the two bar-chart readings beside it."""
+    pen = QPen(QColor(color), 3)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(pen)
+    for y in (18, 46):
+        painter.drawLine(QPointF(6, y), QPointF(58, y))
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(QPen(faint, 2))
+    painter.drawLine(QPointF(6, 32), QPointF(58, 32))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    for x, y in ((10, 28), (18, 37), (26, 25), (42, 35), (50, 29)):
+        painter.drawEllipse(QPointF(x, y), 3.5, 3.5)
+    # the one out, under the lower edge, marked as the plot marks it:
+    # a triangle pointing the way it is out
+    out = QPainterPath()
+    out.moveTo(28, 50)
+    out.lineTo(40, 50)
+    out.lineTo(34, 60)
+    out.closeSubpath()
+    painter.drawPath(out)
+
+
 def _draw_report(painter, color):
     """A page with a chart on it: what the button makes.
 
@@ -2312,6 +2340,7 @@ def control_icon(name: str) -> QIcon:
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,
+     'chance': _draw_chance,
      'kurtosis': _draw_kurtosis, 'statistics': _draw_statistics,
      'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,

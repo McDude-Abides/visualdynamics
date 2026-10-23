@@ -988,6 +988,10 @@ class MainWindow(QMainWindow):
         # the plot is the preview of the settings being made
         self.data_pane.srs_tolerance_panel.changed.connect(
             lambda _settings: self.render_current())
+        # the lines combined and the count of a line redraw the Chance
+        # reading at once, for the same reason
+        self.data_pane.chance_panel.changed.connect(
+            lambda _settings: self.render_current())
         # the signature comparison's modes and limits redraw it at once:
         # the plot is the preview of the settings being made
         self.data_pane.signature_panel.changed.connect(
@@ -13061,6 +13065,8 @@ class MainWindow(QMainWindow):
             # comparison has, and for the same reason: the plot draws
             # the channels that were picked and is never the whole list
             self._show_compliance_table(comparison)
+        if comparison is not None and self.data_pane.comparison_view == 'chance':
+            return self._render_chance(series)
         if comparison is not None and self.data_pane.comparison_view != 'curves':
             return self._render_bars(comparison)
         # a density pair upstream has already claimed the toggle; the
@@ -18381,6 +18387,66 @@ class MainWindow(QMainWindow):
                 plot, errors, colors, low=low,
                 changed=self._lines_bound_moved, notes=notes, note=raw)
         return self.bar_chart.summary.toPlainText()
+
+    def _render_chance(self, series):
+        """One channel of the comparison as its miss from the target in
+        dB, the lines outside each band counted beside the number chance
+        alone puts there, and the counts in the panel beside it.
+
+        One channel at a time, the one the table under the plot picks or
+        the drop-down names, because the reading is of one channel's
+        lines; the table still holds every channel's RMS error and lines
+        out, the overview this does not replace. The settings are the
+        panel's, the scale is the comparison's, and every number is
+        `core.chance.compare_chance`'s.
+        """
+        from ..core.data import Psd, Specification
+        from ..plot.chance import build_chance, title_text
+
+        panel = self.data_pane.chance_panel
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        spec_name, spec, _spec_records = next(
+            entry for entry in series if isinstance(entry[1], Specification))
+        measured_name, measured, _records = next(
+            entry for entry in series if isinstance(entry[1], Psd)
+            and not isinstance(entry[1], Specification))
+        pairs = specification_pairs(series)
+        if not pairs:
+            panel.show_result(None, 'no channel in common to compare')
+            return 'no channel in common to compare'
+        self.data_pane.show_pairs(pairs)
+        # the table's pick outranks the drop-down, as for the spectra
+        wanted = set(self._compliance_channels)
+        picked = [pair for pair in pairs if pair_label(pair) in wanted]
+        if not picked:
+            chosen = self.data_pane.chosen_pair()
+            picked = [chosen if chosen in pairs else pairs[0]]
+        pair = picked[0]
+        self._compliance_channels = [pair_label(pair)]
+        self._plotted_pair = pair
+        label = pair_label(pair)
+        settings = panel.settings()
+        scale = self.project.comparison_scale(spec, measured_name)
+        self.data_pane.graphics.clear()
+        try:
+            result = build_chance(self.data_pane.graphics, spec, measured,
+                                  channel=label, scale_db=scale,
+                                  theme=self.theme_name, **settings)
+        except ValueError as error:
+            # a PSD that does not say its count, or one on octave bands:
+            # the reason, and no numbers that would read as a count
+            panel.show_result(None, str(error))
+            return str(error)
+        panel.show_result(result)
+        prefix = ('visualdynamics.plot.plot_chance('
+                  f'project[{measured_name!r}], project[{spec_name!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, channel={label!r}, combine={settings["combine"]!r}, '
+            f'dof={settings["dof"]!r}, scale_db={scale!r}, '
+            "path='chance.png', show=False)")
+        return title_text(result, label)
 
     def _render_kurtosis(self, history, series):
         """How Gaussian each channel of this record is, a bar apiece.

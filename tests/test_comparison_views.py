@@ -1,9 +1,11 @@
 """Reading a comparison: the spectra, or either of the bar charts.
 
-A specification with a measurement against it is read three ways, one
+A specification with a measurement against it is read four ways, one
 at a time. The spectra are what the comparison looks like; the bar
 charts are what it amounts to — how far each channel sits from the
-level asked for, and how much of each channel fell outside.
+level asked for, and how much of each channel fell outside. The fourth,
+one channel's lines outside beside what chance puts there, is tested
+with its computation in `test_chance.py`.
 
 There was a table here too. It is gone: six channels of it are read,
 sixty are scanned, and the bars answer which channel is worst and how
@@ -65,14 +67,14 @@ def comparing(window, pump):
     return spec, psd
 
 
-# ---- three readings, one at a time --------------------------------------
+# ---- four readings, one at a time ---------------------------------------
 
 
-def test_a_comparison_offers_all_three(window, pump):
+def test_a_comparison_offers_all_four(window, pump):
     comparing(window, pump)
     offered = {k for k, a in window.data_pane.comparison_actions.items()
                if a.isVisible()}
-    assert offered == {'curves', 'error', 'lines'}
+    assert offered == {'curves', 'error', 'lines', 'chance'}
     assert not window.data_pane.toolbar.isHidden()
 
 

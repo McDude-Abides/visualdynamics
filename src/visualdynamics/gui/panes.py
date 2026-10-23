@@ -40,6 +40,7 @@ from ..viz.geometry import annotate_scene
 from .amplitude_panel import AmplitudePanel
 from .author_panel import AuthorPanel
 from .averaging_panel import AveragingPanel
+from .chance_panel import ChancePanel
 from .confidence_panel import ConfidencePanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
@@ -308,8 +309,8 @@ class DataPane(QWidget):
         self.stroke_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
-        #: 'curves', 'error' or 'lines' — sticky, like the other view
-        #: choices, so it survives a redraw
+        #: 'curves', 'error', 'lines' or 'chance' — sticky, like the
+        #: other view choices, so it survives a redraw
         self.comparison_view: str = 'curves'
         #: where the bar charts' thresholds have been dragged to
         self.error_bounds: tuple[float, float] | None = None
@@ -347,6 +348,12 @@ class DataPane(QWidget):
         # the bar, whose SRS readings put it away
         self.srs_tolerance_panel: SrsTolerancePanel = SrsTolerancePanel()
         self.srs_tolerance_panel.hide()
+        # the lines outside a random comparison's bands beside what
+        # chance puts there, and how many lines are judged together;
+        # the Chance reading shows it. Made before the bar, whose
+        # comparison readings put it away
+        self.chance_panel: ChancePanel = ChancePanel()
+        self.chance_panel.hide()
         # the segment marks and their tolerances, beside a run judged
         # segment by segment; the Segments reading shows it. Made before
         # the bar, whose replication readings put it away
@@ -450,6 +457,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.truncate_panel)
         plot_row.addWidget(self.octave_panel)
         plot_row.addWidget(self.srs_tolerance_panel)
+        plot_row.addWidget(self.chance_panel)
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.transmissibility_panel)
         plot_row.addWidget(self.confidence_panel)
@@ -572,10 +580,12 @@ class DataPane(QWidget):
             lambda _index: None if self._loading_pairs
             else self.pair_chosen.emit())
         self.pair_action: QAction = toolbar.addWidget(self.pair_box)
-        # three readings of one comparison: the spectra themselves, the
-        # level each channel came out at, and how much of each channel's
-        # band fell outside. One at a time, because they answer
-        # different questions and stacking them answers none.
+        # four readings of one comparison: the spectra themselves, the
+        # level each channel came out at, how much of each channel's
+        # band fell outside, and how many of one channel's lines fell
+        # outside beside how many chance alone puts there. One at a
+        # time, because they answer different questions and stacking
+        # them answers none.
         self.comparison_group: QActionGroup = QActionGroup(self)
         self.comparison_actions: dict[str, QAction] = {}
         for key, icon, text, tip in (
@@ -584,7 +594,11 @@ class DataPane(QWidget):
                 ('error', 'bars', 'RMS Error',
                  'How far each channel sits from the level asked for'),
                 ('lines', 'percent_bars', 'Lines Out',
-                 'How much of each channel fell outside its abort limits')):
+                 'How much of each channel fell outside its abort limits'),
+                ('chance', 'chance', 'Chance',
+                 ("How many of the channel's lines fell outside each band, "
+                  'beside how many chance alone puts there at the '
+                  "comparison's degrees of freedom"))):
             action = QAction(control_icon(icon), text, self)
             action.setCheckable(True)
             action.setToolTip(tip)
@@ -1310,15 +1324,18 @@ class DataPane(QWidget):
             self.spectra_actions[self.spectra_view].setChecked(True)
 
     def show_comparison_views(self, offered: bool) -> None:
-        """Show or hide the three readings of a comparison (curves,
-        error, lines).
+        """Show or hide the four readings of a comparison (curves,
+        error, lines, chance).
 
-        Only a specification with a measurement against it has three
+        Only a specification with a measurement against it has four
         readings. Anything else has one, and a choice of one is not
-        offered.
+        offered. The Chance reading's panel is put away with them, and
+        whenever another reading is chosen; the drawing puts it up.
         """
         for action in self.comparison_actions.values():
             action.setVisible(offered)
+        if not offered or self.comparison_view != 'chance':
+            self.chance_panel.hide()
         if offered:
             self.toolbar.setVisible(True)
             self.comparison_actions[self.comparison_view].setChecked(True)
