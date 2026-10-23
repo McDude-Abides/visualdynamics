@@ -12967,6 +12967,7 @@ class MainWindow(QMainWindow):
             for key, render in (('fit', self._render_replication_fit),
                                 ('wavelet', self._render_wavelet),
                                 ('statistics', self._render_statistics),
+                                ('amplitude', self._render_amplitude),
                                 ('pulse', self._render_pulse),
                                 ('stroke', self._render_stroke)):
                 if self.data_pane.showing(key):
@@ -18490,6 +18491,62 @@ class MainWindow(QMainWindow):
                 f'{call}(project[{name!r}], {channel}, {given}, '
                 "path='time_statistics.png', show=False)")
         return f'{history.record_label(channel)}: {stats.describe()}'
+
+    def _render_amplitude(self, history, name=None, records=None):
+        """One channel of this record as an amplitude spectrum: each
+        line scaled so a sine reads its amplitude in peak units, under
+        the window chosen in the panel, the frames' magnitudes
+        averaged, with the window and its correction named on the plot
+        and the tallest line read in the panel.
+
+        One channel at a time, as the statistics are: the first
+        selected, and the tree is settled onto it. The frames are the
+        record's averaging, as the Averaging reading sets them; the
+        window is the panel's. Every number is
+        `TimeHistory.amplitude_spectrum`'s.
+        """
+        from ..core.amplitude_spectrum import channel_row
+        from ..plot.amplitude_spectrum import (
+            build_amplitude_spectrum,
+            display_scale,
+        )
+
+        panel = self.data_pane.amplitude_panel
+        panel.set_settings(self.data_pane.amplitude_settings)
+        settings = panel.settings()
+        panel.show()
+        channel = records[0] if records else 0
+        self._settle_on_record(name, history, records, channel)
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        try:
+            spectrum = history.amplitude_spectrum(**settings)
+        except ValueError as error:
+            # frames that do not fit the record, samples unevenly
+            # spaced: the reason, and no numbers that would read as an
+            # amplitude
+            panel.show_reading(None)
+            return str(error)
+        row = channel_row(history, channel)
+        us = self.unit_system
+        tallest = build_amplitude_spectrum(
+            self.data_pane.graphics, spectrum, row, unit_system=us,
+            theme=self.theme_name)
+        scale, unit = display_scale(spectrum, row, us)
+        panel.show_reading(spectrum, row, tallest, scale=scale, unit=unit)
+        if name is not None:
+            call = 'visualdynamics.plot.plot_amplitude_spectrum'
+            given = ''.join(f', {key}={value!r}'
+                            for key, value in settings.items()
+                            if value is not None)
+            self._journal_view(
+                f'{call}(project[{name!r}]',
+                f'{call}(project[{name!r}], {row}{given}, '
+                "path='amplitude_spectrum.png', show=False)")
+        if tallest is None:
+            return f'{spectrum.label(row)}: {spectrum.correction_text()}'
+        return spectrum.describe(row, unit, scale)
 
     def _render_wavelet(self, history, name=None, records=None):
         """Where this record's frequencies are, moment by moment.

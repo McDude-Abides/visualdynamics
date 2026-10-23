@@ -499,6 +499,28 @@ def _draw_confidence(painter, color):
     painter.drawPath(_curve([(x, level(x)) for x in xs]))
 
 
+def _draw_amplitude(painter, color):
+    """A ragged floor with one line standing out of it, and a dashed
+    level across at its top.
+
+    The amplitude reading's button: an amplitude spectrum's floor is
+    ragged, since it is a mean of magnitudes and not a level, and the
+    tone is one line read at its height, which the dashed level marks.
+    A level rather than the tone reading's triangle, so the two are
+    told apart.
+    """
+    faint = QColor(color)
+    faint.setAlpha(120)
+    painter.setPen(_pen(faint, 3))
+    painter.drawPolyline([QPointF(6 + 4 * i, 50 - (5 if i % 2 else 0)
+                                  - (2 if i % 3 == 0 else 0))
+                          for i in range(14)])
+    painter.setPen(QPen(QColor(color), 3, Qt.PenStyle.DashLine))
+    painter.drawLine(QPointF(6, 12), QPointF(58, 12))
+    painter.setPen(_pen(color, 5))
+    painter.drawLine(QPointF(38, 48), QPointF(38, 12))
+
+
 def _draw_truncate(painter, color):
     """A trace with its ends grayed away behind two cut lines.
 
@@ -2295,6 +2317,7 @@ def control_icon(name: str) -> QIcon:
      'truncate': _draw_truncate, 'octave': _draw_octave,
      'tone': _draw_tone, 'transmissibility': _draw_transmissibility,
      'confidence': _draw_confidence,
+     'amplitude': _draw_amplitude,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

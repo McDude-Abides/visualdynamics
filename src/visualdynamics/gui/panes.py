@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..plot import background_brush
 from ..theme import theme as resolve_theme
 from ..viz.geometry import annotate_scene
+from .amplitude_panel import AmplitudePanel
 from .author_panel import AuthorPanel
 from .averaging_panel import AveragingPanel
 from .confidence_panel import ConfidencePanel
@@ -280,6 +281,10 @@ class DataPane(QWidget):
         #: what they are read with, kept across redraws so a range typed
         #: for one channel survives clicking away and back
         self.statistics_settings: dict[str, Any] | None = None
+        #: and the amplitude spectrum, the same way, with the window it
+        #: is read under kept across redraws and records
+        self.amplitude_wanted: bool = False
+        self.amplitude_settings: dict[str, Any] | None = None
         #: and the scalogram, the same way
         self.wavelet_wanted: bool = False
         #: what it is computed with, kept across redraws so a tuned
@@ -398,6 +403,10 @@ class DataPane(QWidget):
         # three rows that draw them; read only, nothing to apply
         self.statistics_panel: StatisticsPanel = StatisticsPanel()
         self.statistics_panel.hide()
+        # the amplitude spectrum's window and its reading, beside the
+        # spectrum; read only, nothing to apply
+        self.amplitude_panel: AmplitudePanel = AmplitudePanel()
+        self.amplitude_panel.hide()
         # the pulse a record is judged against, beside the judgment
         self.pulse_panel: PulsePanel = PulsePanel()
         self.pulse_panel.hide()
@@ -449,6 +458,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.signature_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
+        plot_row.addWidget(self.amplitude_panel)
         plot_row.addWidget(self.pulse_panel)
         plot_row.addWidget(self.replication_fit_panel)
         plot_row.addWidget(self.stroke_panel)
@@ -864,6 +874,19 @@ class DataPane(QWidget):
             'against its band')
         self.statistics_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.statistics_action)
+        # the record's lines scaled so a sine reads its amplitude, in
+        # peak units, under a window chosen for it: where a tone on the
+        # record is read, which its ASD cannot give. A reading of the
+        # record, so it replaces the trace as the statistics do
+        self.amplitude_action: QAction = QAction(
+            control_icon('amplitude'), 'Amplitude', self)
+        self.amplitude_action.setCheckable(True)
+        self.amplitude_action.setToolTip(
+            "One channel's amplitude spectrum in peak units: the window's "
+            "amplitude correction applied and named, the frames' "
+            'magnitudes averaged, the tallest line read')
+        self.amplitude_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.amplitude_action)
         # and the same for the events in a transient record: the windows
         # bracketed on the plot and listed beside it, or neither
         self.shocks_action: QAction = QAction(control_icon('shocks'), 'Shocks', self)
@@ -1117,6 +1140,10 @@ class DataPane(QWidget):
         # bands are for a record meant to be Gaussian random, which a
         # shock record is not (2026-10-16, on review)
         Reading('statistics', 'statistics_panel', 'averaging',
+                flat=True, sticky=True),
+        # offered where the averaging is: its frames are the
+        # averaging's, and only its window is its own
+        Reading('amplitude', 'amplitude_panel', 'averaging',
                 flat=True, sticky=True),
         Reading('shocks', 'shock_panel', 'shocks'),
         Reading('wavelet', 'wavelet_panel', 'averaging', sticky=True),

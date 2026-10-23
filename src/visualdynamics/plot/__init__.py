@@ -3655,6 +3655,78 @@ def plot_time_statistics(history: Any, record: int = 0, *,
 
 
 
+def plot_amplitude_spectrum(history: Any, record: int = 0, *,
+                            averaging: Any = None, window: str = 'hann',
+                            parameter: float | None = None,
+                            log: bool = True,
+                            band: tuple[float, float] | None = None,
+                            unit_system: UnitSystem | None = None,
+                            theme: Any = None,
+                            path: str | os.PathLike | None = None,
+                            show: bool = True, title: str | None = None,
+                            size: tuple[int, int] = (1000, 620)) -> Any:
+    """Draw one channel's amplitude spectrum, its window and correction
+    named on the plot and its tallest line read.
+
+        visualdynamics.plot.plot_amplitude_spectrum(
+            history, 0, window='flattop', path='amplitude.png')
+
+    Each line is scaled so a sine of amplitude A on it reads A, in peak
+    units, and the frames' magnitudes are averaged
+    (`TimeHistory.amplitude_spectrum`, `plot.amplitude_spectrum`). The
+    title names the window, its amplitude correction, the line spacing,
+    the frames averaged and how far low the window reads a sine midway
+    between lines; the tallest line above DC is marked with a triangle
+    and its amplitude written beside it. This is the script form of the
+    Amplitude reading on a time history's bar.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The record.
+    record : int, default 0
+        Which channel, counted as the spectrum's rows are (one per
+        channel; a record saved as captures is one channel).
+    averaging : Averaging, optional
+        The frames, as `TimeHistory.amplitude_spectrum` takes them.
+    window : str, default 'hann'
+        The window; 'flattop' for a tone's amplitude wherever it falls.
+    parameter : float, optional
+        The Tukey window's alpha or the Kaiser window's beta.
+    log : bool, default True
+        Draw the amplitude on a logarithmic axis.
+    band : (float, float), optional
+        The band, in Hz, the tallest line is looked for in.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `TimeHistory.amplitude_spectrum` raises.
+    """
+    from .amplitude_spectrum import build_amplitude_spectrum
+
+    spectrum = history.amplitude_spectrum(averaging, window=window,
+                                          parameter=parameter)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_amplitude_spectrum(widget, spectrum, record,
+                                 unit_system=unit_system, theme=theme,
+                                 log=log, band=band)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{spectrum.label(record)}: '
+                                        'amplitude spectrum'),
+                        size=size)
+
+
 def plot_pulse_check(history: Any, shape: str, peak: float,
                      duration: float, edge: float | None = None, *,
                      channel: int | str | None = None,

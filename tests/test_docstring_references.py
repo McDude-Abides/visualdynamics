@@ -50,6 +50,8 @@ THEORY = {
                          'bandwidth and leakage of a window',
     'core.time_statistics': 'the moments, the Gaussian tails, the crossing '
                             'rate and the expected largest peak',
+    'core.amplitude_spectrum': 'the amplitude correction of a window: its '
+                               'coherent gain and scalloping loss',
     'core.replication_segments': 'the averaged periodogram, the shock '
                                  'response spectrum and the tapered '
                                  'cosine window each segment is read by',

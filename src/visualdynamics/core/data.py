@@ -51,6 +51,7 @@ from numpy.typing import ArrayLike
 
 if TYPE_CHECKING:
     from ..units import UnitSystem
+    from .amplitude_spectrum import AmplitudeSpectrum
     from .averaging import Averaging, ConfidenceBand
     from .half_power import HalfPower
     from .time_statistics import TimeStatistics
@@ -1354,7 +1355,9 @@ class TimeHistory(DataArray):
         mean. This is the same convention as sdynpy's
         `TimeHistoryArray.fft`. Phase is kept, so content whose phase is
         random from frame to frame, such as the response to burst random
-        excitation, averages toward zero.
+        excitation, averages toward zero. For lines scaled so a sine
+        reads its amplitude under a chosen window, with the frames'
+        magnitudes averaged, see `amplitude_spectrum`.
 
         Returns
         -------
@@ -1387,6 +1390,53 @@ class TimeHistory(DataArray):
                         response_dof=dofs, ordinate_dim=dims,
                         ordinate_unit=units, dimension_hint=hints,
                         comment='averaged spectrum')
+
+    def amplitude_spectrum(self, averaging: Averaging | None = None, *,
+                           window: str = 'hann',
+                           parameter: float | None = None
+                           ) -> AmplitudeSpectrum:
+        """Every channel's amplitude spectrum: each line scaled so a sine
+        of amplitude A on it reads A, in peak units, under `window`, the
+        frames' magnitudes averaged.
+
+        Beside `compute_spectra`, which is left as it is: that one is
+        unscaled, rectangular and a complex mean. Here the window's
+        amplitude correction, N/Σw (×2.000 for Hann), is applied and
+        stated on the result, and a tone keeps its amplitude in the
+        average whatever its phase in each frame.
+        `core.amplitude_spectrum.amplitude_spectrum` does the reading
+        and says how; `visualdynamics.plot.plot_amplitude_spectrum`
+        draws it.
+
+        Parameters
+        ----------
+        averaging : Averaging, optional
+            How to cut the record into frames: the record's own
+            `averaging` by default, or one whole frame per record. Its
+            window is not used.
+        window : str, default 'hann'
+            The window, by any name `core.averaging.normalize_window`
+            takes: 'hann' for a general reading, 'flattop' for a tone's
+            amplitude wherever it falls between lines.
+        parameter : float, optional
+            The Tukey window's alpha or the Kaiser window's beta.
+
+        Returns
+        -------
+        AmplitudeSpectrum
+            One row per channel, in SI peak units as the record is
+            stored, with the window, its coherent gain and correction,
+            the line spacing and the frames averaged.
+
+        Raises
+        ------
+        ValueError
+            If the samples are not evenly spaced, or the frames do not
+            fit in the record.
+        """
+        from .amplitude_spectrum import amplitude_spectrum
+        return amplitude_spectrum(self, averaging, window=window,
+                                  parameter=parameter)
 
     @property
     def sample_rate(self) -> float:
