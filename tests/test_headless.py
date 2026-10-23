@@ -328,7 +328,8 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_fit': 'Project.fit_modes',
         '_render_fit_mac': 'plot_mac',
         '_render_author': ('core.author.ModalSpecificationDraft.preview, '
-                           'then plot_data'),
+                           'then plot_data; its areas and running rms '
+                           'plot_breakpoints'),
     }
     renderers = {name for name in dir(main_window.MainWindow)
                  if name.startswith('_render_')}

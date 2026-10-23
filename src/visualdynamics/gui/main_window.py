@@ -1016,6 +1016,9 @@ class MainWindow(QMainWindow):
         self.data_pane.author_panel.form_asked.connect(self._author_form_asked)
         self.data_pane.author_panel.constraint_asked.connect(
             self._author_constraint_asked)
+        self.data_pane.author_panel.entry_asked.connect(self._author_entry_asked)
+        self.data_pane.author_panel.areas_asked.connect(
+            lambda _on: self.render_current())
         self.author_data_action: QAction = QAction(control_icon('edit'),
                                                    'Edit', self)
         self.author_data_action.setCheckable(True)
@@ -10730,6 +10733,13 @@ class MainWindow(QMainWindow):
             previews = [(f'{names[0]} (draft)', draft.preview(), None)]
         status = self._render_series(previews)
         self._add_band_handles(draft)
+        # the breakpoint table read for the channel on the plot: its
+        # areas written on the plot, the running rms under it, and the
+        # numbers in the sheet — one reading, `core.breakpoints`
+        channel = self._plotted_pair[0] if self._plotted_pair else None
+        if panel.areas_wanted:
+            self._add_breakpoint_reading(draft, channel)
+        panel.show_reading(channel)
         unset = draft.unset_pairs()
         said = ('every cross term stated' if not unset else
                 f'{len(unset)} pair{"s" * (len(unset) != 1)} unstated')
@@ -10783,6 +10793,48 @@ class MainWindow(QMainWindow):
         self._band_handles = add_band_handles(
             plot, draft, draft.channels.index(channel), self.unit_system,
             resolve_theme(self.theme_name), self._band_dragged)
+
+    def _add_breakpoint_reading(self, draft, channel):
+        """The drawn channel's segment areas written on the flat plot,
+        and its running rms as a row under it, sharing the frequency
+        axis (`plot.breakpoints`, the pieces `plot_breakpoints`
+        draws)."""
+        import pyqtgraph as pg
+
+        from ..plot.breakpoints import add_running_rms, add_segment_labels
+
+        if self.data_pane.showing_waterfall or channel not in draft.channels:
+            return
+        layout = self.data_pane.graphics.ci
+        plot = next((item for item in layout.items
+                     if isinstance(item, pg.PlotItem)), None)
+        if plot is None:
+            return
+        k = draft.channels.index(channel)
+        reading = draft.reading(k)
+        add_segment_labels(plot, reading, draft.dims[k], self.unit_system,
+                           self.theme_name)
+        add_running_rms(layout, layout.layout.rowCount(), reading,
+                        draft.dims[k], link=plot, unit_system=self.unit_system,
+                        theme=self.theme_name)
+
+    def _author_entry_asked(self, entry):
+        """Levels or Slopes on the sheet: its draft typed the other way.
+        The requirement is unchanged, so nothing is written to the
+        object; the sheet is redrawn with the columns of its entry."""
+        door = self._author_door
+        if door is None:
+            return
+        try:
+            self._drafts[door[1]] = self._draft_for(door).with_entry(entry)
+        except Exception as exc:  # noqa: BLE001 - a slot: said and logged, never swallowed
+            self._sheet_failed(f'{entry} entry', exc)
+            return
+        self.render_current()
+        self._show_status(
+            'levels typed at every breakpoint' if entry == 'levels' else
+            'levels typed by slope: a level at the first breakpoint and a '
+            'slope in dB per octave into each one after it')
 
     def _band_dragged(self, kind, side, segments, decibels):
         """A band's edge let go on the plot at `decibels`: every
@@ -10844,11 +10896,12 @@ class MainWindow(QMainWindow):
                     self.objects[name]).constrained(**{which: on})
                 self.project.author_specification(name, whole, replace=True)
             remembered = self._draft_for(door).spacing
+            entry = self._draft_for(door).entry
             self._drafts.pop(door[1], None)
-            draft = self._draft_for(door)
+            draft = self._draft_for(door).with_entry(entry)
             if draft.spacing is None and remembered is not None:
                 draft = draft._copy(spacing=remembered)
-                self._drafts[door[1]] = draft
+            self._drafts[door[1]] = draft
             self._author_edited(draft)
         except Exception as exc:  # noqa: BLE001 - a slot: said and logged, never swallowed
             self._sheet_failed(f'{which} {"on" if on else "off"}', exc)
@@ -10877,13 +10930,16 @@ class MainWindow(QMainWindow):
                             else f'{name}: {len(whole.frequencies)} '
                                  f'{"breakpoints" if form == "breakpoints" else "lines"}')
             remembered = self._draft_for(door).spacing
+            # the entry is the sheet's, not the object's: kept across
+            # the conversion as the spacing is
+            entry = self._draft_for(door).entry
             self._drafts.pop(door[1], None)
-            draft = self._draft_for(door)
+            draft = self._draft_for(door).with_entry(entry)
             if draft.spacing is None and remembered is not None:
                 # the breakpoints form has no spacing of its own; the
                 # sheet keeps the one the lines had, for the way back
                 draft = draft._copy(spacing=remembered)
-                self._drafts[door[1]] = draft
+            self._drafts[door[1]] = draft
             self._author_edited(draft)
         except Exception as exc:  # noqa: BLE001 - a slot: said and logged, never swallowed
             # said *after* the render: said before it, the render's own

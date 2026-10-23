@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from conftest import fixture_path
+from conftest import select_objects as _select
 from PySide6.QtCore import Qt
 
+import visualdynamics
 from visualdynamics.core.author import SpecificationDraft
 from visualdynamics.core.breakpoints import (
     OCTAVE_DB,
@@ -345,3 +348,196 @@ def test_the_standalone_plot_writes_a_file_from_a_sheet_or_an_object(tmp_path, q
     with pytest.raises(ValueError, match="no channel '9Z\\+'"):
         plot_breakpoints(draft, channel='9Z+', show=False,
                          path=tmp_path / 'none.png')
+
+
+# ---- the sheet in the window ----------------------------------------------------
+
+CONTROLS = ['101X+', '101Y+', '101Z+', '102X+', '102Y+', '102Z+']
+
+
+def _populate(window, pump):
+    rng = np.random.default_rng(1)
+    geometry = visualdynamics.Geometry(np.arange(101, 106),
+                                       rng.uniform(-1.0, 1.0, (5, 3)),
+                                       length_unit='m')
+    window.add_object('Plate', geometry)
+    window.add_object('Channels', visualdynamics.ChannelTable({
+        'channel': list(range(1, 7)),
+        'node': [dof[:3] for dof in CONTROLS],
+        'direction': [dof[3:] for dof in CONTROLS],
+        'unit': ['g'] * 6, 'control': ['True'] * 6}))
+    window.project.link('Plate', 'Channels')
+    pump()
+
+
+def _open(window, pump):
+    _populate(window, pump)
+    _select(window, pump, 'Channels')
+    window.author_action.setChecked(True)
+    window._author_toggled(True)
+    pump()
+    pump()
+    return window.data_pane.author_panel
+
+
+def _header(view, column):
+    return view.model().headerData(column, Qt.Orientation.Horizontal,
+                                   Qt.ItemDataRole.DisplayRole)
+
+
+def _text(view, row, column):
+    return view.model().data(view.model().index(row, column),
+                             Qt.ItemDataRole.DisplayRole)
+
+
+def _type(view, row, column, text):
+    model = view.model()
+    return model.setData(model.index(row, column), text, Qt.ItemDataRole.EditRole)
+
+
+def test_slopes_put_a_slope_beside_each_level_and_write_nothing(window, pump):
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    assert panel.levels_button.isChecked() and not panel.slopes_button.isChecked()
+    assert panel.points.model().columnCount() == 7
+    before = window.project['Channels Specification']
+    journal = len(window.project.journal)
+    panel.slopes_button.click()
+    pump()
+    assert window._drafts[key].entry == 'slopes'
+    assert panel.slopes_button.isChecked()
+    assert panel.points.model().columnCount() == 13, 'a level and a slope a channel'
+    assert _header(panel.points, 2) == '101X+\ndB/oct'
+    assert _text(panel.points, 0, 2) == '', 'nothing slopes into the first'
+    assert _text(panel.points, 1, 2) == '0', 'the starter is flat'
+    assert window.project['Channels Specification'] is before, \
+        'the entry is how the sheet is typed, not a change to the object'
+    assert len(window.project.journal) == journal
+    panel.levels_button.click()
+    pump()
+    assert window._drafts[key].entry == 'levels'
+    assert panel.points.model().columnCount() == 7
+
+
+def test_a_typed_slope_computes_the_level_and_lands_on_the_object(window, pump):
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    panel.slopes_button.click()
+    pump()
+    first = window._drafts[key].levels[0][0]
+    # 20 to 2000 Hz is log2(100) octaves; at minus 3.0103 dB an octave
+    # the level falls by the frequency ratio
+    assert _type(panel.points, 1, 2, str(-OCTAVE_DB))
+    pump()
+    draft = window._drafts[key]
+    assert draft.levels[0][1] == pytest.approx(first / 100.0, rel=1e-12)
+    assert draft.levels[1] == window._drafts[key].levels[1], 'one channel'
+    made = window.project['Channels Specification']
+    assert np.real(made.ordinate[0][-1]) == pytest.approx(first / 100.0, rel=1e-12)
+    assert _text(panel.points, 1, 1) == f'{float(window.unit_system.from_si(first / 100.0, "acceleration**2/frequency")):.6g}', \
+        'the level the slope reaches, shown beside it'
+    # the first row takes no slope, and says why
+    assert not _type(panel.points, 0, 2, '3')
+    assert 'no slope into it' in panel.problem.text()
+    # a slope into a later row runs from the row above it, and the
+    # rows above keep their levels
+    panel.points.setCurrentIndex(panel.points.model().index(1, 0))
+    panel.add_button.click()
+    pump()
+    assert window._drafts[key].frequencies == [20.0, 2000.0, 4000.0]
+    assert _type(panel.points, 2, 2, str(-2 * OCTAVE_DB))
+    pump()
+    draft = window._drafts[key]
+    assert draft.levels[0][:2] == pytest.approx([first, first / 100.0], rel=1e-12)
+    assert draft.levels[0][2] == pytest.approx(first / 400.0, rel=1e-12)
+
+
+def test_a_level_typed_by_slope_holds_the_slopes_after_it(window, pump):
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    panel.slopes_button.click()
+    pump()
+    assert _type(panel.points, 1, 2, '3')
+    pump()
+    slope = window._drafts[key].slopes_db()[0][0]
+    assert slope == pytest.approx(3.0)
+    assert _type(panel.points, 0, 1, '0.5')
+    pump()
+    draft = window._drafts[key]
+    assert draft.levels[0][0] == pytest.approx(
+        float(window.unit_system.to_si(0.5, 'acceleration**2/frequency')))
+    assert draft.slopes_db()[0][0] == pytest.approx(3.0), 'held'
+    # a frequency moved within its neighbors keeps the slope too
+    assert _type(panel.points, 1, 0, '1000')
+    pump()
+    draft = window._drafts[key]
+    assert draft.frequencies == [20.0, 1000.0]
+    assert draft.slopes_db()[0][0] == pytest.approx(3.0)
+
+
+def test_areas_write_on_the_plot_draw_the_running_rms_and_read_out(window, pump):
+    import pyqtgraph as pg
+
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    assert _type(panel.points, 0, 1, '0.04')
+    pump()
+    assert not panel.reading.isVisibleTo(panel)
+
+    def plots():
+        return [item for item in window.data_pane.graphics.ci.items
+                if isinstance(item, pg.PlotItem)]
+
+    alone = len(plots())
+    panel.areas_box.setChecked(True)
+    pump()
+    drawn = plots()
+    assert len(drawn) == alone + 1
+    running = [p for p in drawn if getattr(p, 'is_running_rms', False)]
+    assert len(running) == 1
+    channel = window._plotted_pair[0]
+    reading = window._drafts[key].reading(channel)
+    rms = float(window.unit_system.from_si(reading.rms, 'acceleration'))
+    assert f'{rms:.4g} g at 2000 Hz' in running[0].titleLabel.text
+    labels = [item for item in drawn[0].items
+              if getattr(item, 'is_segment_label', False)]
+    assert len(labels) == 1, 'one segment, one label'
+    assert panel.reading.isVisibleTo(panel)
+    assert f'<b>{channel}</b>' in panel.reading.text()
+    assert f'{rms:.4g} g rms' in panel.reading.text()
+    # an edit restates the reading at once
+    assert _type(panel.points, 1, 1 + window._drafts[key].channels.index(channel), '0.04')
+    pump()
+    flat = float(window.unit_system.from_si(
+        window._drafts[key].reading(channel).rms, 'acceleration'))
+    assert f'{flat:.4g} g rms' in panel.reading.text()
+    panel.areas_box.setChecked(False)
+    pump()
+    assert len(plots()) == alone
+    assert not panel.reading.isVisibleTo(panel)
+
+
+def test_slopes_apply_to_the_breakpoints_and_the_entry_survives_the_form(window, pump):
+    window.import_paths([fixture_path('plate', 'random.nc4')])
+    pump()
+    _select(window, pump, 'Specification')
+    window.data_pane.waterfall_action.setChecked(False)
+    window.author_data_action.setChecked(True)
+    window._author_toggled(True)
+    pump()
+    pump()
+    panel = window.data_pane.author_panel
+    key = window._author_door[1]
+    assert window._drafts[key].form == 'lines'
+    assert not panel.slopes_button.isVisibleTo(panel), \
+        'a slope into each of a controller\'s lines is not offered'
+    window._author_entry_asked('slopes')
+    pump()
+    assert window._drafts[key].entry == 'slopes'
+    assert panel.points.model().columnCount() == 9, 'still a level a channel'
+    panel.breakpoints_button.click()
+    pump()
+    draft = window._drafts[key]
+    assert draft.form == 'breakpoints' and draft.entry == 'slopes'
+    assert panel.slopes_button.isVisibleTo(panel) and panel.slopes_button.isChecked()
+    assert panel.points.model().columnCount() == 17

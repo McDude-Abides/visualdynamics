@@ -67,7 +67,12 @@ def sheet_tables():
 
     draft = SpecificationDraft.at_dofs(['101Z+', '104Z+']).with_all_pairs(0.5)
     points, pairs = sheet_models(Sheet(draft, DEFAULT_SYSTEM))
+    # by slope the breakpoints grid holds a level and a slope a channel,
+    # and is held to the same contract
+    by_slope, _pairs = sheet_models(Sheet(draft.with_entry('slopes'),
+                                          DEFAULT_SYSTEM))
     return [('specification breakpoints', points),
+            ('specification breakpoints by slope', by_slope),
             ('specification pairs', pairs)]
 
 
