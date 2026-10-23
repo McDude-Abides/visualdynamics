@@ -26,7 +26,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QWidget
 
 from ..core.chance import PAIRS, describe_chance
-from .editors import SpinBox, number_box
+from .editors import DoubleSpinBox, SpinBox, number_box
 from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 #: the most lines that may be combined into one group
@@ -59,7 +59,7 @@ class ChancePanel(QWidget):
             'tolerance; each group is worth about this many times a '
             'line\'s degrees of freedom, so chance puts fewer outside')
         # zero stands for "the PSD's own count", said in words in the box
-        self.dof_box = number_box(
+        self.dof_box: DoubleSpinBox = number_box(
             0.0, 1.0e6, value=0.0, decimals=1, step=10.0,
             tip='The statistical degrees of freedom of one line. Left '
                 'at "from the PSD", the count the PSD was stamped with '
