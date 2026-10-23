@@ -930,6 +930,47 @@ def breakpoint_slopes():
           ', '.join(f'{r / 9.80665:.2f}' for r in reading.running))
 
 
+def amplitude_spectrum():
+    """Two tones on a 0.89 grms floor from 20 to 2,000 Hz, read at 5 Hz
+    lines under Hann and under the flat top: 1 g peak at 160 Hz, on a
+    line, and 2 g peak at 502.5 Hz, midway between two. Both windows
+    read the tone on a line at 1 g; Hann reads the one between lines
+    1.42 dB low, the flat top within 0.01 dB."""
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_amplitude_spectrum
+
+    fs, seconds, g = 5120.0, 12.0, 9.80665
+    rng = np.random.default_rng(1502)
+    n = int(fs * seconds)
+    spectrum = np.fft.rfft(rng.standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    # white noise of unit variance has a one-sided ASD of 2/fs
+    gain = np.where((f >= 20.0) & (f <= 2000.0),
+                    np.sqrt(0.0004 / (2.0 / fs)), 0.0)
+    x = np.fft.irfft(spectrum * gain, n)
+    t = np.arange(n) / fs
+    x = (x + 1.0 * np.sin(2.0 * np.pi * 160.0 * t)
+         + 2.0 * np.sin(2.0 * np.pi * 502.5 * t + 0.3))
+    history = TimeHistory(t, x[None] * g, response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    history.averaging = Averaging(frame_length=1024, overlap=0.5,
+                                  window='hann').filled(n, fs)
+    for window in ('hann', 'flattop'):
+        plot_amplitude_spectrum(history, 0, window=window, show=False,
+                                size=(1000, 600),
+                                path=str(OUT / f'amplitude-spectrum-{window}.png'))
+        read = history.amplitude_spectrum(window=window)
+        on_line = read.tallest(0, band=(100.0, 200.0))
+        between = read.tallest(0, band=(400.0, 600.0))
+        print(f'{window}: {read.correction_text()}; {on_line[1] / g:.4f} g '
+              f'at {on_line[0]:g} Hz, {between[1] / g:.4f} g at '
+              f'{between[0]:g} Hz, floor about '
+              f'{np.median(read.amplitude[0, 200:380]) / g:.4f} g')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -951,6 +992,7 @@ def main():
     transmissibility()
     sine_distortion()
     breakpoint_slopes()
+    amplitude_spectrum()
     print('done')
 
 

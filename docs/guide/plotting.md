@@ -121,6 +121,10 @@ reading of a peak on it, the reading the fitting screen's cursor shows
 `plot_tone_readout(asd, [19.44, 58.32], window=...)` draws an
 autospectrum with each tone read off it, the reading the Tones cursor
 shows ([Reading a tone off an ASD](tone-readout.md)).
+`plot_amplitude_spectrum(history, 0, window='flattop')` draws one
+channel's amplitude spectrum in peak units with its window and
+correction in the title, the Amplitude reading's plot
+([Reading a tone's amplitude from a record](amplitude-spectrum.md)).
 `plot_replication_segments(...)` draws a replicated run judged segment
 by segment ([Judging a replication by
 segment](replication-segments.md)). A sine specification's sweep

@@ -61,6 +61,9 @@ that is not an alpha.
   0.707 line, its crossings, and how many lines a peak needs
 - [Reading a tone off an ASD](tone-readout.md): why a spike's height
   is not the tone, and the tone in g peak from the lines it leaks into
+- [Reading a tone's amplitude from a record](amplitude-spectrum.md):
+  the amplitude spectrum in g peak, the window's correction stated, and
+  the flat top for a tone between lines
 - [Checking a sweep rate against the modes it passes](sweep-rate.md):
   the time and cycles in each half-power band, and what a fast sweep
   does to a peak and its Q
