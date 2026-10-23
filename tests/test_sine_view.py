@@ -116,7 +116,11 @@ def test_the_button_makes_the_levels_with_the_setting_shown(window, pump):
                   if isinstance(obj, SineLevelSet))
     assert levels.cycles == 40.0
     assert '40 cycles of smoothing' in window.statusBar().currentMessage()
-    assert window.project.journal[-1] == "project.extract_sine('Record')"
+    # the extraction is the last act; the distortion readout's view of
+    # the levels it made may be journaled after it, since it reads them
+    acts = [line for line in window.project.journal
+            if not line.startswith('visualdynamics.plot.')]
+    assert acts[-1] == "project.extract_sine('Record')"
     # and a later edit badges the levels stale, as a filter edit does
     # (the press selected the levels; the edit is made on the record)
     select_objects(window, pump, 'Record')
