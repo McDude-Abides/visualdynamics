@@ -66,6 +66,9 @@ that is not an alpha.
 - [Reading a tone's amplitude from a record](amplitude-spectrum.md):
   the amplitude spectrum in g peak, the window's correction stated, and
   the flat top for a tone between lines
+- [Checking a spectrum against its record](rms-check.md): the rms from
+  the area under an ASD beside the rms of its time history, and the
+  scaling errors the gap names
 - [Checking a sweep rate against the modes it passes](sweep-rate.md):
   the time and cycles in each half-power band, and what a fast sweep
   does to a peak and its Q

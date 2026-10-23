@@ -129,6 +129,9 @@ shows ([Reading a tone off an ASD](tone-readout.md)).
 channel's amplitude spectrum in peak units with its window and
 correction in the title, the Amplitude reading's plot
 ([Reading a tone's amplitude from a record](amplitude-spectrum.md)).
+`plot_rms_check(asd, history)` draws an autospectrum with its rms
+check written in the corner, the reading the RMS Check toggle shows
+([Checking a spectrum against its record](rms-check.md)).
 `plot_replication_segments(...)` draws a replicated run judged segment
 by segment ([Judging a replication by
 segment](replication-segments.md)). A sine specification's sweep

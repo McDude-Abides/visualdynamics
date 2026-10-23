@@ -91,6 +91,14 @@ on the bar (2), and press Compute PSDs (3)](../images/random-psds-click.png)
 ![The control PSDs: eight acceleration channels and the drive forces,
 averaged over the run's own frames](../images/random-psds.png)
 
+Before a PSD is read, **RMS Check** on its bar checks it against the
+run: the rms from the area under it beside the rms of the time history
+over the same frames, and the gap in dB. A spectrum computed here
+agrees within a few hundredths of a decibel; one imported from the
+controller can be checked against the run the same way, and a scaling
+error shows as a gap the check names (see [Checking a spectrum against
+its record](../rms-check.md)).
+
 ### 3. Band onto sixth octaves
 
 A random report always includes the octave-band PSD and the

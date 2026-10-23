@@ -1074,6 +1074,46 @@ def plot_composition():
           f'{f[np.argmax(after.ordinate[0])]:.0f} Hz')
 
 
+def rms_check():
+    """A random record checked against its own ASD twice: as the package
+    computes it, Hann at half overlap, which agrees within hundredths of
+    a decibel, and with every line made 1.5 times too high, the Hann
+    amplitude correction applied to a density, which is flagged and
+    named. Twelve seconds at 5120 samples a second, flat at 0.04 g2/Hz
+    from 20 to 2000 Hz, 1024-sample frames."""
+    import copy
+
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.tone_readout import noise_bandwidth
+    from visualdynamics.plot import plot_rms_check
+
+    fs, seconds, g = 5120.0, 12.0, 9.80665
+    rng = np.random.default_rng(1502)
+    n = int(fs * seconds)
+    spectrum = np.fft.rfft(rng.standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    spectrum[(f < 20.0) | (f > 2000.0)] = 0.0
+    x = np.fft.irfft(spectrum, n)
+    x = x * np.sqrt(0.04 * 1980.0) / np.sqrt(np.mean(x ** 2))
+    history = TimeHistory(np.arange(n) / fs, x[None] * g,
+                          response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    averaging = Averaging(frame_length=1024, overlap=0.5,
+                          window='hann').filled(n, fs)
+    asd = history.compute_psds(averaging)
+    wrong = copy.deepcopy(asd)
+    wrong.ordinate = asd.ordinate * noise_bandwidth(averaging)
+    for spectrum_, name in ((asd, 'rms-check-agree.png'),
+                            (wrong, 'rms-check-amplitude.png')):
+        plot_rms_check(spectrum_, history, averaging=averaging, show=False,
+                       size=(1000, 600), path=str(OUT / name))
+        check = spectrum_.rms_check(history, averaging=averaging)
+        print(f'rms check: {check.describe("g", 1.0 / g)}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1098,6 +1138,7 @@ def main():
     amplitude_spectrum()
     comparison_chance()
     plot_composition()
+    rms_check()
     print('done')
 
 
