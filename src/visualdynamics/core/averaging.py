@@ -648,18 +648,36 @@ class ConfidenceBand:
     def describe(self) -> str:
         """The band in words, as the app and the plots state it: the
         confidence, the degrees of freedom it was worked out at
-        (`dof_text`) and its two edges in decibels from the estimate,
-        such as '90 % band at 225.9 DOF: -0.8 / +0.9 dB'."""
+        (`dof_text`) and its two edges in decibels from the estimate
+        (`edges_text`), such as '90 % band at 225.9 DOF: -0.8 / +0.9
+        dB'."""
         return (f'{round(self.level * 100)} % band at {dof_text(self.dof)} '
-                f'DOF: {self.lower_db:+.1f} / {self.upper_db:+.1f} dB')
+                f'DOF: {self.edges_text()}')
+
+    def edges_text(self) -> str:
+        """The two edges in decibels from the estimate, as every view
+        shows them: to a tenth of a decibel, such as '-0.8 / +0.9 dB'
+        (`db_text` gives one edge)."""
+        return f'{self.lower_db:+.1f} / {self.upper_db:+.1f} dB'
+
+
+def db_text(db: float) -> str:
+    """One edge of a band in decibels, signed, to a tenth of a decibel:
+    '-0.8 dB'. A band's edge is known to far better, but a hundredth of
+    a decibel is not a difference anyone reads off a spectrum, and the
+    Averaging view, the confidence reading and the status line all show
+    this one figure."""
+    return f'{float(db):+.1f} dB'
 
 
 def dof_text(dof: float) -> str:
     """A count of statistical degrees of freedom as it is shown: four
     significant figures, so an equivalent count reads 225.9 and a whole
-    one 120, the same figure in the Averaging view, the confidence
+    one 120, and a whole number from 10,000 up, 12500 rather than
+    1.25e+04; the same figure in the Averaging view, the confidence
     reading and a plot's legend."""
-    return f'{float(dof):.4g}'
+    dof = float(dof)
+    return f'{dof:.0f}' if abs(dof) >= 1.0e4 else f'{dof:.4g}'
 
 
 def confidence_bands(estimate: ArrayLike, dof: float,

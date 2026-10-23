@@ -3496,7 +3496,9 @@ class Psd(_Bands, DataArray):
         ValueError
             If the spectrum carries no degrees of freedom and none are
             given, if it holds cross terms (whose error is not
-            chi-square), or if a count or the level is out of range.
+            chi-square), if it is a `Specification` (a target, not an
+            average: `confidence_refusal`), or if a count or the level
+            is out of range.
         """
         from .averaging import chi_square_factors
 
@@ -3548,8 +3550,8 @@ class Psd(_Bands, DataArray):
         ------
         ValueError
             As `confidence_band` raises: no degrees of freedom known or
-            given, a cross term among the records, or a count or the
-            level out of range.
+            given, a cross term among the records, a specification, or
+            a count or the level out of range.
         """
         from .averaging import confidence_bands
 
@@ -3558,43 +3560,80 @@ class Psd(_Bands, DataArray):
         return [confidence_bands(values[i], counts[i], levels=[level])[0]
                 for i in range(self.num_records)]
 
-    def is_autospectrum(self) -> bool:
-        """Whether every record is an autospectrum, a channel against
-        itself: one DOF and one quantity on both sides. Only such a
-        spectrum has a chi-square band (`confidence_band`).
+    def is_autospectrum(self, record: int | None = None) -> bool:
+        """Whether a record is an autospectrum, a channel against itself:
+        one DOF and one quantity on both sides. Only such a record has a
+        chi-square band (`confidence_band`) or a tone to read
+        (`tone_refusal`).
+
+        Parameters
+        ----------
+        record : int, optional
+            Which record; every record must be one when omitted.
 
         Returns
         -------
         bool
         """
+        if record is not None:
+            return self._is_auto(int(record))
         return self._cross_term() is None
 
-    def _cross_term(self) -> int | None:
-        """The first record that is a cross term, or None."""
+    def _is_auto(self, record: int) -> bool:
+        """Whether record `record` names one DOF and one quantity twice."""
         # A record is an autospectrum only when its two DOFs are one
         # and its two quantities are one: force against acceleration
         # at a drive point names 1X+ twice and is still a cross term,
         # whose real part alone the band would otherwise have been
         # drawn on (2026-10-16).
-        for i in range(self.num_records):
-            response, reference = self.record_pair(i)
-            first, second = channel_quantities(self.ordinate_dim[i])
-            if response != reference or first != second:
-                return i
+        response, reference = self.record_pair(record)
+        first, second = channel_quantities(self.ordinate_dim[record])
+        return response == reference and first == second
+
+    def _cross_term(self) -> int | None:
+        """The first record that is a cross term, or None."""
+        return next((i for i in range(self.num_records)
+                     if not self._is_auto(i)), None)
+
+    def confidence_refusal(self) -> str | None:
+        """Why this spectrum has no chi-square band, or None when it has
+        one: `confidence_band` and `confidence_reading` raise this as
+        their ValueError, and the application offers the band only where
+        it is None.
+
+        Two things are refused, whatever count is given. A cross term,
+        whose magnitude has a different error law, so a band drawn on it
+        as if chi-square would be a claim nobody computed. And a
+        `Specification`, which is a target and not an average, even the
+        spectrum of a transient specification, which is averaged from a
+        waveform and carries the count of that averaging: the band says
+        where the true spectrum of a measurement lies, and a requirement
+        has no true spectrum other than itself. A missing count is not
+        refused here, since it can be given (`confidence_band`'s `dof`).
+
+        Returns
+        -------
+        str or None
+            The reason, in words, or None.
+        """
+        if isinstance(self, Specification):
+            return ('a specification is a target, not an average, and '
+                    'has no chi-square band')
+        cross = self._cross_term()
+        if cross is not None:
+            return ('a chi-square band is on an autospectrum; this PSD '
+                    f'holds cross terms ({self.record_label(cross)})')
         return None
 
     def _band_counts(self, dof: float | ArrayLike | None) -> np.ndarray:
         """Each record's degrees of freedom for its band: `dof` spread
         over the records, or the spectrum's own. One statement of the
-        refusals, read by `confidence_band` and `confidence_reading`."""
-        # A cross term's magnitude has a different error law, and a
-        # band drawn on it as if chi-square would be a claim nobody
-        # computed. Refused rather than skipped, so the caller knows.
-        cross = self._cross_term()
-        if cross is not None:
-            raise ValueError('a chi-square band is on an autospectrum; '
-                             'this PSD holds cross terms '
-                             f'({self.record_label(cross)})')
+        refusals (`confidence_refusal`, then the count), read by
+        `confidence_band` and `confidence_reading`."""
+        # Refused rather than skipped, so the caller knows.
+        refusal = self.confidence_refusal()
+        if refusal is not None:
+            raise ValueError(refusal)
         counts = self.statistical_dof if dof is None else dof
         if counts is None:
             raise ValueError(
@@ -3736,12 +3775,13 @@ class Psd(_Bands, DataArray):
             return ('a tone is read off the evenly spaced lines of an '
                     'averaged spectrum; this one is banded or written at '
                     'breakpoints')
-        response = self.response_dof[record]
-        reference = (response if self.reference_dof is None
-                     else self.reference_dof[record])
+        response, reference = self.record_pair(record)
         # a cross spectrum's real part is not a density of one signal,
-        # and its imaginary part is the phase between two
-        if reference != response or has_phase(self.ordinate[record]):
+        # and its imaginary part is the phase between two; one DOF named
+        # twice over two quantities is a cross term too
+        # (`is_autospectrum`)
+        if (not self.is_autospectrum(record)
+                or has_phase(self.ordinate[record])):
             return (f'record {record} ({response}/{reference}) is a cross '
                     'spectrum; a tone is read off an autospectrum')
         try:

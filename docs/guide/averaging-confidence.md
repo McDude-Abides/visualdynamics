@@ -150,7 +150,9 @@ and the pane beside it sets and says what the band is:
   the band on a spectrum read from a file, at the count the system that
   averaged it reports.
 - Below the rule: where the count came from (*the averaging*, *typed*
-  or *not known*), the channel the rows read (the first one drawn), the
+  or *not known*), the channel the rows read (the first one drawn that
+  has a finite line above zero; a dead channel has no band and the note
+  names it), the
   **Equivalent DOF**, the band's edges **Below** and **Above** the
   estimate in decibels, and the same edges as **Factors**. A note under
   them says what the confidence means line by line, and says so when
@@ -158,16 +160,21 @@ and the pane beside it sets and says what the band is:
 
 The status line gives the band in words. A spectrum that carries no
 count and has none typed draws no band, and the pane asks for one: a
-band is never guessed. A cross-spectrum and a specification are not
-offered the reading. Like every reading, the view is journaled as the
-call that draws it:
+band is never guessed. A cross-spectrum and a specification have no
+band, whatever count is given: a specification is a target, not an
+average, and that includes the PSD of a transient specification, which
+carries the count it was averaged to. `Psd.confidence_refusal` says
+why, the band and the plot raise it, and the app does not offer the
+reading. Like every reading, the view is journaled as the call that
+draws it:
 
 ```python
 project['Record PSD'].plot(marks='confidence', levels=[0.95],
                            path='confidence.png', show=False)
 ```
 
-with `dof=` added when a count was typed.
+with `dof=` added when a count was typed, and `records=` when only
+some channels are drawn.
 
 ## What has no count, and what the count leaves out
 

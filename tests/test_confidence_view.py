@@ -93,6 +93,14 @@ def test_the_band_is_offered_on_an_autospectrum_alone(window, pump):
     _flat(window, pump, 'Cross')
     assert not pane.confidence_action.isVisible(), \
         'a cross term has no chi-square band'
+    from visualdynamics.core.data import Specification
+
+    target = Specification(f, np.full((1, 64), 0.04), response_dof=['1Z+'],
+                           ordinate_dim='acceleration**2/frequency')
+    target.statistical_dof = np.array([40.0])
+    window.add_object('Target', target)
+    _flat(window, pump, 'Target')
+    assert not pane.confidence_action.isVisible(),         'a specification is a target, even one carrying a count'
 
 
 def test_the_toggle_shades_the_band_and_reads_it(window, pump):
@@ -107,8 +115,8 @@ def test_the_toggle_shades_the_band_and_reads_it(window, pump):
     assert derived['source'].text() == 'the averaging'
     assert derived['channel'].text() == '1Z+'
     assert derived['dof'].text() == dof_text(count)
-    assert derived['below'].text() == f'{10 * np.log10(low):+.2f} dB'
-    assert derived['above'].text() == f'{10 * np.log10(high):+.2f} dB'
+    assert derived['below'].text() == f'{10 * np.log10(low):+.1f} dB'
+    assert derived['above'].text() == f'{10 * np.log10(high):+.1f} dB'
     assert panel.level_box.currentText() == '90 %'
     assert panel.dof_box.text() == 'as averaged'
     band = asd.confidence_reading(0.9)[0]
@@ -132,7 +140,7 @@ def test_ninety_five_is_chosen_in_the_pane_and_kept(window, pump):
     assert np.allclose(after - before, np.log10(high95 / high90)), \
         'the upper edge moves up by the ratio of the two factors'
     assert pane.confidence_panel.derived['above'].text() == \
-        f'{10 * np.log10(high95):+.2f} dB'
+        f'{10 * np.log10(high95):+.1f} dB'
     # the confidence is one choice, kept for the next spectrum drawn
     window.render_current()
     pump()
@@ -168,14 +176,68 @@ def test_an_imported_spectrum_asks_for_its_count(window, pump):
 
 
 def test_a_typed_count_overrides_the_averaging_s(window, pump):
-    name, _shown, pane = _band_on(window, pump)
+    """Typed over a count the spectrum carries: the rows, the edge
+    drawn and the legend all say 16, not the stamped count."""
+    name, asd, pane = _band_on(window, pump)
+    stamped = asd.statistical_dof[0]
+    assert dof_text(stamped) != '16'
     pane.confidence_panel.dof_box.setValue(16.0)
     pump()
     derived = pane.confidence_panel.derived
     assert derived['source'].text() == 'typed'
-    assert derived['below'].text() == '-2.16 dB'
-    assert derived['above'].text() == '+3.03 dB'
+    assert derived['dof'].text() == '16'
+    assert derived['below'].text() == '-2.2 dB'
+    assert derived['above'].text() == '+3.0 dB'
     assert window._confidence_dofs[name] == 16.0
+    # the edge on the plot is the spectrum times the factor at 16
+    low16, high16 = chi_square_factors(16.0, 0.9)
+    low_n, high_n = chi_square_factors(stamped, 0.9)
+    edges = _edges(window)
+    lower, upper = (edge.getData()[1] for edge in edges[:2])
+    plot = window.confidence_previews[0][0]
+    log_y = plot.ctrl.logYCheck.isChecked()
+    shown = np.real(asd.ordinate[0])
+    seen = shown[np.isfinite(shown) & (shown > 0)]
+    drawn_ratio = (10.0 ** (upper - lower) if log_y else upper / lower)
+    assert np.allclose(drawn_ratio[np.isfinite(drawn_ratio)],
+                       high16 / low16),         'the band is as wide as 16 DOF make it'
+    assert not np.isclose(high16 / low16, high_n / low_n)
+    assert seen.size
+    names = [label.text for _sample, label in plot.legend.items]
+    assert '90 % confidence, 16 DOF' in names
+    assert not any(dof_text(stamped) in label for label in names)
+
+
+def test_a_dead_first_channel_is_passed_over_not_read(window, pump):
+    """A channel with no finite line has no band drawn, so the rows
+    read the next channel and the note names the one passed over."""
+    record = _record()
+    record.ordinate[0] = np.nan
+    window.add_object('Record', record)
+    name = window.project.compute_psds('Record')
+    pane = _flat(window, pump, name)
+    pane.confidence_action.trigger()
+    pump()
+    derived = pane.confidence_panel.derived
+    assert derived['channel'].text() == '2Z+'
+    assert 'No band on 1Z+' in pane.confidence_panel.notes.text()
+    assert window.statusBar().currentMessage().startswith('2Z+: ')
+
+
+def test_no_channel_with_a_line_reads_no_band(window, pump):
+    record = _record()
+    record.ordinate[:] = np.nan
+    window.add_object('Record', record)
+    name = window.project.compute_psds('Record')
+    pane = _flat(window, pump, name)
+    pane.confidence_action.trigger()
+    pump()
+    panel = pane.confidence_panel
+    assert panel.derived['channel'].text() == '—'
+    assert panel.derived['dof'].text() == '—'
+    assert 'no band to shade' in panel.notes.text()
+    assert window.statusBar().currentMessage().startswith(
+        'No confidence band: no line drawn')
 
 
 def test_records_averaged_differently_are_said_to_differ(window, pump):
@@ -219,6 +281,21 @@ def test_the_band_is_journaled_as_its_plot_call(window, pump):
     lines = [line for line in window.project.journal
              if line.startswith(prefix)]
     assert lines == [(f"{prefix}, levels=[0.9], dof=120.0, "
+                     "path='confidence.png', show=False)")]
+
+
+def test_the_journaled_call_names_the_records_drawn(window, pump):
+    """One channel picked on the plot: the replay shades that channel,
+    not every record, and the pane reads the channel picked."""
+    name, _asd, pane = _band_on(window, pump)
+    window._select_records(name, [1])
+    window.render_current()
+    pump()
+    assert pane.confidence_panel.derived['channel'].text() == '2Z+'
+    prefix = f"project[{name!r}].plot(marks='confidence'"
+    lines = [line for line in window.project.journal
+             if line.startswith(prefix)]
+    assert lines == [(f"{prefix}, levels=[0.9], records=[1], "
                      "path='confidence.png', show=False)")]
 
 

@@ -21,6 +21,7 @@ from visualdynamics.core.averaging import (
     ConfidenceBand,
     chi_square_factors,
     confidence_bands,
+    db_text,
     dof_text,
 )
 from visualdynamics.core.data import Psd, TimeHistory
@@ -59,7 +60,8 @@ def test_a_band_says_its_confidence_its_count_and_its_edges(dof, level,
 
 @pytest.mark.parametrize('dof, shown', [
     (120.0, '120'), (225.9437, '225.9'), (2.0, '2'), (17.1718, '17.17'),
-    (1504.6, '1505'),
+    (1504.6, '1505'), (9999.4, '9999'), (12500.3, '12500'),
+    (1.3e6, '1300000'),
 ])
 def test_a_count_is_shown_to_four_figures(dof, shown):
     assert dof_text(dof) == shown
@@ -216,3 +218,121 @@ def test_plot_data_takes_a_count_for_the_band_alone(qt_app, tmp_path):
         visualdynamics.plot.plot_data(psd, marks='octave', dof=40.0,
                                       path=str(tmp_path / 'never.png'),
                                       show=False)
+
+
+# ---- a specification is a target, not an average -------------------------
+
+
+def _target_spectra():
+    """A breakpoint specification, and the PSD of a transient
+    specification, which is a `Specification` carrying the count its
+    averaging gives."""
+    from visualdynamics.core.data import (
+        Specification,
+        TransientSpecification,
+    )
+
+    breakpoints = Specification([20.0, 80.0, 350.0, 2000.0],
+                                [[0.01, 0.04, 0.04, 0.007]],
+                                response_dof=['1Z+'],
+                                ordinate_dim='acceleration**2/frequency')
+    averaging = Averaging(frame_length=256, overlap=0.5, window='hann',
+                          frames=10)
+    rng = np.random.default_rng(1509)
+    waveform = TransientSpecification(
+        np.arange(averaging.span) / 1024.0,
+        rng.standard_normal((1, averaging.span)), response_dof=['1Z+'],
+        ordinate_dim='acceleration')
+    waveform.averaging = averaging
+    averaged = waveform.compute_psds()
+    assert isinstance(averaged, Specification)
+    assert averaged.statistical_dof is not None, 'a count is stamped'
+    return breakpoints, averaged
+
+
+def test_a_specification_has_no_band_even_given_a_count():
+    """The refusal is the spectrum's, not the window's: a script asking
+    for the band on a target is told no, as the app never offers it."""
+    for target in _target_spectra():
+        assert target.confidence_refusal() is not None
+        with pytest.raises(ValueError, match='specification'):
+            target.confidence_band(0.9, dof=16.0)
+        with pytest.raises(ValueError, match='specification'):
+            target.confidence_reading(0.9, dof=16.0)
+        with pytest.raises(ValueError, match='specification'):
+            target.confidence_reading(0.9)
+
+
+def test_a_specification_is_not_shaded_by_the_plot(qt_app, tmp_path):
+    for target in _target_spectra():
+        with pytest.raises(ValueError, match='specification'):
+            visualdynamics.plot.plot_data(
+                target, marks='confidence', levels=[0.9], dof=16.0,
+                path=str(tmp_path / 'never.png'), show=False)
+
+
+def test_an_average_and_a_typed_count_have_no_refusal():
+    psd, _averaging = _averaged()
+    assert psd.confidence_refusal() is None
+    imported = visualdynamics.import_file(fixture_path('plate', 'psd.npz'))
+    assert imported.confidence_refusal() is None, \
+        'a missing count is typed in, not refused'
+
+
+# ---- a typed count wins over the stamped one, on the plot too -----------
+
+
+def test_a_typed_count_overrides_the_stamped_one_on_the_plot(qt_app):
+    """A spectrum averaged in the project carries its own count; a count
+    given draws the band at the count given, and the legend names it,
+    not the stamped one."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import step_outline
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    psd, averaging = _averaged()
+    stamped = averaging.statistical_dof().equivalent
+    assert dof_text(stamped) != '16'
+    names, (_layout, drawn) = _legend(psd, [0], levels=[0.9], dof=16.0)
+    assert '90 % confidence, 16 DOF' in names
+    assert not any(dof_text(stamped) in name for name in names)
+    edges = [item for _plot, item in drawn
+             if isinstance(item, pg.PlotDataItem)]
+    low, high = chi_square_factors(16.0, 0.9)
+    shown = psd.display_ordinate(DEFAULT_SYSTEM, [0])[0]
+    _x, steps = step_outline(psd.abscissa, np.real(shown))
+    assert (steps > 0.0).all(), 'one run, so one pair of edges'
+    assert len(edges) == 2
+    lower, upper = (edge.getData()[1] for edge in edges)
+    log_y = np.allclose(lower, np.log10(steps * low))
+    assert log_y or np.allclose(lower, steps * low)
+    expect = np.log10(steps * high) if log_y else steps * high
+    assert np.allclose(upper, expect)
+
+
+def test_every_view_shows_an_edge_to_a_tenth_of_a_decibel():
+    """The Averaging view's band row (`edges_text`), the confidence
+    pane's Below and Above rows (`db_text`) and the status line
+    (`describe`) give one figure for one edge."""
+    band, = confidence_bands(1.0, 16.0, levels=[0.9])
+    assert band.edges_text() == '-2.2 / +3.0 dB'
+    assert db_text(band.lower_db) == '-2.2 dB'
+    assert db_text(band.upper_db) == '+3.0 dB'
+    assert band.describe().endswith(band.edges_text())
+
+
+def test_a_drive_point_cross_term_reads_no_tone():
+    """Force against acceleration at one DOF names 1X+ twice and has no
+    imaginary part when real, yet is not an autospectrum: the tone
+    readout refuses it by the same test the band does."""
+    lines = np.arange(0.0, 64.0)
+    drive = Psd(lines, np.full((1, 64), 2.0), response_dof=['1X+'],
+                reference_dof=['1X+'],
+                ordinate_dim='acceleration*force/frequency')
+    assert not drive.is_autospectrum(0)
+    assert 'cross spectrum' in drive.tone_refusal(0)
+    auto = Psd(lines, np.full((1, 64), 2.0), response_dof=['1X+'],
+               ordinate_dim='acceleration**2/frequency')
+    assert auto.is_autospectrum(0)
+    assert auto.tone_refusal(0) is None

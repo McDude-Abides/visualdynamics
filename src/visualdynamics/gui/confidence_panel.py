@@ -25,7 +25,7 @@ from typing import Any
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QLabel, QWidget
 
-from ..core.averaging import CONFIDENCE_LEVELS, dof_text
+from ..core.averaging import CONFIDENCE_LEVELS, db_text, dof_text
 from .editors import DoubleSpinBox
 from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
@@ -112,12 +112,14 @@ class ConfidencePanel(QWidget):
             self._loading = False
 
     def show_reading(self, band: Any, channel: str = '', source: str = '',
-                     counts: Any = None) -> None:
-        """Write `band`, the first drawn record's `ConfidenceBand`, into
+                     counts: Any = None, passed: Any = None) -> None:
+        """Write `band`, the first banded record's `ConfidenceBand`, into
         the rows, with the `channel` it belongs to and the `source` of
         its count ('the averaging' or 'typed'). `counts` are every
-        drawn record's counts, for the note when they differ. None
-        clears the rows, and `source` then says why."""
+        banded record's counts, for the note when they differ, and
+        `passed` the channels drawn with no line to band. None clears
+        the rows, and `source` then says why ('not known' for no count,
+        'no lines' for nothing to band)."""
         values = dict.fromkeys(key for key, _name in ROWS)
         values['source'] = source or None
         notes = []
@@ -125,8 +127,8 @@ class ConfidencePanel(QWidget):
             values.update(
                 channel=channel or '—',
                 dof=dof_text(band.dof),
-                below=f'{band.lower_db:+.2f} dB',
-                above=f'{band.upper_db:+.2f} dB',
+                below=db_text(band.lower_db),
+                above=db_text(band.upper_db),
                 factors=(f'×{band.lower_factor:.3g} to '
                          f'×{band.upper_factor:.3g}'))
             share = round(band.level * 100)
@@ -141,6 +143,15 @@ class ConfidencePanel(QWidget):
                     f'The records drawn were averaged to {spread[0]} to '
                     f'{spread[-1]} DOF; each is banded at its own, and '
                     'the rows read the first.')
+            if passed:
+                notes.append(
+                    f'No band on {", ".join(passed)}: no line there is '
+                    'finite and above zero.')
+        elif source == 'no lines':
+            values['source'] = None
+            notes.append(
+                'No line drawn is finite and above zero, so there is no '
+                'band to shade or read.')
         elif source == 'not known':
             notes.append(
                 'This spectrum does not say what it was averaged over. '

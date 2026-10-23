@@ -12422,15 +12422,15 @@ class MainWindow(QMainWindow):
             pass
 
     def _confidence_source(self, series):
-        """(name, spectrum, records) when the selection is one averaged
-        autospectrum the band can be drawn on (`Psd.is_autospectrum`),
-        or None, which is also what hides the button. A specification
-        is a target, not an average, and has no band."""
+        """(name, spectrum, records) when the selection is one spectrum
+        the band can be drawn on, or None, which is also what hides the
+        button. The spectrum says which those are
+        (`Psd.confidence_refusal`: a cross term or a specification is
+        refused, by scripts as here)."""
         if len(series) != 1:
             return None
         name, data, records = series[0]
-        if (not isinstance(data, Psd) or isinstance(data, Specification)
-                or not data.is_autospectrum()):
+        if not isinstance(data, Psd) or data.confidence_refusal() is not None:
             return None
         return name, data, records
 
@@ -12442,8 +12442,10 @@ class MainWindow(QMainWindow):
         The count is the spectrum's own (`Psd.statistical_dof`) unless
         one was typed in the pane for it; a spectrum with neither draws
         no band and the pane asks for the count. The rows read the
-        first record on the plot, and every record drawn is banded at
-        its own count. Returns the status line.
+        first record the band is drawn on (one with no finite, positive
+        line has none, and is passed over rather than read as banded),
+        and every record drawn is banded at its own count. Returns the
+        status line.
         """
         from ..plot import confidence_preview
 
@@ -12472,11 +12474,23 @@ class MainWindow(QMainWindow):
             return f'No confidence band: {refusal}'
         shown = (list(range(psd.num_records)) if records is None
                  else [int(r) for r in records])
-        first = shown[0]
+        self._journal_confidence(name, level, typed, records)
+        # the records the band was drawn on: the plot shades only lines
+        # that are finite and above zero, so a dead channel has none
+        values = np.real(psd.ordinate)
+        with np.errstate(invalid='ignore'):
+            banded = [i for i in shown
+                      if np.any(np.isfinite(values[i]) & (values[i] > 0.0))]
+        if not banded:
+            panel.show_reading(None, source='no lines')
+            return ('No confidence band: no line drawn is finite and '
+                    'above zero')
+        first = banded[0]
         channel = str(psd.response_dof[first])
         panel.show_reading(readings[first], channel, source,
-                           [readings[i].dof for i in shown])
-        self._journal_confidence(name, level, typed)
+                           [readings[i].dof for i in banded],
+                           passed=[str(psd.response_dof[i]) for i in shown
+                                   if i not in banded])
         return f'{channel}: ' + readings[first].describe()
 
     def _confidence_chosen(self):
@@ -12495,16 +12509,19 @@ class MainWindow(QMainWindow):
             self._confidence_dofs[name] = typed
         self.render_current()
 
-    def _journal_confidence(self, name, level, typed):
+    def _journal_confidence(self, name, level, typed, records=None):
         """The band, journaled as the headless call that draws it
-        (`_journal_view`), at the confidence and count it was read at."""
+        (`_journal_view`), at the confidence and count it was read at
+        and on the records drawn, so a replay shades what was seen."""
         if name not in self.project:
             return
         prefix = f"project[{name!r}].plot(marks='confidence'"
         count = '' if typed is None else f', dof={typed!r}'
+        chosen = ('' if records is None
+                  else f', records={[int(r) for r in records]!r}')
         self._journal_view(
             prefix,
-            f'{prefix}, levels=[{level!r}]{count}, '
+            f'{prefix}, levels=[{level!r}]{count}{chosen}, '
             "path='confidence.png', show=False)")
 
     def _clear_confidence(self):

@@ -474,8 +474,7 @@ class AveragingPanel(QWidget):
         self.derived['equivalent'].setText(dof_text(worth.equivalent))
         band = confidence_bands(1.0, worth.equivalent,
                                 levels=CONFIDENCE_LEVELS[:1])[0]
-        self.derived['band'].setText(
-            f'{band.lower_db:+.1f} / {band.upper_db:+.1f} dB')
+        self.derived['band'].setText(band.edges_text())
         self.derived['duration'].setText(
             f'{averaging.frame_length / rate:.4g} s')
         self.derived['stop'].setText(
