@@ -1332,9 +1332,22 @@ class SpecificationDraft:
         -------
         BreakpointReading
             The slopes, the areas and the running rms.
+
+        Raises
+        ------
+        ValueError
+            On the 'lines' form. A controller's lines are a density per
+            line, integrated as bins, and read as a power law between
+            them the areas add to an rms the specification does not
+            have; `to_breakpoints` gives the table to read.
         """
         from .breakpoints import read_breakpoints
 
+        if self.form == 'lines':
+            raise ValueError(
+                'the areas and the running rms read a breakpoint table, and '
+                'the sheet is on its lines, a density per line; read the '
+                'breakpoints instead (to_breakpoints)')
         if isinstance(channel, (int, np.integer)):
             k = int(channel)
             if not 0 <= k < self.num_channels:

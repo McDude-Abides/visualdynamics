@@ -353,7 +353,7 @@ def test_the_view_writes_each_segment_and_dashes_the_running_rms(qt_app):
     assert running.getViewBox().linkedView(0) is plot.getViewBox()
 
 
-def test_a_controllers_lines_are_read_but_not_labeled(qt_app):
+def test_a_long_table_is_read_but_not_labeled(qt_app):
     from visualdynamics.plot.breakpoints import MOST_LABELS, build_breakpoints
 
     f = np.linspace(20.0, 2000.0, MOST_LABELS + 10)
@@ -392,6 +392,38 @@ def test_the_standalone_plot_writes_a_file_from_a_sheet_or_an_object(tmp_path, q
     with pytest.raises(ValueError, match="no channel '9Z\\+'"):
         plot_breakpoints(draft, channel='9Z+', show=False,
                          path=tmp_path / 'none.png')
+
+
+def test_a_density_per_bin_is_refused_rather_than_read_as_a_power_law(tmp_path, qt_app):
+    """A controller's target on its lines is a density per line,
+    integrated as bins (`interpolation` 'bin'). Read as a power law
+    between those lines the areas add to an rms the object does not
+    have: the profile put on 20 Hz lines is 6.799 g as bins and would
+    read 6.784 g."""
+    from visualdynamics.plot import plot_breakpoints
+
+    lines = _sheet().to_lines(20.0)
+    assert lines.form == 'lines'
+    binned = lines.make("a controller's target")
+    binned.interpolation = 'bin'
+    assert specification_rms(binned) / G == pytest.approx(6.7991, abs=1e-4)
+    assert read_breakpoints(lines.frequencies, lines.levels[0]).rms / G == \
+        pytest.approx(6.7842, abs=1e-4), 'what the view would have drawn'
+    with pytest.raises(ValueError, match='density per line'):
+        plot_breakpoints(binned, show=False, path=tmp_path / 'binned.png')
+    with pytest.raises(ValueError, match='breakpoint table'):
+        lines.reading(0)
+    # its breakpoints read as the table they are
+    table = SpecificationDraft.from_specification(binned).to_breakpoints()
+    assert table.frequencies == F
+    assert table.reading(0).rms / G == pytest.approx(6.7842, abs=1e-4)
+    # an object written at breakpoints on an even grid is still a power
+    # law between its points, and its areas add to its own rms
+    even = lines.make('breakpoints on an even grid')
+    assert even.interpolation == 'log_log'
+    plot_breakpoints(even, show=False, path=tmp_path / 'even.png')
+    assert (tmp_path / 'even.png').stat().st_size > 2000
+    assert specification_rms(even) / G == pytest.approx(6.7842, abs=1e-4)
 
 
 # ---- the sheet in the window ----------------------------------------------------
@@ -627,6 +659,16 @@ def test_slopes_apply_to_the_breakpoints_and_the_entry_survives_the_form(window,
     assert window._drafts[key].form == 'lines'
     assert not panel.slopes_button.isVisibleTo(panel), \
         'a slope into each of a controller\'s lines is not offered'
+    assert not panel.areas_box.isVisibleTo(panel), \
+        'nor the areas, which read a breakpoint table'
+    panel.areas_box.setChecked(True)
+    pump()
+    assert not panel.areas_wanted
+    assert not panel.reading.isVisibleTo(panel)
+    assert not [item for item in window.data_pane.graphics.ci.items
+                if getattr(item, 'is_running_rms', False)]
+    panel.areas_box.setChecked(False)
+    pump()
     window._author_entry_asked('slopes')
     pump()
     assert window._drafts[key].entry == 'slopes'
@@ -636,4 +678,5 @@ def test_slopes_apply_to_the_breakpoints_and_the_entry_survives_the_form(window,
     draft = window._drafts[key]
     assert draft.form == 'breakpoints' and draft.entry == 'slopes'
     assert panel.slopes_button.isVisibleTo(panel) and panel.slopes_button.isChecked()
+    assert panel.areas_box.isVisibleTo(panel)
     assert panel.points.model().columnCount() == 17

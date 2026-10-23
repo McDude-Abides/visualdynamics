@@ -552,8 +552,11 @@ class AuthorPanel(QWidget):
             # the choice does not apply and is not shown
             (self.slopes_button if draft.entry == 'slopes'
              else self.levels_button).setChecked(True)
+            # and so are the areas, which read a breakpoint table; a
+            # controller's lines are a density per line, integrated as
+            # bins (`SpecificationDraft.reading`)
             for widget in (self.entry_label, self.levels_button,
-                           self.slopes_button):
+                           self.slopes_button, self.areas_box):
                 widget.setVisible(draft.form == 'breakpoints')
             # the constraints read off the channels: on when every
             # channel of the sheet has them
@@ -694,8 +697,10 @@ class AuthorPanel(QWidget):
 
     @property
     def areas_wanted(self) -> bool:
-        """Whether the segment areas and the running rms are asked for."""
-        return self.areas_box.isChecked()
+        """Whether the segment areas and the running rms are asked for,
+        and the sheet is on its breakpoints, where they are offered."""
+        return (self.areas_box.isChecked() and self._sheet is not None
+                and self._sheet.form == 'breakpoints')
 
     def _areas_toggled(self, on: bool) -> None:
         self.show_reading(self._reading_channel)
@@ -707,9 +712,9 @@ class AuthorPanel(QWidget):
         the plot; the first when it is not on the sheet) under the
         grid: each segment's slope, area, share of the whole and the
         rms accumulated to its end, then the total, in the display
-        units. Hidden while Areas and running rms is off. A sheet on
-        more segments than are labeled on the plot (a controller's
-        lines) is read as its total alone."""
+        units. Hidden while Areas and running rms is off, and on the
+        lines form, where it is not offered. A table of more segments
+        than are labeled on the plot is read as its total alone."""
         from ..plot.breakpoints import MOST_LABELS, readout
 
         self._reading_channel = channel

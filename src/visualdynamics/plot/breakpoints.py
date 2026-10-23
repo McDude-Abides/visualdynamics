@@ -34,8 +34,8 @@ import numpy as np
 
 from . import _reading_plot
 
-#: the most segments that are each given a label; a specification on a
-#: controller's lines has thousands, and a label on each would bury it.
+#: the most segments that are each given a label; a long table (a
+#: shape traced at many points) would be buried under a label on each.
 #: The panel and the title still give every number.
 MOST_LABELS = 16
 

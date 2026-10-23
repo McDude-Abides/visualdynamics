@@ -653,7 +653,8 @@ that states one coherence and phase for every pair. *Enter: Levels* or
 or a level at the first and a slope in decibels per octave into each
 one after it, the level there computed. *Areas and running rms* writes
 each segment's area on the plot, draws the rms accumulated from the
-low end under it, and reads both out under the breakpoints
+low end under it, and reads both out under the breakpoints; both
+are offered on the breakpoints form
 ([Writing a random specification by slope](breakpoint-slopes.md)). While the sheet is
 open the plot is the 2-D one, since every editing gesture happens
 there, and the 3-D stage is off until the sheet closes.

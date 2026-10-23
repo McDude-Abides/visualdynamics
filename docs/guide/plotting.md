@@ -106,7 +106,8 @@ app shows, and each takes `path=`. `plot_srs_tolerance(...)` draws a
 shock response spectrum against its tolerance band, point by point
 ([Judging an SRS against its tolerance](srs-tolerance.md)).
 `plot_breakpoints(specification)` draws one channel of a random
-specification with each segment's slope and area written on it and
+specification written at breakpoints (a density per bin is refused)
+with each segment's slope and area written on it and
 the running rms beneath, as the specification sheet's *Areas and
 running rms* does ([Writing a random specification by
 slope](breakpoint-slopes.md)).

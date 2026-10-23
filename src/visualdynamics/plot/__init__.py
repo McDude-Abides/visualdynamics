@@ -3459,8 +3459,10 @@ def plot_breakpoints(specification: Any, *, channel: str | None = None,
     Parameters
     ----------
     specification : SpecificationDraft or Specification
-        The specification, as a sheet or as the object. An object is
-        read at the lines where its channel's autospectrum is positive.
+        The specification, as a sheet on its breakpoints or as an
+        object written at breakpoints (`interpolation` 'log_log'). An
+        object is read at the lines where its channel's autospectrum is
+        positive.
     channel : str, optional
         The channel drawn; the first by default.
     unit_system, theme, path, show, title, size
@@ -3470,17 +3472,40 @@ def plot_breakpoints(specification: Any, *, channel: str | None = None,
     -------
     object
         The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        For a specification read as a density per bin (`interpolation`
+        'bin', a controller's target on its lines) or a sheet on its
+        lines: the power law between its lines is not the curve its rms
+        is the area of, so the areas would add to an rms the object
+        does not have. Open it as a sheet and read `to_breakpoints`.
     """
     from ..core.author import SpecificationDraft
+    from ..core.breakpoints import read_breakpoints
     from .breakpoints import build_breakpoints
 
-    draft = (specification if isinstance(specification, SpecificationDraft)
-             else SpecificationDraft.from_specification(
-                 specification, None if channel is None else [channel]))
+    if isinstance(specification, SpecificationDraft):
+        draft = specification
+    else:
+        # a density per bin integrates as bins: 6.799 g for a profile
+        # of 6.784 g put on 20 Hz lines, where the power law between
+        # those lines reads 6.784, a picture of a number nobody computed
+        if getattr(specification, 'interpolation', 'bin') != 'log_log':
+            raise ValueError(
+                'the specification is a density per line, integrated as '
+                'bins, not a breakpoint table; open it as a sheet and read '
+                'its breakpoints (SpecificationDraft.to_breakpoints)')
+        draft = SpecificationDraft.from_specification(
+            specification, None if channel is None else [channel])
     if channel is not None and channel not in draft.channels:
         raise ValueError(f'no channel {channel!r} in the specification')
     k = 0 if channel is None else draft.channels.index(channel)
-    reading = draft.reading(k)
+    # an object written at breakpoints on an even grid opens on the
+    # lines form, and is still a power law between its points
+    reading = (draft.reading(k) if draft is specification
+               else read_breakpoints(draft.frequencies, draft.levels[k]))
     name = draft.channels[k]
 
     def build(widget: Any) -> Any:

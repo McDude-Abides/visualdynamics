@@ -35,9 +35,15 @@ W<sub>1</sub> f<sub>1</sub> ((f<sub>2</sub>/f<sub>1</sub>)<sup>n+1</sup> − 1) 
 and at n = −1 (minus 3.0103 dB per octave, minus 10 dB per decade),
 where that divides by zero, it is
 W<sub>1</sub> f<sub>1</sub> ln(f<sub>2</sub>/f<sub>1</sub>). Both
-are `core.compliance.log_log_areas`, the same integral every rms of a
-specification is computed by, so the segment areas always add up to
-the rms the specification's table under its plot shows.
+are `core.compliance.log_log_areas`, the integral the rms of a
+specification written at breakpoints is computed by, so its segment
+areas add up to the rms the specification's table under its plot shows.
+A controller's target on its lines is a density per line, integrated
+as bins, and is not a breakpoint table: read as a power law between its
+lines it would give an rms the object does not have (6.784 g where the
+bins hold 6.799 g, for the profile below put on 20 Hz lines). The view
+refuses it; open it as a sheet and read its breakpoints
+(`SpecificationDraft.to_breakpoints`).
 
 The areas say where the rms comes from, which the plot does not. On
 log axes a slope at the top of the band looks like a short line at the
@@ -86,11 +92,12 @@ nothing to the specification, and the specification made is the same.
 *Slopes* is offered on the breakpoints form only; the interpolated form
 is a controller's reading of the breakpoints, and is edited by level.
 
-*Areas and running rms* writes each segment's slope, area and share of
-the whole on the plot, draws the running rms dashed in a row under it
-on the same frequency axis, and reads the table out under the
-breakpoints for the channel on the plot: each segment's slope, area,
-share and the rms to its end, then the total.
+*Areas and running rms*, also on the breakpoints form only, writes
+each segment's slope, area and share of the whole on the plot, draws
+the running rms dashed in a row under it on the same frequency axis,
+and reads the table out under the breakpoints for the channel on the
+plot: each segment's slope, area, share and the rms to its end, then
+the total.
 
 ## From a script
 
