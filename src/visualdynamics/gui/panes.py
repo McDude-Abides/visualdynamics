@@ -39,6 +39,7 @@ from ..theme import theme as resolve_theme
 from ..viz.geometry import annotate_scene
 from .author_panel import AuthorPanel
 from .averaging_panel import AveragingPanel
+from .confidence_panel import ConfidencePanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
@@ -212,6 +213,8 @@ class DataPane(QWidget):
     tone_toggled = Signal(bool)
     #: the transmissibility reading was asked for (True) or put away
     transmissibility_toggled = Signal(bool)
+    #: the confidence band was asked for (True) or put away (False)
+    confidence_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -268,6 +271,7 @@ class DataPane(QWidget):
         self.octave_wanted: bool = False
         self.tone_wanted: bool = False
         self.transmissibility_wanted: bool = False
+        self.confidence_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
@@ -380,6 +384,10 @@ class DataPane(QWidget):
         self.transmissibility_panel: TransmissibilityPanel = \
             TransmissibilityPanel()
         self.transmissibility_panel.hide()
+        # what an averaged autospectrum is worth, beside the band
+        # shaded on it; read only, nothing to apply
+        self.confidence_panel: ConfidencePanel = ConfidencePanel()
+        self.confidence_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -435,6 +443,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.transmissibility_panel)
+        plot_row.addWidget(self.confidence_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
@@ -965,6 +974,19 @@ class DataPane(QWidget):
         # history, and by nothing else, so it starts put away
         self.transmissibility_action.setVisible(False)
         toolbar.addAction(self.transmissibility_action)
+        # and what the average is worth: the chi-square band the true
+        # spectrum lies in, shaded on it, the confidence and the count
+        # in the pane. A statement about the spectrum as it is, so a
+        # toggle with no act, like the tones
+        self.confidence_action: QAction = QAction(
+            control_icon('confidence'), 'Confidence', self)
+        self.confidence_action.setCheckable(True)
+        self.confidence_action.setToolTip(
+            'Shade the band the true spectrum lies in, at 90 or 95 % '
+            'confidence, from the degrees of freedom it was averaged to')
+        self.confidence_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('confidence', checked))
+        toolbar.addAction(self.confidence_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1028,7 +1050,7 @@ class DataPane(QWidget):
         fence(toolbar, [
             self.plot_mode_group.actions(),
             [self.waterfall_action],
-            [self.octave_action, self.tone_action],
+            [self.octave_action, self.tone_action, self.confidence_action],
             [self.sweep_rate_action],
             [self.transmissibility_action],
             self.comparison_group.actions(),
@@ -1160,9 +1182,9 @@ class DataPane(QWidget):
         self.truncate_toggled.emit(checked)
 
     def _choose_toggle(self, key: str, checked: bool) -> None:
-        """The octave, tones, transmissibility or sweep-rate button,
-        each a toggle of its own: remember it, put its panel away when
-        it is unchecked, then say so."""
+        """The octave, tones, transmissibility, confidence or
+        sweep-rate button, each a toggle of its own: remember it, put
+        its panel away when it is unchecked, then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
             getattr(self, f'{key}_panel').hide()
@@ -1497,6 +1519,12 @@ class DataPane(QWidget):
         return self.tone_action.isChecked()
 
     @property
+    def showing_confidence(self) -> bool:
+        """Whether the confidence band is checked. It applies only to an
+        autospectrum, so the caller checks that first."""
+        return self.confidence_action.isChecked()
+
+    @property
     def showing_truncate(self) -> bool:
         """Whether the truncate view is checked. It applies only to a
         time history, so the caller checks that first."""
@@ -1806,7 +1834,8 @@ class DataPane(QWidget):
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
                       tone: bool = False, fit: bool = False,
-                      transmissibility: bool = False) -> None:
+                      transmissibility: bool = False,
+                      confidence: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1823,8 +1852,9 @@ class DataPane(QWidget):
         unit to integrate. `octave` offers the
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, `transmissibility` the ASD ratio and H1's band
-        behind an FRF computed from a time history, and `residual` the
-        fit's residual CMIF. The pair,
+        behind an FRF computed from a time history, `confidence` the
+        chi-square band of an autospectrum, and `residual` the fit's
+        residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -1879,6 +1909,9 @@ class DataPane(QWidget):
         # project, read on its magnitude
         self._offer('transmissibility', 'transmissibility_panel',
                     transmissibility)
+        # and the band to an autospectrum, the one estimate whose
+        # error is chi-square
+        self._offer('confidence', 'confidence_panel', confidence)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -1951,7 +1984,7 @@ class DataPane(QWidget):
                        self.drive_point_action, self.cmif_action,
                        self.octave_action, self.tone_action,
                        self.transmissibility_action,
-                       self.sweep_rate_action,
+                       self.confidence_action, self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

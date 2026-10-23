@@ -43,6 +43,7 @@ from ..core.averaging import (
     WINDOWS,
     Averaging,
     confidence_bands,
+    dof_text,
 )
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter
 from .settings_panel import add_derived, add_rule, add_settings, panel_grid
@@ -470,7 +471,7 @@ class AveragingPanel(QWidget):
         # same rule (`Averaging.statistical_dof`), records pooled
         worth = averaging.statistical_dof(records=self.records)
         self.derived['dof'].setText(str(worth.nominal))
-        self.derived['equivalent'].setText(f'{worth.equivalent:.4g}')
+        self.derived['equivalent'].setText(dof_text(worth.equivalent))
         band = confidence_bands(1.0, worth.equivalent,
                                 levels=CONFIDENCE_LEVELS[:1])[0]
         self.derived['band'].setText(

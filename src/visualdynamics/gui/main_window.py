@@ -69,7 +69,7 @@ from PySide6.QtWidgets import (
 
 from .. import io
 from ..compatibility import check_compatibility
-from ..core.averaging import Averaging
+from ..core.averaging import CONFIDENCE_LEVELS, Averaging
 from ..core.channel_table import ChannelTable
 from ..core.data import (
     Bounded,
@@ -1002,6 +1002,12 @@ class MainWindow(QMainWindow):
         # and the transmissibility behind an FRF: the toggle redraws
         self.data_pane.transmissibility_toggled.connect(
             lambda _wanted: self.render_current())
+        # the confidence band: the toggle redraws, and so does a level
+        # or a count chosen in its pane, since the band is its preview
+        self.data_pane.confidence_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.confidence_panel.changed.connect(
+            self._confidence_chosen)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1163,6 +1169,16 @@ class MainWindow(QMainWindow):
         self._transmissibility: dict[str, Any] | None = None
         self._transmissibility_frequencies: dict[tuple[str, int],
                                                  float] = {}
+        #: the confidence band on the plot (`_draw_confidence`): the
+        #: (plot, item) pairs drawn, and the spectrum they belong to
+        self.confidence_previews: list[Any] = []
+        self._confidence_name: str | None = None
+        #: the confidence the band is drawn at, one choice for every
+        #: spectrum, since it is how sure the reader wants to be rather
+        #: than a property of the data; and a count typed in the pane,
+        #: by spectrum name, over the one the spectrum carries
+        self._confidence_level: float = CONFIDENCE_LEVELS[0]
+        self._confidence_dofs: dict[str, float] = {}
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -9463,6 +9479,7 @@ class MainWindow(QMainWindow):
         self._clear_octave()
         self._clear_tone()
         self._clear_transmissibility()
+        self._clear_confidence()
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -12404,6 +12421,103 @@ class MainWindow(QMainWindow):
             # the plot went with the drawing it belonged to
             pass
 
+    def _confidence_source(self, series):
+        """(name, spectrum, records) when the selection is one averaged
+        autospectrum the band can be drawn on (`Psd.is_autospectrum`),
+        or None, which is also what hides the button. A specification
+        is a target, not an average, and has no band."""
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if (not isinstance(data, Psd) or isinstance(data, Specification)
+                or not data.is_autospectrum()):
+            return None
+        return name, data, records
+
+    def _draw_confidence(self, name, psd, records):
+        """The chi-square band on the flat spectrum
+        (`plot.confidence_preview`), at the confidence chosen in the
+        pane, and the reading in the pane beside it.
+
+        The count is the spectrum's own (`Psd.statistical_dof`) unless
+        one was typed in the pane for it; a spectrum with neither draws
+        no band and the pane asks for the count. The rows read the
+        first record on the plot, and every record drawn is banded at
+        its own count. Returns the status line.
+        """
+        from ..plot import confidence_preview
+
+        panel = self.data_pane.confidence_panel
+        level = self._confidence_level
+        typed = self._confidence_dofs.get(name)
+        panel.set_settings(level, typed)
+        self._confidence_name = name
+        panel.show()
+        if typed is not None:
+            source = 'typed'
+        elif psd.statistical_dof is not None:
+            source = 'the averaging'
+        else:
+            panel.show_reading(None, source='not known')
+            return ('No confidence band: this PSD does not say what it '
+                    'was averaged over; type its DOF in the pane')
+        try:
+            readings = psd.confidence_reading(level, typed)
+            self.confidence_previews = confidence_preview(
+                self.data_pane.graphics.ci.items, psd,
+                resolve_theme(self.theme_name), records=records,
+                levels=[level], unit_system=self.unit_system, dof=typed)
+        except ValueError as refusal:
+            panel.show_reading(None, source=source)
+            return f'No confidence band: {refusal}'
+        shown = (list(range(psd.num_records)) if records is None
+                 else [int(r) for r in records])
+        first = shown[0]
+        channel = str(psd.response_dof[first])
+        panel.show_reading(readings[first], channel, source,
+                           [readings[i].dof for i in shown])
+        self._journal_confidence(name, level, typed)
+        return f'{channel}: ' + readings[first].describe()
+
+    def _confidence_chosen(self):
+        """A confidence or a count chosen in the pane: kept (the level
+        for every spectrum, the count for this one), and the band drawn
+        again."""
+        name = self._confidence_name
+        if name is None:
+            return
+        panel = self.data_pane.confidence_panel
+        self._confidence_level = panel.level()
+        typed = panel.typed_dof()
+        if typed is None:
+            self._confidence_dofs.pop(name, None)
+        else:
+            self._confidence_dofs[name] = typed
+        self.render_current()
+
+    def _journal_confidence(self, name, level, typed):
+        """The band, journaled as the headless call that draws it
+        (`_journal_view`), at the confidence and count it was read at."""
+        if name not in self.project:
+            return
+        prefix = f"project[{name!r}].plot(marks='confidence'"
+        count = '' if typed is None else f', dof={typed!r}'
+        self._journal_view(
+            prefix,
+            f'{prefix}, levels=[{level!r}]{count}, '
+            "path='confidence.png', show=False)")
+
+    def _clear_confidence(self):
+        """Take the band off, before every drawing, like every other
+        preview."""
+        previews, self.confidence_previews = self.confidence_previews, []
+        for item, drawn in previews:
+            try:
+                item.removeItem(drawn)
+            except RuntimeError:
+                # the plot went with the drawing it belonged to
+                pass
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -12818,6 +12932,8 @@ class MainWindow(QMainWindow):
                                      transmissibility=self.
                                      _transmissibility_source(series)
                                      is not None,
+                                     confidence=self._confidence_source(
+                                         series) is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -13103,6 +13219,10 @@ class MainWindow(QMainWindow):
         toning = toning or (
             self.data_pane.showing('transmissibility')
             and self._transmissibility_source(series) is not None)
+        # and the confidence band, which is shaded on the flat plot's
+        # axes beside the spectrum's own steps
+        toning = toning or (self.data_pane.showing_confidence
+                            and self._confidence_source(series) is not None)
         offered = (entry is not None and not pairs and not lone_fed
                    and not cursor and not toning
                    and self._waterfall_count(entry) >= 1)
@@ -13193,6 +13313,10 @@ class MainWindow(QMainWindow):
                   and self._transmissibility_source(series))
         if behind:
             message = self._draw_transmissibility(*behind) or message
+        banded = (self.data_pane.showing_confidence
+                  and self._confidence_source(series))
+        if banded:
+            message = self._draw_confidence(*banded) or message
         return message + axis_note
 
     def _paged_series(self, series, entry, pairs, lone_fed):

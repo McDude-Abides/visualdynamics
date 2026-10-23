@@ -466,6 +466,39 @@ def _draw_tone(painter, color):
     painter.drawPolygon([QPointF(24, 9), QPointF(40, 9), QPointF(32, 20)])
 
 
+def _draw_confidence(painter, color):
+    """A spectrum with a hump, inside a shaded band with dashed edges.
+
+    What the button puts on the plot, in miniature: the averaged
+    spectrum, and the band the true one lies in drawn about it, wider
+    above than below as the chi-square band is.
+    """
+    def level(x):
+        # a floor with one resonance on it, in the icon's 64-unit box
+        return 40.0 - 16.0 * math.exp(-((x - 34.0) / 7.0) ** 2)
+
+    xs = range(6, 59)
+    upper = [(x, level(x) - 9.0) for x in xs]
+    lower = [(x, level(x) + 6.0) for x in xs]
+    faint = QColor(color)
+    faint.setAlpha(70)
+    band = QPainterPath(QPointF(*upper[0]))
+    for point in upper[1:] + lower[::-1]:
+        band.lineTo(QPointF(*point))
+    band.closeSubpath()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(faint))
+    painter.drawPath(band)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    edge = QColor(color)
+    edge.setAlpha(170)
+    painter.setPen(QPen(edge, 2, Qt.PenStyle.DashLine))
+    painter.drawPath(_curve(upper))
+    painter.drawPath(_curve(lower))
+    painter.setPen(_pen(color, 4))
+    painter.drawPath(_curve([(x, level(x)) for x in xs]))
+
+
 def _draw_truncate(painter, color):
     """A trace with its ends grayed away behind two cut lines.
 
@@ -2261,6 +2294,7 @@ def control_icon(name: str) -> QIcon:
      'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,
      'tone': _draw_tone, 'transmissibility': _draw_transmissibility,
+     'confidence': _draw_confidence,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,
