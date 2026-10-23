@@ -373,7 +373,8 @@ RESPONSE_DECADES = 3.0
 
 
 def response(filtering: Filtering, sample_rate: float,
-             lines: int = 400) -> tuple[np.ndarray, np.ndarray]:
+             lines: int = 400, *, frequencies: Any = None
+             ) -> tuple[np.ndarray, np.ndarray]:
     """(frequencies, magnitude in dB) of the filter as the record sees
     it.
 
@@ -392,6 +393,11 @@ def response(filtering: Filtering, sample_rate: float,
     Nyquist are clamped just under it instead of refused, so a curve
     can be drawn while the settings are being edited. Values are
     floored at -240 dB.
+
+    `frequencies`, when given, are the frequencies the response is
+    read at instead, in Hz, so a reading can ask for the gain at the
+    lines it names (`core.resample` reads it at the span and at the
+    lowest frequency that folds into it).
     """
     # Squared magnitude, not the filter's own (Brandon, 2026-08-25).
     from scipy.signal import sosfreqz
@@ -399,9 +405,12 @@ def response(filtering: Filtering, sample_rate: float,
     nyquist = float(sample_rate) / 2.0
     edges = [e for e in (filtering.low, filtering.high)
              if e is not None]
-    start = min(nyquist / 10.0 ** RESPONSE_DECADES, min(edges) * 0.5)
-    frequencies = np.logspace(np.log10(start), np.log10(nyquist),
-                              int(lines))
+    if frequencies is None:
+        start = min(nyquist / 10.0 ** RESPONSE_DECADES, min(edges) * 0.5)
+        frequencies = np.logspace(np.log10(start), np.log10(nyquist),
+                                  int(lines))
+    else:
+        frequencies = np.atleast_1d(np.asarray(frequencies, dtype=float))
     # edges clamped rather than refused: mid-edit the boxes pass
     # through states the filter itself would refuse, and the panel
     # wants a curve to draw against, not an exception

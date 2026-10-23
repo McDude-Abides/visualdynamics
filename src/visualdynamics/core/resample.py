@@ -13,24 +13,27 @@ band.
 
 So `resample` filters before it decimates. The filter is a zero-phase
 Butterworth low-pass (`core.filters.design`, run forward and backward
-as `filters.filtered` runs it) with its corner at the new rate divided
-by 2.56, the alias-free span: the band of lines an analyzer keeps and
-shows. Above the span, up to the new Nyquist frequency, is the filter's
-roll-off, and those lines are computed and dropped. A frame of 1,024
-samples has 512 lines up to the Nyquist frequency, of which
+as `filters.filtered` runs it) that keeps the alias-free span flat:
+the span is the new rate divided by 2.56, the band of lines an analyzer
+keeps and shows. Above the span, up to the new Nyquist frequency, is the
+filter's roll-off, and those lines are computed and dropped. A frame of
+1,024 samples has 512 lines up to the Nyquist frequency, of which
 1,024 / 2.56 = 400 lie inside the span and are kept, and 112 are
 dropped; the line counts 400, 800 and 1,600 on an analyzer's menu come
 from that division. The lowest frequency that can fold into the span is
-the new rate less the span, 1.56 spans; the default eighth-order
-filter, doubled by the forward and backward pass, is 62 dB down there,
-past the 50 dB test documents commonly ask of an anti-alias filter. The
-corner sits on the span's top line, so that line is 6.02 dB down, the
-zero-phase pair's response at its nominal corner.
+the new rate less the span, 1.56 spans. The filter's corner is at 1.2
+spans (`CORNER`), among the dropped lines, so a zero-phase pair, which
+is 6.02 dB down at its nominal corner, is about 0.1 dB down at the span
+and 0.01 dB at 0.9 of it. The lowest fold is then 1.3 corners up, and
+the default twelfth-order design, doubled by the forward and backward
+pass, is 55 to 56 dB down there at the factors of 10 to 16 in common
+use and never less than 54.7 dB at any factor: past the 50 dB test
+documents commonly ask of an anti-alias filter.
 
 The order matters in one direction only. A filter run after the record
 is decimated cannot help: the alias is in the band by then, at a
-frequency where real content could be, and a low-pass at the span
-leaves it exactly where it was. `read_resample` reads that out on a
+frequency where real content could be, and the same low-pass run on
+the decimated record leaves it exactly where it was. `read_resample` reads that out on a
 record: the record's autospectrum as recorded, and at the new rate
 three ways (filtered first, decimated bare, and low-passed after
 decimating), with the level each puts at the frequency where each
@@ -68,7 +71,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .filters import Filtering, design, threaded_sosfiltfilt
+from .filters import Filtering, _filter_pool, design, response
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
@@ -88,12 +91,21 @@ if TYPE_CHECKING:                                    # pragma: no cover
 #: 2.5: a power-of-two frame divided by 2.56 is a round line count
 SPAN_RATIO = 2.56
 
+#: the anti-alias filter's corner over the alias-free span. At 1.2 the
+#: corner is among the dropped lines (0.94 of the new Nyquist
+#: frequency), so the span is flat to 0.1 dB, and the lowest frequency
+#: that folds into the span (1.56 spans) is 1.3 corners up. With the
+#: corner on the span the span's top line was 6.02 dB down and 0.9 of
+#: it 1.46 dB down (Brandon, 2026-10-23)
+CORNER = 1.2
+
 #: the anti-alias filter's design order. Doubled by the forward and
-#: backward pass, eighth order is 62 dB down at the lowest frequency
-#: that folds into the span (1.56 spans), past the 50 dB test
-#: documents commonly ask for; seventh order is the least that gets
-#: there (54 dB), sixth falls short (46.4 dB)
-ORDER = 8
+#: backward pass, twelfth order with the corner at 1.2 spans is 55.8 dB
+#: down at the lowest frequency that folds into the span at a factor of
+#: 10, 55.1 dB at 16, and 54.7 dB in the limit of a large factor, past
+#: the 50 dB test documents commonly ask for; eleventh order is 50.2 dB
+#: in that limit, and tenth falls short (45.6 dB)
+ORDER = 12
 
 #: the frame the reading's spectra are taken with at the new rate, in
 #: samples, when none is given: 400 lines kept, as an analyzer's first
@@ -203,24 +215,54 @@ def decimation_factor(source_rate: float, rate: float) -> int:
 def anti_alias_filter(rate: float, order: int = ORDER,
                       ratio: float = SPAN_RATIO) -> Filtering:
     """The low-pass a record is filtered through before it is decimated
-    to `rate`: its corner at the alias-free span, `rate` over `ratio`
-    (2.56), of design order `order` (`ORDER`, 8)."""
-    return Filtering(high=alias_free_span(rate, ratio), order=order)
+    to `rate`: its corner at `CORNER` (1.2) times the alias-free span,
+    `rate` over `ratio` (2.56), of design order `order` (`ORDER`, 12).
+
+    The corner sits among the dropped lines, above the span and below
+    the new Nyquist frequency, so the span is flat; a `ratio` that puts
+    it at or above the Nyquist frequency is refused.
+    """
+    corner = CORNER * alias_free_span(rate, ratio)
+    if not corner < float(rate) / 2.0:
+        raise ValueError(
+            f'a span ratio of {ratio:g} puts the corner ({corner:g} Hz) at '
+            f'or above the Nyquist frequency ({float(rate) / 2.0:g} Hz)')
+    return Filtering(high=corner, order=order)
 
 
-def gain_db(filtering: Filtering, sample_rate: float,
-            frequencies: Any) -> Any:
-    """The zero-phase gain of `filtering` at `sample_rate`, in dB, at
-    each of `frequencies`: 20 log10 |H|², the response a record run
-    forward and backward through it sees (`filters.response` says why
-    the square). Floored at -240 dB."""
-    from scipy.signal import sosfreqz
+def _filtered_every(sos: Any, rows: np.ndarray, factor: int) -> np.ndarray:
+    """Each row of `rows` through `sos` at zero phase, every
+    `factor`-th sample of it kept, a row at a time.
 
-    f = np.atleast_1d(np.asarray(frequencies, dtype=float))
-    _w, h = sosfreqz(design(filtering, sample_rate), worN=f,
-                     fs=float(sample_rate))
-    db = 20.0 * np.log10(np.maximum(np.abs(h) ** 2, 1e-12))
-    return float(db[0]) if np.ndim(frequencies) == 0 else db
+    Filtering the whole record and then decimating holds the record
+    filtered at the full rate beside it, twice the record at the peak
+    (2.06 times, Brandon, 2026-10-23). Here only the rows being filtered
+    are held at the full rate: `scipy.signal.sosfiltfilt` takes about
+    three rows of working space for each, and the rows run on the
+    filter threads (`filters.threaded_sosfiltfilt`) a few at a time, at
+    most a quarter as many as the record has rows, so the working space
+    stays under the record's own size. The values are the
+    filter-then-decimate ones to the bit, since each row is the same
+    call.
+    """
+    from scipy.signal import sosfiltfilt
+
+    count, samples = rows.shape
+    kept = np.empty((count, len(range(0, samples, factor))),
+                    dtype=np.result_type(rows.dtype, np.float64))
+
+    def one(i: int) -> None:
+        kept[i] = sosfiltfilt(sos, rows[i])[::factor]
+
+    at_once = min(8, max(1, count // 4))
+    if at_once == 1 or rows.size < 1_000_000:
+        for i in range(count):
+            one(i)
+        return kept
+    pool = _filter_pool()
+    for start in range(0, count, at_once):
+        list(pool.map(one, range(start, min(start + at_once, count))))
+    return kept
 
 
 def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
@@ -236,9 +278,12 @@ def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
     own rate over the whole record, so its edge transients land at the
     record's ends; the first sample is kept, and the result's clock is
     the source's own at every q-th sample. The records' descriptions
-    are carried over. The averaging and the shock windows are not: an
-    averaging counts its frame in samples, which spans another time at
-    the new rate, so the result is framed afresh.
+    and the shock windows are carried over, the windows being in
+    seconds from the record's start, which is kept. The averaging is
+    not: it counts its frame in samples, which spans another time at
+    the new rate, so the result is framed afresh. The record is
+    filtered and decimated a row at a time, so the record filtered at
+    the full rate is never held whole beside it.
 
     With ``anti_alias=False`` no filter is applied and an
     `AliasWarning` is issued: whatever the record holds between the new
@@ -254,7 +299,7 @@ def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
         The new sample rate, in Hz.
     anti_alias : bool, default True
         Filter before decimating.
-    order : int, default 8
+    order : int, default 12
         The anti-alias filter's design order (`ORDER`).
 
     Returns
@@ -276,17 +321,22 @@ def resample(data: TimeHistory, rate: float, *, anti_alias: bool = True,
     rows = np.real(np.asarray(data.ordinate))
     if anti_alias:
         sos = design(anti_alias_filter(new_rate, order), source)
-        rows = threaded_sosfiltfilt(sos, rows)
+        kept = _filtered_every(sos, rows, factor)
     else:
+        kept = np.ascontiguousarray(rows[:, ::factor])
         warnings.warn(AliasWarning(
             f'resampled from {source:g} to {new_rate:g} Hz with no '
             f'anti-alias filter: anything the record holds between '
             f'{new_rate / 2.0:g} and {source / 2.0:g} Hz has folded into '
             f'0 to {new_rate / 2.0:g} Hz, and no filter applied '
             'afterward can take it out'), stacklevel=2)
-    return TimeHistory(np.asarray(data.abscissa)[::factor],
-                       np.ascontiguousarray(rows[:, ::factor]),
-                       **data.record_fields())
+    result = TimeHistory(np.asarray(data.abscissa)[::factor], kept,
+                         **data.record_fields())
+    # the windows are in seconds from the record's start, and the start
+    # is kept, so they mark the same events (Brandon, 2026-10-23); a
+    # tuple, as `filters.carrying_marks` copies them
+    result.shocks = tuple(data.shocks) if data.shocks else data.shocks
+    return result
 
 
 @dataclass(frozen=True)
@@ -301,8 +351,8 @@ class Fold:
     as `TimeHistory.compute_psds` gives them, each the tallest line
     within one line of the frequency: `source` at `frequency` in the
     record as recorded, and at `alias` the record decimated bare
-    (`bare`), decimated then low-passed at the span (`after`), and
-    filtered first (`filtered`).
+    (`bare`), decimated then low-passed through the same filter
+    (`after`), and filtered first (`filtered`).
     """
 
     frequency: float
@@ -364,16 +414,16 @@ class ResampleReading:
     each given frequency folds, and the spectra that show it.
 
     Rates and frequencies are in Hz and gains in dB. `corner` is the
-    anti-alias filter's corner, the span; `gain_at_span` is the
-    zero-phase gain there and `gain_at_fold` at `lowest_fold`, the
-    lowest frequency that folds into the span (the new rate less the
-    span). `lines`, `kept` and `dropped` are `line_counts` for the
+    anti-alias filter's corner, `CORNER` (1.2) spans; `gain_at_span` is
+    the zero-phase gain at the span and `gain_at_fold` at
+    `lowest_fold`, the lowest frequency that folds into the span (the
+    new rate less the span). `lines`, `kept` and `dropped` are `line_counts` for the
     spectra's frame at the new rate, and `resolution` their line
     spacing. `spectra` holds (frequencies, densities) for 'source', the
     record as recorded on the same line spacing, and at the new rate
     'filtered' (filtered first), 'bare' (decimated with no filter) and
-    'after' (decimated, then low-passed at the span); the densities are
-    in SI with the dimension `density_dim`.
+    'after' (decimated, then low-passed through the same filter); the
+    densities are in SI with the dimension `density_dim`.
     """
 
     record: int
@@ -403,8 +453,8 @@ class ResampleReading:
 
     @property
     def corner(self) -> float:
-        """The anti-alias filter's corner, at the span."""
-        return self.span
+        """The anti-alias filter's corner, `CORNER` (1.2) spans."""
+        return self.filtering.high
 
     @property
     def resolution(self) -> float:
@@ -425,13 +475,13 @@ class ResampleReading:
     @property
     def gain_at_span(self) -> float:
         """The filter's zero-phase gain at the span's top line, dB."""
-        return gain_db(self.filtering, self.source_rate, self.span)
+        return _gain(self.filtering, self.source_rate, self.span)
 
     @property
     def gain_at_fold(self) -> float:
         """The filter's zero-phase gain at the lowest frequency that
         folds into the span, dB."""
-        return gain_db(self.filtering, self.source_rate, self.lowest_fold)
+        return _gain(self.filtering, self.source_rate, self.lowest_fold)
 
     def describe(self) -> str:
         """The reading in words, as the plot's title and the status line
@@ -445,6 +495,13 @@ class ResampleReading:
             return text + '.'
         return text + '. ' + '; '.join(f.describe() for f in self.folds) \
             + '.'
+
+
+def _gain(filtering: Filtering, sample_rate: float, frequency: float
+          ) -> float:
+    """`filters.response` at one frequency: the zero-phase gain, dB."""
+    return float(response(filtering, sample_rate,
+                          frequencies=[frequency])[1][0])
 
 
 def ordinal(n: int) -> str:
@@ -501,7 +558,8 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
         print(reading.describe())
 
     The channel is resampled filtered first (`resample`), decimated
-    bare, and decimated then low-passed at the span, and each of the
+    bare, and decimated then low-passed through the same filter at the
+    new rate, and each of the
     three and the channel as recorded is turned into an autospectrum on
     one line spacing: Hann frames of `frame_length` samples at the new
     rate (`FRAME`, 1,024, or the longest power of two the decimated
@@ -523,7 +581,7 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
         Which channel.
     frequencies : float or sequence of float, optional
         Frequencies above the new Nyquist frequency to fold, in Hz.
-    order : int, default 8
+    order : int, default 12
         The anti-alias filter's design order.
     frame_length : int, optional
         The spectra's frame at the new rate, in samples.
@@ -568,7 +626,7 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
     from .filters import filtered
 
     span = alias_free_span(new_rate)
-    after = filtered(bare, Filtering(high=span, order=order))
+    after = filtered(bare, anti_alias_filter(new_rate, order))
     if frame_length is None:
         frame = min(FRAME, 2 ** int(np.floor(np.log2(len(one.abscissa)
                                                       // factor))))

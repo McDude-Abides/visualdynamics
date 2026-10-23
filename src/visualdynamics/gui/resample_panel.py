@@ -198,8 +198,8 @@ class ResamplePanel(QWidget):
         for key, value in text.items():
             self.values[key].setText(value)
         self.values['span'].setToolTip(
-            'The alias-free span, the new rate over 2.56, and the '
-            'anti-alias filter\'s corner')
+            'The alias-free span, the new rate over 2.56. The anti-alias '
+            'filter\'s corner is 1.2 times it, so the span is flat')
         self.values['lowest'].setToolTip(
             'The lowest frequency that folds into the span: the new rate '
             'less the span')

@@ -12,10 +12,10 @@ and density up on a log axis. Four spectra on one line spacing
 - the record filtered first and then decimated, the resampling done
   right, solid and heavy;
 - decimated with no filter, dashed;
-- decimated and then low-passed at the span, dotted. Inside the span it
-  lies on the dashed curve wherever an alias is: a low-pass applied
-  after sampling leaves the alias where it is, and the two curves
-  coinciding at the alias is the picture of that.
+- decimated and then low-passed through the same filter, dotted.
+  Inside the span it lies on the dashed curve wherever an alias is: a
+  low-pass applied after sampling leaves the alias where it is, and the
+  two curves coinciding at the alias is the picture of that.
 
 The new Nyquist frequency is a dashed vertical line and the span's top
 a solid one, each named; the lines between them, the anti-alias

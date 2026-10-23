@@ -6,11 +6,16 @@ channel sampled at 5,120 Hz lands at 520 Hz, and its samples are those
 of a 520 Hz tone with its sign reversed. The alias-free span is the
 rate over 2.56, so 5,120 Hz keeps 2,000 Hz, and a 1,024-sample frame
 keeps 400 of its 512 lines and drops 112. The lowest frequency that
-folds into the span is the rate less the span, 3,120 Hz, 1.56 spans:
-a Butterworth of design order N run forward and backward is
-20 log10(1 / (1 + 1.56^(2N))) there, 61.8 dB down at eighth order,
-54.1 at seventh and 46.4 at sixth, against the 50 dB test documents
-commonly ask for; at its corner it is 6.02 dB down. A 1 g peak tone on
+folds into the span is the rate less the span, 3,120 Hz, 1.56 spans.
+The filter's corner is at 1.2 spans, 2,400 Hz, so the fold is 1.3
+corners up: a Butterworth of design order N run forward and backward
+is 20 log10(1 / (1 + 1.3^(2N))) there in the analog limit, 54.7 dB
+down at twelfth order, 50.2 at eleventh and 45.6 at tenth, against the
+50 dB test documents commonly ask for, and at the span, 1 / 1.2
+corners, it is 0.11 dB down where a corner on the span would be 6.02.
+The digital design is further down at the fold than the analog limit
+at every factor, 55.8 dB at a factor of 10 (51,200 to 5,120 Hz). A 1 g
+peak tone on
 a line of a Hann-windowed autospectrum at 5 Hz lines stands at
 0.5 / (1.5 x 5) = 0.0667 g^2/Hz. And a low-pass at the span run after
 the decimation leaves the 520 Hz alias where it is.
@@ -25,8 +30,9 @@ import pytest
 
 from visualdynamics.core.averaging import Averaging
 from visualdynamics.core.data import TimeHistory
-from visualdynamics.core.filters import Filtering, filtered
+from visualdynamics.core.filters import Filtering, filtered, response
 from visualdynamics.core.resample import (
+    CORNER,
     ORDER,
     SPAN_RATIO,
     AliasWarning,
@@ -34,7 +40,6 @@ from visualdynamics.core.resample import (
     alias_frequency,
     anti_alias_filter,
     decimation_factor,
-    gain_db,
     level_change,
     line_counts,
     ordinal,
@@ -116,27 +121,44 @@ def test_the_factor_is_a_whole_number():
         decimation_factor(5120.0, 0.0)
 
 
-def test_the_filter_is_6_db_down_at_the_span_and_62_down_where_it_could_fold():
-    """At the corner the zero-phase pair is -6.02 dB by definition; at
-    the lowest frequency that folds into the span, 1.56 spans, the
-    default eighth order is past 50 dB, and seventh is the least that
-    is."""
+def gain(filtering, rate, frequencies):
+    """The zero-phase gain the record sees, dB, as `filters.response`
+    reads it."""
+    return response(filtering, rate, frequencies=frequencies)[1]
+
+
+def test_the_span_is_flat_and_the_lowest_fold_55_db_down():
+    """Brandon's numbers (2026-10-23), at 51,200 to 5,120 Hz: with the
+    corner on the span the span was 1.46 dB down at 0.9 of it and
+    6.02 dB at its top; with the twelfth-order corner at 1.2 spans it is
+    0.10 dB down at its top and 55.8 dB down at the lowest fold."""
     span = alias_free_span(RATE)
     fold = RATE - span
+    rate = 10 * RATE
     assert fold / span == pytest.approx(1.56)
-    assert anti_alias_filter(RATE) == Filtering(high=2000.0, order=8)
-    assert gain_db(anti_alias_filter(RATE), FINE, span) == pytest.approx(
-        -6.0206, abs=1e-3)
-    for order, hand in ((8, -61.8), (7, -54.1), (6, -46.4)):
-        assert zero_phase_butterworth_db(1.56, order) == pytest.approx(
+    assert CORNER == 1.2 and ORDER == 12
+    assert anti_alias_filter(RATE) == Filtering(high=2400.0, order=12)
+    on_span = gain(Filtering(high=span, order=8), rate,
+                   [0.9 * span, span, fold])
+    assert on_span == pytest.approx([-1.46, -6.02, -62.82], abs=0.01)
+    flat = gain(anti_alias_filter(RATE), rate, [0.9 * span, span, fold])
+    assert flat == pytest.approx([-0.01, -0.10, -55.76], abs=0.01)
+    # the analog limit, which the digital design is below at every factor
+    for order, hand in ((12, -54.7), (11, -50.2), (10, -45.6)):
+        assert zero_phase_butterworth_db(1.3, order) == pytest.approx(
             hand, abs=0.05)
-        assert gain_db(anti_alias_filter(RATE, order), FINE, fold) == \
-            pytest.approx(hand, abs=0.5)
-    assert gain_db(anti_alias_filter(RATE, 7), FINE, fold) < -50.0
-    assert gain_db(anti_alias_filter(RATE, 6), FINE, fold) > -50.0
-    assert ORDER == 8
-    # an array in, an array out
-    assert gain_db(anti_alias_filter(RATE), FINE, [span, fold]).shape == (2,)
+    assert zero_phase_butterworth_db(1.0 / 1.2, 12) == pytest.approx(
+        -0.11, abs=0.005)
+    for factor in (2, 4, 10, 16, 100):
+        at = gain(anti_alias_filter(RATE), factor * RATE, [span, fold])
+        assert at[0] > -0.12
+        assert at[1] < zero_phase_butterworth_db(1.3, 12) + 0.01
+        assert gain(anti_alias_filter(RATE, 11), factor * RATE,
+                    [fold])[0] < -50.0
+    assert gain(anti_alias_filter(RATE, 10), 100 * RATE, [fold])[0] > -50.0
+    # a span ratio that would put the corner past Nyquist is refused
+    with pytest.raises(ValueError, match='Nyquist'):
+        anti_alias_filter(RATE, ratio=2.3)
 
 
 def test_the_words():
@@ -175,7 +197,7 @@ def test_the_warning_points_at_the_caller():
 
 
 def test_filtered_first_the_tone_is_gone_and_the_content_kept():
-    """The 4,600 Hz tone is 116 dB down behind the default filter; a
+    """The 4,600 Hz tone is far down behind the default filter; a
     300 Hz tone, well inside the span, comes through at its height."""
     source = record(((4600.0, 1.0), (300.0, 0.1)))
     with warnings.catch_warnings():
@@ -188,9 +210,15 @@ def test_filtered_first_the_tone_is_gone_and_the_content_kept():
                          - expected[middle])) < 1e-4
 
 
-def test_the_result_keeps_the_clock_and_the_records_and_not_the_marks():
+def test_the_result_keeps_the_clock_the_records_and_the_shock_windows():
+    """The windows are in seconds from the record's start, which is
+    kept, so they are carried; the averaging counts samples and is
+    not."""
+    from visualdynamics.core.shocks import Shock
+
     source = record(samples=16 * 4096 + 5)
     source.averaging = Averaging(frame_length=8192, frames=2)
+    source.shocks = (Shock(0.1, 0.2), Shock(0.5, 0.25))
     slow = resample(source, RATE)
     assert len(slow.abscissa) == 4097
     assert np.array_equal(slow.abscissa, source.abscissa[::16])
@@ -198,7 +226,85 @@ def test_the_result_keeps_the_clock_and_the_records_and_not_the_marks():
     assert slow.ordinate_dim == ['acceleration']
     assert slow.ordinate_unit == ['g']
     assert slow.averaging is None
-    assert not slow.shocks
+    assert slow.shocks == (Shock(0.1, 0.2), Shock(0.5, 0.25))
+    # and land on the same samples of the slower clock
+    assert [(round(w.start * RATE), round(w.duration * RATE))
+            for w in slow.srs_windows()] == [(512, 1024), (2560, 1280)]
+    assert not resample(record(), RATE).shocks
+
+
+def test_a_record_that_starts_late_keeps_its_start():
+    """A record whose clock starts at 3.25 s resamples and reads as the
+    same record from zero does, its clock still starting at 3.25 s and
+    its windows still on the same samples."""
+    from visualdynamics.core.shocks import Shock
+
+    early = record(((4600.0, 1.0), (300.0, 0.1)))
+    late = TimeHistory(early.abscissa + 3.25, early.ordinate.copy(),
+                       **early.record_fields())
+    late.shocks = (Shock(0.1, 0.2),)
+    slow = resample(late, RATE)
+    assert slow.abscissa[0] == pytest.approx(3.25)
+    assert slow.sample_rate == pytest.approx(RATE)
+    assert np.allclose(slow.abscissa, late.abscissa[::16])
+    assert np.array_equal(slow.ordinate, resample(early, RATE).ordinate)
+    assert [(round(w.start * RATE), round(w.duration * RATE))
+            for w in slow.srs_windows()] == [(512, 1024)]
+    reading = read_resample(late, RATE, frequencies=[4600.0])
+    same = read_resample(early, RATE, frequencies=[4600.0])
+    assert reading.describe() == same.describe()
+    (fold,) = reading.folds
+    assert fold.bare / G ** 2 == pytest.approx(0.0667, abs=1e-4)
+    for key in ('source', 'filtered', 'bare', 'after'):
+        # to rounding: the clock read from 3.25 s on differs in its
+        # last bits, and the filtered curve's floor is rounding itself
+        g = same.spectra[key][1]
+        assert np.allclose(reading.spectra[key][1], g, rtol=1e-6,
+                           atol=1e-12 * np.max(g))
+
+
+def test_filtering_a_row_at_a_time_matches_filtering_the_record():
+    """The rows are filtered and decimated one at a time, on threads; the
+    values are those of filtering the whole record and then keeping
+    every 16th sample, to the bit."""
+    from scipy.signal import sosfiltfilt
+
+    from visualdynamics.core.filters import design
+
+    rows = np.random.default_rng(3).standard_normal((8, 131072))
+    source = TimeHistory(np.arange(131072) / FINE, rows,
+                         response_dof=[f'{i}Z+' for i in range(8)],
+                         ordinate_dim=['acceleration'] * 8)
+    slow = resample(source, RATE)
+    whole = sosfiltfilt(design(anti_alias_filter(RATE), FINE), rows)
+    assert np.array_equal(slow.ordinate, whole[:, ::16])
+
+
+def test_resampling_does_not_hold_the_filtered_record_whole():
+    """Filtering the whole record and then decimating held twice the
+    record at the peak (2.06 times, Brandon, 2026-10-23). A row at a
+    time, the peak is under the record's own size."""
+    import tracemalloc
+
+    from visualdynamics.core.filters import _filter_pool
+
+    rows = np.random.default_rng(4).standard_normal((8, 131072))
+    source = TimeHistory(np.arange(131072) / FINE, rows,
+                         response_dof=[f'{i}Z+' for i in range(8)],
+                         ordinate_dim=['acceleration'] * 8)
+    # the threads and the lazy imports made first, so the peak is the
+    # resampling's own
+    _filter_pool()
+    resample(record(samples=4096), RATE)
+    tracemalloc.start()
+    try:
+        resample(source, RATE)
+        _now, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # 0.82 times here: two rows at a time, each taking three rows of
+    # working space, against 2.01 filtering the record whole
+    assert peak < 1.0 * rows.nbytes
 
 
 def test_every_channel_is_resampled():
@@ -222,12 +328,12 @@ def test_the_method_is_the_function():
 
 
 def test_a_low_pass_after_decimating_leaves_the_alias_where_it_is():
-    """Run on the bare 5,120 Hz record, a 2,000 Hz low-pass finds the
-    520 Hz alias inside its pass band and leaves it."""
+    """Run on the bare 5,120 Hz record, the anti-alias low-pass finds
+    the 520 Hz alias inside its pass band and leaves it."""
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', AliasWarning)
         bare = resample(record(), RATE, anti_alias=False)
-    after = filtered(bare, Filtering(high=2000.0, order=ORDER))
+    after = filtered(bare, anti_alias_filter(RATE))
     middle = slice(1024, 3072)
     assert np.max(np.abs(after.ordinate[0, middle]
                          - bare.ordinate[0, middle])) / G < 1e-3
@@ -248,13 +354,14 @@ def test_the_reading_of_the_worked_example():
     assert (reading.source_rate, reading.rate, reading.factor) == (
         pytest.approx(FINE), pytest.approx(RATE), 16)
     assert reading.nyquist == pytest.approx(2560.0)
-    assert reading.span == reading.corner == pytest.approx(2000.0)
+    assert reading.span == pytest.approx(2000.0)
+    assert reading.corner == pytest.approx(2400.0)
     assert (reading.frame_length, reading.lines, reading.kept,
             reading.dropped) == (1024, 512, 400, 112)
     assert reading.resolution == pytest.approx(5.0)
     assert reading.lowest_fold == pytest.approx(3120.0)
-    assert reading.gain_at_span == pytest.approx(-6.02, abs=0.01)
-    assert reading.gain_at_fold == pytest.approx(-61.8, abs=0.5)
+    assert reading.gain_at_span == pytest.approx(-0.11, abs=0.005)
+    assert reading.gain_at_fold == pytest.approx(-55.1, abs=0.05)
     (fold,) = reading.folds
     assert (fold.frequency, fold.alias, fold.multiple, fold.in_span) == (
         4600.0, 520.0, 1, True)
@@ -265,7 +372,7 @@ def test_the_reading_of_the_worked_example():
     assert fold.filtered_db < -100.0
     assert reading.describe() == (
         '81920 Hz to 5120 Hz (every 16th sample) behind a low-pass at '
-        '2000 Hz: Nyquist 2560 Hz, span 2000 Hz, 400 of 512 lines kept. '
+        '2400 Hz: Nyquist 2560 Hz, span 2000 Hz, 400 of 512 lines kept. '
         f'4600 Hz folds to 520 Hz, inside the span: '
         f'{level_change(fold.filtered_db)} filtered first, unchanged '
         'low-passed after decimating.')
@@ -289,14 +396,16 @@ def test_with_no_frequency_given_the_tallest_line_above_nyquist_is_folded():
 
 def test_a_frequency_that_folds_above_the_span_lands_among_the_dropped_lines():
     """2,900 Hz folds to 2,220 Hz, between the span and the Nyquist
-    frequency: a line the analyzer drops, and the low-pass after the
-    decimation takes it down."""
+    frequency: a line the analyzer drops. Filtered first it is taken
+    down; the low-pass after the decimation, its corner at 2,400 Hz,
+    leaves it about where it is, among the lines dropped anyway."""
     reading = read_resample(record(((2900.0, 1.0),)), RATE,
                             frequencies=[2900.0, 1000.0, 2560.0])
     (fold,) = reading.folds
     assert fold.alias == pytest.approx(2220.0)
     assert not fold.in_span
-    assert fold.after_db < -10.0
+    assert fold.filtered_db < -30.0
+    assert fold.after_db > -3.0
     assert 'among the dropped lines' in fold.describe()
 
 
@@ -391,9 +500,9 @@ def test_the_view_marks_the_span_the_nyquist_frequency_and_the_dropped_lines(
         names = [label.text for _sample, label in plot.legend.items]
         assert names[:4] == [
             'as recorded, 81920 Hz',
-            'filtered at 2000 Hz, then decimated to 5120 Hz',
+            'filtered at 2400 Hz, then decimated to 5120 Hz',
             'decimated with no filter',
-            'decimated, then low-passed at 2000 Hz']
+            'decimated, then low-passed at 2400 Hz']
         assert 'dropped lines, 112 of 512' in names
         assert 'above the new Nyquist frequency, as recorded' in names
         assert 'where it lands, decimated with no filter' in names
@@ -470,8 +579,8 @@ def test_in_the_view_the_low_pass_after_lies_on_the_bare_curve_at_the_alias(
             return float(item.yData[k])
 
         bare = at('decimated with no filter', 520.0)
-        after = at('decimated, then low-passed at 2000 Hz', 520.0)
-        first = at('filtered at 2000 Hz, then decimated to 5120 Hz', 520.0)
+        after = at('decimated, then low-passed at 2400 Hz', 520.0)
+        first = at('filtered at 2400 Hz, then decimated to 5120 Hz', 520.0)
         assert after == pytest.approx(bare, rel=1e-3)
         assert first < bare * 1e-3
         # drawn in the window's units: g^2/Hz in the default system
@@ -530,8 +639,8 @@ def test_a_time_history_offers_the_resample_reading(window, pump):
     assert values == {
         'source': '81920 Hz', 'rate': '5120 Hz', 'nyquist': '2560 Hz',
         'span': '2000 Hz', 'lines': '400 of 512', 'dropped': '112',
-        'resolution': '5 Hz', 'frame': '1024', 'at_span': '-6.0 dB',
-        'lowest': '3120 Hz', 'at_lowest': '-62.2 dB'}
+        'resolution': '5 Hz', 'frame': '1024', 'at_span': '-0.1 dB',
+        'lowest': '3120 Hz', 'at_lowest': '-55.1 dB'}
     assert panel.verdict.text().startswith(
         '4600 Hz folds to 520 Hz, inside the span: ')
     assert panel.verdict.text().endswith(
@@ -547,7 +656,7 @@ def test_the_settings_redraw_the_reading_and_are_kept(window, pump):
     panel.order_box.setValue(6)
     panel.frame_box.setCurrentIndex(panel.frame_box.findData(2048))
     pump()
-    assert panel.values['at_lowest'].text() == '-46.7 dB'
+    assert panel.values['at_lowest'].text() == '-27.9 dB'
     assert panel.values['lines'].text() == '800 of 1024'
     assert pane.resample_settings == {'factor': 16, 'order': 6,
                                       'frame_length': 2048,
@@ -585,7 +694,7 @@ def test_the_resample_reading_is_journaled_as_its_plot_call(window, pump):
              if line.startswith('visualdynamics.plot.plot_resample(')]
     assert lines == [
         ("visualdynamics.plot.plot_resample(project['Record'], 5120.0, 0, "
-         "frequencies=(4600.0,), order=8, frame_length=1024, "
+         "frequencies=(4600.0,), order=12, frame_length=1024, "
          "path='resample.png', show=False)")]
 
 

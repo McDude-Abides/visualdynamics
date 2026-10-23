@@ -72,6 +72,18 @@ def test_the_response_is_drawn_from_below_the_lowest_edge_to_nyquist():
     assert np.interp(100.0, f, db) == pytest.approx(-6.02, abs=0.05)
 
 
+def test_the_response_can_be_read_at_the_frequencies_asked_for():
+    """The same response, at the lines a reading names: -6.02 dB at the
+    nominal corner, and the curve's own values where it was drawn."""
+    filtering = Filtering(high=100.0)
+    f, db = filters.response(filtering, RATE, frequencies=[100.0, 50.0])
+    assert f.tolist() == [100.0, 50.0]
+    assert db[0] == pytest.approx(-6.0206, abs=1e-3)
+    drawn_f, drawn = filters.response(filtering, RATE)
+    _f, again = filters.response(filtering, RATE, frequencies=drawn_f)
+    assert np.array_equal(again, drawn)
+
+
 def test_a_high_pass_edge_past_nyquist_is_drawn_clamped_but_designed_refused():
     _f, db = filters.response(Filtering(low=2000.0), RATE)
     assert np.all(np.isfinite(db)), 'clamped just under Nyquist to draw'
