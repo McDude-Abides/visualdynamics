@@ -11,6 +11,12 @@ plot uses.
 The report and the 3-D waterfall both use this module. It works on all
 of an object's records at once, because the waterfall passes it hundreds
 of them. It needs only numpy.
+
+This thinning is for drawing, never for a record anything is computed
+from: its points sit at uneven times, and an anti-alias filter ahead of
+it would take off the peaks it exists to keep. A record taken to a lower
+sample rate for analysis goes through `core.resample`, which filters
+first.
 """
 
 from __future__ import annotations

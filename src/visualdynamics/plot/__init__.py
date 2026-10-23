@@ -4498,6 +4498,79 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
                         size=size)
 
 
+def plot_resample(history: Any, rate: float, record: int = 0, *,
+                  frequencies: float | Sequence[float] | None = None,
+                  order: int | None = None,
+                  frame_length: int | None = None,
+                  unit_system: UnitSystem | None = None, theme: Any = None,
+                  path: str | os.PathLike | None = None,
+                  show: bool = True, title: str | None = None,
+                  size: tuple[int, int] = (1000, 700)) -> Any:
+    """Draw what taking a record to a lower sample rate does, on its
+    autospectrum.
+
+        visualdynamics.plot.plot_resample(history, 5120.0,
+                                          frequencies=[4600.0],
+                                          path='resample.png')
+
+    One channel read by `core.resample.read_resample` and drawn by
+    `plot.resample`: the record as recorded, filtered first and then
+    decimated, decimated with no filter, and decimated then low-passed
+    at the span, on one line spacing; the new Nyquist frequency and the
+    span's top marked, the dropped lines between them hatched, and each
+    frequency above the new Nyquist frequency joined to where it folds,
+    with what each order of filtering left there in words. Where the
+    bare and the low-passed-after curves lie on each other at an alias,
+    the low-pass came too late. This is the script form of the
+    Resample reading on a time history's bar.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The record, evenly sampled.
+    rate : float
+        The new sample rate, in Hz, a whole division of the record's.
+    record : int, default 0
+        Which channel.
+    frequencies : float or sequence of float, optional
+        Frequencies above the new Nyquist frequency to fold, in Hz; the
+        record's tallest line above it when omitted.
+    order : int, optional
+        The anti-alias filter's design order, `core.resample.ORDER`
+        when omitted.
+    frame_length : int, optional
+        The spectra's frame at the new rate, in samples.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `core.resample.read_resample` raises.
+    """
+    from ..core.resample import ORDER, read_resample
+    from .resample import build_resample
+
+    reading = read_resample(history, rate, record, frequencies=frequencies,
+                            order=ORDER if order is None else order,
+                            frame_length=frame_length)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_resample(widget, reading, unit_system=unit_system,
+                       theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{reading.label}: resampled to '
+                                       f'{reading.rate:g} Hz',
+                        size=size)
+
+
 def plot_snr(signal: Any, floor: Any, *,
              records: Sequence[int] | None = None,
              low: float | None = None, theme: Any = None,

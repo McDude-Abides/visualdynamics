@@ -1865,6 +1865,45 @@ class TimeHistory(DataArray):
                              'or pass one')
         return filtered(self, chosen)
 
+    def resample(self, rate: float, *, anti_alias: bool = True,
+                 order: int | None = None) -> TimeHistory:
+        """This record at the lower sample rate `rate`
+        (`core.resample.resample`): every channel through a zero-phase
+        low-pass at the new rate over 2.56, then every q-th sample kept.
+
+        `core.resample.read_resample` reads what the resampling does on
+        a channel's spectrum, and `visualdynamics.plot.plot_resample`
+        draws it.
+
+        Parameters
+        ----------
+        rate : float
+            The new sample rate, in Hz, a whole division of this
+            record's.
+        anti_alias : bool, default True
+            Filter before decimating. Without the filter, anything the
+            record holds above the new Nyquist frequency folds into the
+            new band, and an `core.resample.AliasWarning` says so.
+        order : int, optional
+            The anti-alias filter's design order,
+            `core.resample.ORDER` when omitted.
+
+        Returns
+        -------
+        TimeHistory
+            The record at `rate`.
+
+        Raises
+        ------
+        ValueError
+            If the record is not evenly sampled, or `rate` is not a
+            whole division of its sample rate.
+        """
+        from .resample import ORDER, resample
+
+        return resample(self, rate, anti_alias=anti_alias,
+                        order=ORDER if order is None else order)
+
     def integrate(self, drift_corner: Any = ...) -> TimeHistory:
         """One integration: acceleration to velocity, velocity to
         displacement (`core.filters.integrate`).

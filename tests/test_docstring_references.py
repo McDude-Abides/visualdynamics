@@ -79,6 +79,8 @@ THEORY = {
                          'frequency between segments',
     'core.sine_frequency': 'the estimator of the tone and the frequency '
                            'band it is judged against',
+    'core.resample': 'decimation behind an anti-alias filter, and where '
+                     'content above the Nyquist frequency folds',
 }
 
 #: and methods, where the theory lives on the call rather than the module

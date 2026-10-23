@@ -13150,7 +13150,8 @@ class MainWindow(QMainWindow):
                                 ('statistics', self._render_statistics),
                                 ('amplitude', self._render_amplitude),
                                 ('pulse', self._render_pulse),
-                                ('stroke', self._render_stroke)):
+                                ('stroke', self._render_stroke),
+                                ('resample', self._render_resample)):
                 if self.data_pane.showing(key):
                     return render(history, series[0][0], series[0][2])
         if all_frf and self.data_pane.showing_cmif:
@@ -19143,6 +19144,60 @@ class MainWindow(QMainWindow):
                 f'{prefix}, channel={channel}{given}, '
                 "path='stroke.png', show=False)")
         return summary(reading, self.unit_system)
+
+    def _render_resample(self, history, name=None, records=None):
+        """What taking this record to a lower sample rate does.
+
+        One channel at a time, as the scalogram is: the first selected,
+        and the tree is settled onto it so the selection and the
+        picture cannot disagree. The new rate is the record's over the
+        panel's factor, and the channel is read by
+        `core.resample.read_resample` (the call a script makes) and
+        drawn as `plot.resample` draws it. A frame longer than the
+        decimated record holds gives way to the longest that fits, so a
+        short record still draws.
+        """
+        from ..core.resample import read_resample
+        from ..plot.resample import build_resample, summary
+
+        panel = self.data_pane.resample_panel
+        panel.set_settings(self.data_pane.resample_settings)
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        channel = records[0] if records else 0
+        self._settle_on_record(name, history, records, channel)
+        settings = panel.settings()
+        try:
+            rate = history.sample_rate / settings['factor']
+            frame = settings['frame_length']
+            if frame * settings['factor'] > len(history.abscissa):
+                frame = None
+            reading = read_resample(history, rate, channel,
+                                    frequencies=settings['frequencies'],
+                                    order=settings['order'],
+                                    frame_length=frame)
+        except ValueError as error:
+            # uneven sampling, or a factor that leaves too few samples:
+            # the reason, and no readout that would read as a verdict
+            panel.show_reading(None)
+            return str(error)
+        build_resample(self.data_pane.graphics, reading,
+                       unit_system=self.unit_system, theme=self.theme_name)
+        panel.show_reading(reading)
+        if name is not None:
+            given = ''.join(
+                f', {key}={value!r}' for key, value in (
+                    ('frequencies', settings['frequencies']),
+                    ('order', settings['order']),
+                    ('frame_length', frame)) if value is not None)
+            prefix = f'visualdynamics.plot.plot_resample(project[{name!r}]'
+            self._journal_view(
+                prefix,
+                f'{prefix}, {reading.rate!r}, {channel}{given}, '
+                "path='resample.png', show=False)")
+        return summary(reading)
 
     def _settle_on_record(self, name, history, records, channel):
         """Settle the tree onto the one record a reading is drawn for,

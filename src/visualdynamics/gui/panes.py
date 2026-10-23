@@ -57,6 +57,7 @@ from .profile_panel import ProfilePanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
 from .rms_check_panel import RmsCheckPanel
+from .resample_panel import ResamplePanel
 from .segments_panel import SegmentsPanel
 from .settings_panel import PANEL_WIDTH
 from .shock_panel import ShockPanel
@@ -316,6 +317,13 @@ class DataPane(QWidget):
         #: so they survive clicking away and back (a shaker's ratings
         #: do not change with the record)
         self.stroke_settings: dict[str, Any] | None = None
+        #: and the resampling, the same way: a record taken to a lower
+        #: rate, its spectrum read for what the filter does and where
+        #: content above the new Nyquist frequency folds
+        self.resample_wanted: bool = False
+        #: the factor, filter order, frame and folded frequencies, kept
+        #: across redraws so they survive clicking away and back
+        self.resample_settings: dict[str, Any] | None = None
         #: where its band has been dragged to, if it has
         self.kurtosis_bounds: tuple[float, float] | None = None
         #: 'curves', 'error', 'lines' or 'chance' — sticky, like the
@@ -441,6 +449,10 @@ class DataPane(QWidget):
         # the shaker's shock ratings beside the pulse read against them
         self.stroke_panel: StrokePanel = StrokePanel()
         self.stroke_panel.hide()
+        # the decimation and its anti-alias filter beside the spectrum
+        # that shows what they do; read only, nothing to apply
+        self.resample_panel: ResamplePanel = ResamplePanel()
+        self.resample_panel.hide()
         for reading in self._READINGS:
             if reading.sticky:
                 getattr(self, reading.panel).changed.connect(
@@ -489,6 +501,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.pulse_panel)
         plot_row.addWidget(self.replication_fit_panel)
         plot_row.addWidget(self.stroke_panel)
+        plot_row.addWidget(self.resample_panel)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -976,6 +989,18 @@ class DataPane(QWidget):
             'shock stroke, velocity and force typed beside it')
         self.stroke_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.stroke_action)
+        # what taking the record to a lower rate does: the anti-alias
+        # filter, the span and the dropped lines on its spectrum, and
+        # where content above the new Nyquist frequency folds
+        self.resample_action: QAction = QAction(control_icon('resample'),
+                                                'Resample', self)
+        self.resample_action.setCheckable(True)
+        self.resample_action.setToolTip(
+            'The record at a lower sample rate: the anti-alias filter, '
+            'the span and the dropped lines on its spectrum, and where '
+            'content above the new Nyquist frequency folds')
+        self.resample_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.resample_action)
         for reading in self._READINGS:
             self.reading_group.addAction(
                 getattr(self, f'{reading.key}_action'))
@@ -1222,6 +1247,10 @@ class DataPane(QWidget):
         Reading('fit', 'replication_fit_panel', 'fit',
                 flat=True, sticky=True),
         Reading('stroke', 'stroke_panel', 'fit', flat=True, sticky=True),
+        # offered where the averaging is: a record with a sample rate
+        # to lower, read on its spectrum, which has no 3-D form here
+        Reading('resample', 'resample_panel', 'averaging', flat=True,
+                sticky=True),
     )
 
     def show_acts(self, acts: Sequence[tuple]) -> None:

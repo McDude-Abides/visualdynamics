@@ -725,6 +725,31 @@ def _draw_kurtosis(painter, color):
     painter.drawPath(path)
 
 
+def _draw_resample(painter, color):
+    """A fast wave, faint, sampled too slowly: the dots it leaves trace
+    a slow wave, drawn bold. The resample reading's button, the alias a
+    record keeps when it is decimated with no filter ahead of it."""
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(_pen(faint, 3))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    # nine cycles across the icon, sampled ten times: the samples trace
+    # one cycle, the fold of 9 into a rate of 10
+    painter.drawPath(_curve([(6 + i, 32 - 16 * math.sin(2 * math.pi * 9
+                                                         * i / 52))
+                             for i in range(53)]))
+    painter.setPen(_pen(color, 5))
+    painter.drawPath(_curve([(6 + i, 32 + 16 * math.sin(2 * math.pi * i
+                                                         / 52))
+                             for i in range(53)]))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    for k in range(11):
+        x = 6 + 5.2 * k
+        y = 32 - 16 * math.sin(2 * math.pi * 9 * k / 10)
+        painter.drawEllipse(QPointF(x, y), 4.0, 4.0)
+
+
 def _draw_statistics(painter, color):
     """A histogram under its bell, with a bar standing at each edge.
 
@@ -2382,6 +2407,7 @@ def control_icon(name: str) -> QIcon:
      'segments': _draw_segments,
      'pulse': _draw_pulse,
      'stroke': _draw_stroke,
+     'resample': _draw_resample,
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,
