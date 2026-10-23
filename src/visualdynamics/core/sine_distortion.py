@@ -6,67 +6,75 @@ fundamental and nothing else. Whatever else the channel carries is
 outside the band: harmonics from a rattle, a loose fixture bolt, a joint
 that claps or an amplifier at its limit, a fixture resonance excited at a
 multiple of the drive, noise. The controller does not see it, and the
-article feels it. The check compares the channel read unfiltered with
-the tone alone. With x_u the unfiltered RMS and x_1 the RMS of the
-fundamental, the distortion is
+article feels it. The check reads it directly. The tones the extraction
+tracked are rebuilt on the record's own samples and taken away from it,
+and what is left is everything that is not a tone. With r the RMS of
+that residual and x_1 the RMS of the rebuilt tones, both over the same
+span of the record, the distortion is
 
-    D = sqrt((x_u / x_1)**2 - 1),
+    D = r / x_1,
 
-the RMS of everything that is not the tone over the RMS of the tone,
-since the tone and the rest are orthogonal and their powers add
-(`distortion`). It is reported as a fraction (a percentage on screen)
-and in dB, 20 log10 D.
+reported as a fraction (a percentage on screen) and in dB, 20 log10 D.
 
-The tolerance is usually written on the ratio rather than on D: the
-unfiltered RMS no more than some share above the filtered one. Five
+The tolerance is usually written on a ratio rather than on D: the
+unfiltered RMS no more than some share above the filtered one. Where
+the residual is orthogonal to the tones their mean squares add, so the
+ratio is sqrt(1 + D**2) and D = sqrt(ratio**2 - 1) (`distortion`). Five
 percent is an example of what test documents ask for, and it is the
 default here (`DISTORTION_EXCESS`). Five percent over is a distortion of
 sqrt(1.05**2 - 1) = 0.320, 32 % or -9.9 dB (`distortion_limit`), which is
 the line the check draws and the figure a line is flagged above.
 
-The check is not sensitive, and it is not meant to be. A tone with a
-third harmonic at 10 % of it reads 1.005 on the ratio, at 20 % 1.020,
-and only at 32 % does it reach 1.05: it catches distortion large enough
-to change the test. It hardly sees clipping at all. A sine clipped flat
-at four fifths of its peak reads 1.004, because cutting the tops of a
-sine puts most of the lost power back into the fundamental, so flat tops
-are found in the time history and its crest factor, not here.
+Why the residual rather than the ratio of two readings (Brandon,
+2026-10-23). Read as the unfiltered RMS over the tone's, D rests on two
+things that need not hold. The tones must be orthogonal to each other
+for their powers to add: two clean tones sweeping through each other are
+not, where they cross, and read a distortion near 100 % there. And the
+two readings must cover the same stretch of the record: a level the
+filter read at an instant and an RMS read over a span differ wherever
+the level moves inside the span, so a clean sweep through a sharp
+resonance read 100 % on its far side. The residual is read over the same
+samples as the tones it is measured against, and two tones that beat or
+cross are rebuilt together and subtracted together, so neither
+assumption is made.
 
-The fundamental is the extraction's (`core.sine.extract_sine`): each
-tone's Vold-Kalman envelope on its own sweep, debiased, read at the
-instants the extraction chose, which is the best estimate of the tone
-the package has. Its smoothing is `SineLevelSet.cycles` cycles of the
-tone's own frequency, and the unfiltered RMS is read over the same
-stretch: centered on the instant each line was read, over that many
-cycles of the tone's phase, exactly, on the band-limited waveform rather
-than the samples alone (the span average `core.sine_tracking` reads its
-RMS detector with). Read from the samples alone, a span rounded to whole
-samples at a few samples a cycle reads a sine's RMS off by a few tenths
-of a percent, and near a ratio of one that is several percent of D. A
-span that would run off either end of the tone's stretch of the record is
-moved inward until it fits.
+The check is not sensitive, and it is not meant to be. A tone with a
+third harmonic at 10 % of it reads a ratio of 1.005, at 20 % 1.020, and
+only at 32 % does it reach 1.05: it catches distortion large enough to
+change the test. It hardly sees clipping at all. A sine clipped flat at
+four fifths of its peak reads 1.004, because cutting the tops of a sine
+puts most of the lost power back into the fundamental, so flat tops are
+found in the time history and its crest factor, not here.
+
+The tones are rebuilt by the estimator the extraction uses
+(`core.sine.vold_kalman`): every tone the levels hold that plays over
+the checked tone's stretch, solved jointly on the record's own samples
+with the extraction's smoothing, each tone's complex envelope on its
+own sweep argument. The envelope follows the level as it moves, a
+resonance included, so the rebuilt tone is the tone the controller's
+band would pass, sample by sample. Where the extraction corrected the
+sweep clock (`SineLevel.drift_hz` not zero) the rebuild fits the same
+kind of correction to its own envelope's phase and solves again, so a
+drifted sweep is not rebuilt off its tone. The residual and the tones
+are then read over `cycles` cycles of the tone's phase centered on each
+line's instant (the extraction's smoothing by default), moved inward
+where a span would run off either end of the tone's stretch.
 
 The record's mean over the tone's stretch is taken out first: a sensor's
 offset is not motion the article feels. Anything slower than the span
 that is not constant is counted, as it should be, since it is not the
-tone either.
+tone either. Content up to the Nyquist frequency is counted in full;
+above it the record holds nothing, so a sweep whose third harmonic
+passes the Nyquist frequency says so in the notes.
 
-Where several tones play at once, the unfiltered RMS holds all of them,
-so the fundamental is the root-sum-square of every tone live in the
-span, each from its own level (interpolated along its own lines) and
-each counted for the share of the span it plays in, and D is what is
-left over all of them. Over a short span two tones beat, and the beat
-does not average away: on a clean record they read a few percent of
-distortion between them, more over fewer cycles. A line whose span
-reaches a tone of the specification the levels do not hold cannot be
-judged, and neither can a line the extraction found under its noise
-floor (`SineLevel.below_floor`); both are kept, counted in the notes and
-left out of the verdict (`DistortionCheck.judged`).
-
-On a clean recording the ratio reads within a few parts in ten thousand
-of one, and D, being the square root of the difference, reads a few
-percent from that alone: 1.0002 is 2 %. The figure means something well
-above that, which is where the check's limit is.
+A line whose span reaches a tone of the specification the levels do not
+hold cannot be judged, and neither can a line the extraction found under
+its noise floor (`SineLevel.below_floor`), nor a line with no tone on
+the channel to judge against (a dead channel), nor any line of a channel
+whose stretch holds a sample that is not a finite number. All are kept,
+counted in the notes and left out of the verdict
+(`DistortionCheck.judged`), and a channel with no judged line does not
+pass.
 
 References
 ----------
@@ -94,38 +102,32 @@ from typing import Any
 
 import numpy as np
 
+from ..units import UNKNOWN
 from .data import _even_steps
-from .sine import SineLevelSet, SineSweepSpecification, extract_sine
-from .sine_tracking import _laid, _span_average
-
-# Why the unfiltered RMS reads the band-limited waveform (2026-10-23):
-# on a clean 100-800 Hz sweep sampled at 4096 Hz over ten cycles, the
-# samples alone put the ratio up to 1.002 off one at the top, a D of
-# 6 %, where the span average holds it under 1.0002.
+from .sine import SineLevelSet, SineSweepSpecification, extract_sine, vold_kalman
+from .sine_tracking import _laid
 
 #: the share the unfiltered RMS may stand above the fundamental's
 #: before a line is flagged: 5 %, an example of what test documents ask
 #: for, which is a distortion of 32 % (`distortion_limit`)
 DISTORTION_EXCESS = 0.05
 
-#: the share of the Nyquist frequency up to which the band-limited
-#: reconstruction counts content in full; above it the reconstruction
-#: filter rolls off and the unfiltered RMS under-reads what is there
-#: (a third harmonic at 10 % read 0.100 to 0.82 of the Nyquist
-#: frequency and 0.069 at 0.99, sampled at 4096 Hz)
-RECONSTRUCTED_SHARE = 0.8
-
-#: the harmonic a note is written for when it climbs past
-#: `RECONSTRUCTED_SHARE`: the third, the first a symmetric clip or a
-#: rattle puts on a channel
+#: the harmonic a note is written for when it climbs past the Nyquist
+#: frequency: the third, the first a symmetric clip or a rattle puts on
+#: a channel
 HARMONIC = 3
 HARMONIC_WORD = 'third'
 
 
 def distortion(unfiltered: Any, fundamental: Any) -> np.ndarray:
-    """The distortion from the two readings: sqrt((unfiltered /
-    fundamental)**2 - 1), the RMS of everything that is not the tone over
-    the RMS of the tone.
+    """The distortion from two RMS readings, where what is not the tone
+    is orthogonal to it: sqrt((unfiltered / fundamental)**2 - 1), the RMS
+    of everything that is not the tone over the RMS of the tone.
+
+    This is the conversion between a tolerance written on the ratio and
+    a distortion. The check itself reads the residual directly
+    (`check_distortion`), since two tones that cross are not orthogonal
+    and two readings over different stretches are not comparable.
 
     A ratio under one, which only the scatter of the two readings gives
     (the unfiltered record holds the tone and more), reads as no
@@ -198,14 +200,16 @@ class DistortionCheck:
 
     `frequency` and `seconds` are the extraction's lines, ascending in
     frequency, each with the second it was read, from the recording's
-    first sample. `unfiltered` and `fundamental` are channels x lines of
-    RMS in SI, the channel read over `cycles` cycles about each line and
-    the root-sum-square of every tone live there. `judged` is channels x
-    lines, False where a line cannot be judged (the tone under its noise
-    floor, or a tone the levels do not hold live beside it). `excess` is
-    the tolerance on the ratio. `notes` says what was not judged and why,
-    empty when every line was. Two of these compare equal only if they
-    are the same object, since the arrays have no single truth value.
+    first sample. `unfiltered`, `fundamental` and `residual` are channels
+    x lines of RMS in SI over `cycles` cycles about each line: the
+    channel itself, the tones rebuilt on it, and the channel less the
+    tones. `judged` is channels x lines, False where a line cannot be
+    judged (the tone under its noise floor, a tone the levels do not
+    hold live beside it, no tone on the channel, or a sample that is not
+    a finite number). `excess` is the tolerance on the ratio. `notes`
+    says what was not judged and why, empty when every line was. Two of
+    these compare equal only if they are the same object, since the
+    arrays have no single truth value.
     """
 
     tone: str
@@ -216,23 +220,27 @@ class DistortionCheck:
     seconds: np.ndarray
     unfiltered: np.ndarray
     fundamental: np.ndarray
+    residual: np.ndarray
     judged: np.ndarray
     excess: float
     cycles: float
     notes: tuple[str, ...] = field(default=())
 
     @property
-    def ratio(self) -> np.ndarray:
-        """Channels x lines: the unfiltered RMS over the fundamental's,
-        the number a tolerance like 'within 5 %' is written on."""
+    def distortion(self) -> np.ndarray:
+        """Channels x lines: D as a fraction, the residual's RMS over the
+        rebuilt tones'; not a number where there is no tone."""
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.where(self.fundamental > 0.0,
-                            self.unfiltered / self.fundamental, np.nan)
+                            self.residual / self.fundamental, np.nan)
 
     @property
-    def distortion(self) -> np.ndarray:
-        """Channels x lines: D as a fraction (`distortion`)."""
-        return distortion(self.unfiltered, self.fundamental)
+    def ratio(self) -> np.ndarray:
+        """Channels x lines: the ratio the distortion stands for,
+        sqrt(1 + D**2), the unfiltered RMS over the tone's where the rest
+        is orthogonal to the tones; the number a tolerance like 'within
+        5 %' is written on."""
+        return np.sqrt(1.0 + self.distortion ** 2)
 
     @property
     def decibels(self) -> np.ndarray:
@@ -249,11 +257,17 @@ class DistortionCheck:
     def over(self) -> np.ndarray:
         """Channels x lines, True where a judged line's distortion is
         above the limit."""
-        return self.judged & (self.distortion > self.limit)
+        with np.errstate(invalid='ignore'):
+            return self.judged & (self.distortion > self.limit)
 
     @property
     def passed(self) -> bool:
-        """Whether no judged line on any channel is over the limit."""
+        """Whether every channel read has a judged line and no judged
+        line on any channel is over the limit. A channel with nothing
+        judged (dead, not a number, or every line unjudged) has not
+        passed: there is no reading to pass."""
+        if not self.judged.any(axis=1).all():
+            return False
         return not bool(self.over.any())
 
     def row(self, dof: str | None = None) -> int:
@@ -296,7 +310,8 @@ class DistortionCheck:
     def describe(self, dof: str | None = None) -> str:
         """The verdict in one line, such as 'Up at 101Z+: worst 12.3 %
         (-18.2 dB) at 412 Hz, within the 32.0 % limit'. Every channel's
-        worst when `dof` is None."""
+        worst when `dof` is None, naming any channel with no line
+        judged."""
         where = self.tone + ('' if dof is None else f' at {dof}')
         worst = self.worst(dof)
         if worst is None:
@@ -308,9 +323,14 @@ class DistortionCheck:
         words = (f'{where}: worst {100.0 * value:.1f} % '
                  f'({float(decibels(value)):.1f} dB) at {frequency:.4g} Hz, ')
         if over:
-            return words + (f'{over} of {judged} lines over the '
-                            f'{100.0 * self.limit:.1f} % limit')
-        return words + f'within the {100.0 * self.limit:.1f} % limit'
+            words += (f'{over} of {judged} lines over the '
+                      f'{100.0 * self.limit:.1f} % limit')
+        else:
+            words += f'within the {100.0 * self.limit:.1f} % limit'
+        silent = [self.dofs[r] for r in rows if not self.judged[r].any()]
+        if silent:
+            words += f'; no line judged on {", ".join(silent)}'
+        return words
 
 
 def _live_windows(specification: SineSweepSpecification, chosen: Any,
@@ -327,13 +347,13 @@ def _live_windows(specification: SineSweepSpecification, chosen: Any,
 def _span(phase: np.ndarray, k: int, cycles: float) -> tuple[int, float]:
     """The span of exactly `cycles` cycles of `phase` centered on sample
     `k`, moved inward where it would run off either end: (its last
-    sample, the phase it starts at), as the span average takes it."""
+    sample, the phase it starts at)."""
     turn = 2.0 * np.pi * cycles
     last = len(phase) - 1
     end = min(int(np.searchsorted(phase, phase[k] + turn / 2.0)), last)
     if phase[end] - turn < phase[0]:
         end = min(int(np.searchsorted(phase, phase[0] + turn)), last)
-    return end, float(phase[end] - turn)
+    return end, float(max(phase[end] - turn, phase[0]))
 
 
 def _overlap(t0: np.ndarray, t1: np.ndarray, lo: float,
@@ -344,30 +364,100 @@ def _overlap(t0: np.ndarray, t1: np.ndarray, lo: float,
     return inside / np.maximum(t1 - t0, 1e-300)
 
 
+def _row_of(history: Any, dof: str, dimension: str) -> int:
+    """The record of `history` at `dof` measuring `dimension`, the
+    quantity its levels were read in: the first such, as the extraction
+    takes the first record of a control DOF. A DOF can carry an
+    accelerometer and a force gauge both, and a check of one against the
+    other's levels would measure the wrong channel against the tone."""
+    rows = [r for r, name in enumerate(history.response_dof)
+            if str(name) == dof]
+    if not rows:
+        raise ValueError(f'the recording carries no record for {dof}')
+    if dimension == UNKNOWN:
+        return rows[0]
+    same = [r for r in rows if history.ordinate_dim[r] == dimension]
+    if not same:
+        found = sorted({str(history.ordinate_dim[r]) for r in rows})
+        raise ValueError(
+            f'the levels at {dof} were read in {dimension} and the '
+            f'recording carries {", ".join(found)} there: they are not of '
+            'this record')
+    return same[0]
+
+
+def _unwound(argument: np.ndarray, envelope: np.ndarray,
+             dt: float) -> np.ndarray:
+    """`argument` with the slow phase its envelope turned through taken
+    into it: a quadratic in time fitted to the envelope's unwrapped
+    phase, weighted by its power, the kind of clock correction the
+    extraction applies. Solved again on the corrected argument the
+    envelope sits still, so the filter passes the tone in full."""
+    weight = np.abs(envelope) ** 2
+    if not weight.sum() > 0.0 or len(argument) < 3:
+        return argument
+    u = (np.arange(len(argument)) - len(argument) / 2.0) * dt
+    phase = np.unwrap(np.angle(envelope))
+    root = np.sqrt(weight)
+    basis = np.stack([np.ones_like(u), u, u * u], axis=1) * root[:, None]
+    coefficients, *_rest = np.linalg.lstsq(basis, phase * root, rcond=None)
+    return argument + coefficients[1] * u + coefficients[2] * u * u
+
+
+def _mean_squares(values: np.ndarray, phase: np.ndarray,
+                  ends: np.ndarray, starts: np.ndarray) -> np.ndarray:
+    """The mean of `values` squared over each span of the tone's phase,
+    from the phase `starts` to the sample `ends`: the trapezoid over
+    phase from one running sum, the span's first piece interpolated
+    where it starts between two samples, divided by the phase covered.
+
+    Over phase rather than samples, so a span is exactly its cycles of
+    the tone wherever they fall between samples: counted in whole
+    samples, ten cycles at forty samples a cycle read a sine's mean
+    square up to a quarter of a percent off, more at fewer samples, and
+    differently for the tone and for what is not the tone.
+    """
+    square = values * values
+    running = np.concatenate(([0.0], np.cumsum(
+        0.5 * (square[1:] + square[:-1]) * np.diff(phase))))
+    at = np.clip(np.searchsorted(phase, starts), 1, len(phase) - 1)
+    width = phase[at] - phase[at - 1]
+    share = np.where(width > 0.0, (phase[at] - starts) / width, 0.0)
+    begin = square[at] - share * (square[at] - square[at - 1])
+    piece = 0.5 * (begin + square[at]) * (phase[at] - starts)
+    covered = phase[ends] - starts
+    return (running[ends] - running[at] + piece) / covered
+
+
 def check_distortion(history: Any, specification: SineSweepSpecification,
                      levels: SineLevelSet | None = None, *,
                      tone: str | None = None,
                      channels: Sequence[str] | None = None,
                      excess: float = DISTORTION_EXCESS,
                      cycles: float | None = None) -> DistortionCheck:
-    """Check one tone's distortion along its sweep: the channel's
-    unfiltered RMS against the RMS of the tracked fundamental, at every
-    line of the extraction.
+    """Check one tone's distortion along its sweep: the RMS of the record
+    less the tracked tones against the RMS of the tones, at every line of
+    the extraction.
 
-    The fundamental comes from `levels`, a `SineLevelSet` that
-    `extract_sine` (Extract Sine Levels) read from this recording against
-    this specification; with none, the extraction is run here with the
+    The tones come from `levels`, a `SineLevelSet` that `extract_sine`
+    (Extract Sine Levels) read from this recording against this
+    specification; with none, the extraction is run here with the
     recording's own `sine_extraction` setting (or its suggestion), as the
-    project verb runs it. At each line the channel is read unfiltered over
-    `cycles` cycles of the tone (the extraction's smoothing by default)
-    centered on the line's instant, its mean over the tone's stretch
-    taken out, and compared with the root-sum-square of every tone live
-    there. A line is flagged where the distortion is above the limit
+    project verb runs it. Over the checked tone's stretch, every tone the
+    levels hold is rebuilt on each channel's samples by the joint
+    Vold-Kalman solve with the extraction's smoothing, the record's mean
+    taken out, and the rebuilt tones subtracted. At each line the residual
+    and the rebuilt tones are read over `cycles` cycles of the tone
+    centered on the line's instant, and the distortion is the one RMS
+    over the other. A line is flagged where it is above the limit
     `excess` sets (`distortion_limit`).
 
     Raises ValueError when `excess` or `cycles` is not more than zero, when
     the recording is not evenly sampled, when the levels hold no such tone
-    or channel, or when the recording holds less of the tone than one span.
+    or channel, when the recording carries no record of a channel in the
+    quantity its levels were read in, when the levels were read at times
+    the recording does not hold, or when the recording holds less of the
+    tone than one span.
 
     Parameters
     ----------
@@ -385,14 +475,13 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
         The share the unfiltered RMS may stand above the fundamental's;
         5 %, a distortion of 32 %, by default.
     cycles : float, optional
-        The span the unfiltered RMS is read over, in cycles of the tone;
-        the extraction's smoothing by default, so both readings cover the
-        same stretch.
+        The span the RMS readings are taken over, in cycles of the tone;
+        the extraction's smoothing by default.
 
     Returns
     -------
     DistortionCheck
-        The two RMS readings at every line on every channel read, which
+        The three RMS readings at every line on every channel read, which
         lines could be judged, and the tolerance.
     """
     distortion_limit(excess)                  # refuses a bad tolerance
@@ -418,8 +507,9 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
                          'were read with; give cycles=')
     cycles = float(cycles)
     if not cycles > 0.0:
-        raise ValueError('the unfiltered RMS is read over more than zero '
-                         'cycles')
+        raise ValueError('the RMS is read over more than zero cycles')
+    smoothing = float(levels.cycles if levels.cycles is not None
+                      else cycles)
     held = [str(dof) for dof in level.response_dof]
     wanted = held if channels is None else [str(dof) for dof in channels]
     missing = [dof for dof in wanted if dof not in held]
@@ -427,33 +517,35 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
         raise ValueError(f'the levels hold no reading for {missing}; they '
                          f'hold {held}')
     picks = [held.index(dof) for dof in wanted]
-    dofs = list(history.response_dof)
-    absent = [dof for dof in wanted if dof not in dofs]
-    if absent:
-        raise ValueError(f'the recording carries no record for {absent}')
-    rows = [dofs.index(dof) for dof in wanted]
+    level_dims = list(level.ordinate_dim)
+    rows = [_row_of(history, dof, str(level_dims[p]))
+            for dof, p in zip(wanted, picks, strict=True)]
 
-    first, last, _frequency, phase = _laid(history, chosen, level.onset, dt)
+    samples = history.ordinate.shape[1]
+    first, last, frequency, phase = _laid(history, chosen, level.onset, dt)
     if phase[-1] - phase[0] < 2.0 * np.pi * cycles:
         raise ValueError(
             f'{chosen.name}: the recording holds '
             f'{(phase[-1] - phase[0]) / (2.0 * np.pi):.3g} cycles of the '
             f'tone, less than the {cycles:g} the RMS is read over')
     seconds = np.asarray(level.seconds, dtype=float)
-    lines = np.clip(np.round(seconds / dt).astype(np.int64) - first, 0,
-                    last - first - 1)
-
+    at = np.round(seconds / dt).astype(np.int64)
+    if len(at) and (at.min() < first or at.max() >= min(last, samples)):
+        raise ValueError(
+            f'{chosen.name}: the levels were read at times from '
+            f'{seconds.min():.4g} to {seconds.max():.4g} s, outside the '
+            f"tone's stretch of this recording; they are of another "
+            'record, or of this one before it changed. Extract them again')
+    lines = np.clip(at - first, 0, last - first - 1)
     spans = [_span(phase, int(k), cycles) for k in lines]
+    ends = np.array([end for end, _start in spans], dtype=np.int64)
+    starts = np.array([start for _end, start in spans], dtype=float)
     # each span's ends in recording seconds, for the other tones' share
-    t0 = (first + np.interp([start for _end, start in spans], phase,
-                            np.arange(len(phase)))) * dt
-    t1 = (first + np.array([end for end, _start in spans])) * dt
+    t0 = (first + np.interp(starts, phase, np.arange(len(phase)))) * dt
+    t1 = (first + ends) * dt
 
-    # every other tone: its power counted for the share of the span it
-    # plays in, at its own level interpolated along its lines; a tone
-    # the levels do not hold leaves every span it reaches unjudged. A
-    # line counted the other tone only where its center was inside it
-    # and read 29 % at both of that tone's ends (2026-10-23)
+    # a tone of the specification the levels do not hold cannot be
+    # rebuilt, so a span reaching it at all is not judged
     windows = _live_windows(specification, chosen, level.onset)
     extracted = set(levels.tone_names)
     shared = np.zeros(len(seconds), dtype=bool)
@@ -461,56 +553,98 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
         if name not in extracted:
             shared |= _overlap(t0, t1, lo, hi) > 0.0
 
-    amplitude = np.abs(np.asarray(level.ordinate))[picks]
-    power = (amplitude / np.sqrt(2.0)) ** 2
-    for other in levels.levels:
-        if other.tone == level.tone or other.seconds is None:
+    # every tone the levels hold over the checked tone's stretch, laid on
+    # the record's samples from its own onset, the checked tone first
+    laid = []
+    for other in [level] + [o for o in levels.levels if o is not level]:
+        if other is level:
+            o_first, o_last, o_frequency, o_phase = (first, last,
+                                                     frequency, phase)
+        else:
+            try:
+                o_first, o_last, o_frequency, o_phase = _laid(
+                    history, specification.tone(other.tone), other.onset, dt)
+            except ValueError:
+                continue                       # none of it on the record
+        lo, hi = max(o_first, first), min(o_last, last)
+        if hi - lo < 2:
             continue
-        share = _overlap(t0, t1, *windows.get(other.tone, (0.0, 0.0)))
-        if not share.any():
-            continue
-        held_other = [str(dof) for dof in other.response_dof]
-        when = np.asarray(other.seconds, dtype=float)
-        order = np.argsort(when)
-        for c, dof in enumerate(wanted):
-            reading = np.abs(np.asarray(other.ordinate))[
-                held_other.index(dof)][order]
-            power[c] += share * (np.interp(seconds, when[order], reading)
-                                 / np.sqrt(2.0)) ** 2
-    fundamental = np.sqrt(power)
+        laid.append((o_phase[lo - o_first:hi - o_first],
+                     o_frequency[lo - o_first:hi - o_first], lo - first,
+                     bool(other.drift_hz)))
 
-    unfiltered = np.zeros((len(rows), len(seconds)))
+    count = len(seconds)
+    unfiltered = np.full((len(rows), count), np.nan)
+    fundamental = np.full((len(rows), count), np.nan)
+    residual = np.full((len(rows), count), np.nan)
+    notes = []
     for c, row in enumerate(rows):
         x = np.real(np.asarray(history.ordinate[row, first:last],
                                dtype=float))
+        bad = int((~np.isfinite(x)).sum())
+        if bad:
+            notes.append(f'{wanted[c]}: {bad} sample{"s" * (bad != 1)} over '
+                         "the tone's stretch "
+                         f'{"are" if bad != 1 else "is"} not a finite '
+                         'number, so no line is judged')
+            continue
         x = x - np.mean(x)
-        unfiltered[c] = [np.sqrt(max(_span_average(x, phase, end, start,
-                                                   'rms'), 0.0))
-                         for end, start in spans]
+        arguments = [argument for argument, _f, _o, _d in laid]
+        frequencies = [f for _a, f, _o, _d in laid]
+        offsets = [offset for _a, _f, offset, _d in laid]
+        envelopes = vold_kalman(x, arguments, frequencies, offsets, dt,
+                                smoothing)
+        if any(drifted for *_rest, drifted in laid):
+            # the extraction moved this sweep's clock; the rebuild fits
+            # the same kind of correction to its own envelopes and
+            # solves again, so a drifted tone is not rebuilt off itself
+            arguments = [_unwound(argument, envelope, dt) if drifted
+                         else argument
+                         for (argument, *_rest, drifted), envelope
+                         in zip(laid, envelopes, strict=True)]
+            envelopes = vold_kalman(x, arguments, frequencies, offsets, dt,
+                                    smoothing)
+        tones = np.zeros(len(x))
+        for argument, offset, envelope in zip(arguments, offsets,
+                                              envelopes, strict=True):
+            tones[offset:offset + len(argument)] += np.real(
+                envelope * np.exp(1j * argument))
+        unfiltered[c] = np.sqrt(_mean_squares(x, phase, ends, starts))
+        fundamental[c] = np.sqrt(_mean_squares(tones, phase, ends, starts))
+        residual[c] = np.sqrt(np.maximum(
+            _mean_squares(x - tones, phase, ends, starts), 0.0))
 
-    floor = (np.zeros_like(unfiltered, dtype=bool)
+    floor = (np.zeros((len(rows), count), dtype=bool)
              if level.below_floor is None
              else np.asarray(level.below_floor, dtype=bool)[picks])
-    judged = ~floor & ~shared[None, :]
-    notes = []
+    toneless = np.isfinite(fundamental) & ~(fundamental > 0.0)
+    judged = (~floor & ~shared[None, :] & np.isfinite(residual)
+              & (fundamental > 0.0))
     if floor.any():
         notes.append(f'{int(floor.sum())} line{"s" * int(floor.sum() != 1)} '
                      'under the noise floor, not judged')
     if shared.any():
         notes.append(f'{int(shared.sum())} line{"s" * int(shared.sum() != 1)} '
                      'shared with a tone the levels do not hold, not judged')
-    reach = RECONSTRUCTED_SHARE * 0.5 / dt / HARMONIC
+    for c in range(len(rows)):
+        none = int(toneless[c].sum())
+        if none:
+            notes.append(f'{wanted[c]}: {none} line{"s" * (none != 1)} '
+                         'with no tone on the channel to judge against, '
+                         'not judged')
+    reach = 0.5 / dt / HARMONIC
     if float(np.max(level.abscissa)) > reach:
         notes.append(f'above {reach:.4g} Hz the {HARMONIC_WORD} harmonic is '
-                     f'past {100.0 * RECONSTRUCTED_SHARE:g} % of the Nyquist '
-                     'frequency, where the unfiltered RMS under-reads it')
+                     'past the Nyquist frequency, so the record cannot hold '
+                     'it and the check cannot see it')
     return DistortionCheck(
         tone=chosen.name, dofs=wanted,
         dimensions=[history.ordinate_dim[row] for row in rows],
         units=[history.ordinate_unit[row] for row in rows],
         frequency=np.asarray(level.abscissa, dtype=float), seconds=seconds,
-        unfiltered=unfiltered, fundamental=fundamental, judged=judged,
-        excess=float(excess), cycles=cycles, notes=tuple(notes))
+        unfiltered=unfiltered, fundamental=fundamental, residual=residual,
+        judged=judged, excess=float(excess), cycles=cycles,
+        notes=tuple(notes))
 
 
 __all__ = ['DISTORTION_EXCESS', 'DistortionCheck', 'check_distortion',

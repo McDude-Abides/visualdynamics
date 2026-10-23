@@ -4306,9 +4306,9 @@ def plot_sine_distortion(history: Any, specification: Any,
                                                  path='distortion.png')
 
     The check is `core.sine_distortion.check_distortion`, with the same
-    arguments: the channel's unfiltered RMS against the RMS of the tone
-    the extraction tracked, at every line of `levels` (extracted here
-    when omitted). It is drawn by `plot.sine_distortion.build_distortion`:
+    arguments: the RMS of the record less the tones the extraction
+    tracked against the RMS of the tones, at every line of `levels`
+    (extracted here when omitted). It is drawn by `plot.sine_distortion.build_distortion`:
     the limit dashed, each control channel (or only `channel`) as a solid
     curve with its own hollow marker, the same marker filled on a line
     over the limit, and each named in the legend with its worst reading

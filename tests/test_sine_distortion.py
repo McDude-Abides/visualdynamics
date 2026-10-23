@@ -1,12 +1,12 @@
-"""The sine distortion check: the unfiltered RMS against the tracked tone.
+"""The sine distortion check: the record less the tracked tones against
+the tones.
 
-The numbers are closed forms. A tone with a harmonic at h of its
-amplitude has an RMS of sqrt(1 + h**2) times the tone's, so the ratio
-reads 1.005 at h = 0.10, 1.020 at 0.20 and 1.050 at 0.32, and the
-distortion sqrt(ratio**2 - 1) reads h itself. The record is a 2 m/s**2
+The numbers are closed forms. A harmonic at h of the tone's amplitude
+leaves a residual of h times the tone's RMS, so the distortion reads h
+itself and the ratio it stands for, sqrt(1 + h**2), reads 1.005 at
+h = 0.10, 1.020 at 0.20 and 1.050 at 0.32. The record is a 2 m/s**2
 sweep from 100 to 500 Hz at 100 Hz/s sampled at 4096 Hz, so its third
-harmonic stays under 1500 Hz, inside the share of the band the
-unfiltered RMS reads in full.
+harmonic stays under 1500 Hz, under the Nyquist frequency.
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ def test_a_harmonic_reads_as_its_own_share_of_the_tone(harmonic, ratio):
     assert check.ratio[0][inside] == pytest.approx(ratio, abs=6e-4)
     assert check.distortion[0][inside] == pytest.approx(harmonic, abs=4e-3)
     assert check.fundamental[0][inside] == pytest.approx(
-        AMPLITUDE / np.sqrt(2.0), rel=1e-4), 'the tone, and only the tone'
+        AMPLITUDE / np.sqrt(2.0), rel=2e-4), 'the tone, and only the tone'
 
 
 def test_a_clean_sweep_reads_near_zero_and_passes():
@@ -187,19 +187,26 @@ def test_noise_is_counted_as_everything_that_is_not_the_tone():
 
 
 def test_two_tones_at_once_are_both_the_fundamental():
-    """With both tones extracted, the second's power joins the first's,
-    and a clean record still reads clean where they overlap."""
+    """With both tones extracted, both are rebuilt and taken away
+    together, and a clean record reads clean where they overlap and
+    across the second tone's ends."""
     check, *_rest = _checked(second_tone=True)
     assert check.judged.all()
     overlap = (check.seconds > 1.6) & (check.seconds < 2.9)
     assert overlap.any()
+    # the RMS of the two together over a short span, which beats about
+    # their root-sum-square
     assert check.fundamental[0][overlap] == pytest.approx(
-        np.sqrt(AMPLITUDE ** 2 + 1.0) / np.sqrt(2.0), rel=4e-3)
-    # the beat between the tones over a short span and the second
-    # tone's own scatter, a few percent; counted by the line's center
-    # alone, the spans across the second tone's ends read 29 %
-    assert np.median(check.distortion[0][overlap]) < 0.04
-    assert check.distortion.max() < 0.15
+        np.sqrt(AMPLITUDE ** 2 + 1.0) / np.sqrt(2.0), rel=1e-2)
+    # read as two RMS readings, the beat and the second tone's scatter
+    # read a few percent, and counted by the line's center alone the
+    # spans across the second tone's ends read 29 %
+    assert np.median(check.distortion[0][overlap]) < 0.002
+    ends = (np.abs(check.seconds - 1.0) < 0.05) | (np.abs(check.seconds
+                                                          - 3.0) < 0.05)
+    assert ends.any()
+    assert check.distortion[0][ends].max() < 0.05
+    assert check.distortion.max() < 0.05
     assert check.passed
 
 
@@ -261,12 +268,24 @@ def test_a_wider_span_reads_the_same_steady_harmonic():
     assert wide.distortion[0][_inside(wide)] == pytest.approx(0.2, abs=4e-3)
 
 
-def test_a_sweep_past_the_reconstructed_band_says_so():
+def test_a_sweep_whose_third_harmonic_passes_nyquist_says_so():
     check, *_rest = _checked(top=800.0, seconds=9.0)
-    reach = 0.8 * FS / 2.0 / 3.0
-    note = (f'above {reach:.4g} Hz the third harmonic is past 80 % of the '
-            'Nyquist frequency, where the unfiltered RMS under-reads it')
+    reach = FS / 2.0 / 3.0
+    note = (f'above {reach:.4g} Hz the third harmonic is past the Nyquist '
+            'frequency, so the record cannot hold it and the check cannot '
+            'see it')
     assert check.notes == (note,)
+
+
+def test_a_harmonic_up_near_nyquist_reads_in_full():
+    # a 20 % third harmonic of a tone at 600 to 650 Hz is at 1800 to
+    # 1950 Hz, 0.88 to 0.95 of the Nyquist frequency: counted on the
+    # samples it reads in full, where the band-limited reading this
+    # replaced under-read it past 0.8
+    check, *_rest = _checked(harmonic=0.2, top=680.0, seconds=7.0)
+    near = (check.frequency > 600.0) & (check.frequency < 650.0)
+    assert near.sum() > 5
+    assert check.distortion[0][near] == pytest.approx(0.2, abs=0.01)
 
 
 def test_what_cannot_be_checked_is_refused():
@@ -286,6 +305,169 @@ def test_what_cannot_be_checked_is_refused():
         check_distortion(history, spec, levels, cycles=5000.0)
     with pytest.raises(ValueError, match='no tone; extract them first'):
         check_distortion(history, spec, SineLevelSet([], cycles=10.0))
+
+
+# ---- the residual read directly (Brandon, 2026-10-23) ----------------------
+
+
+def _record(x):
+    return TimeHistory(np.arange(len(x)) / FS, x[None, :],
+                       response_dof=[CONTROL], ordinate_dim=['acceleration'],
+                       ordinate_unit=['m/s**2'])
+
+
+def test_two_clean_tones_crossing_read_clean_where_they_cross():
+    """Two tones sweeping through each other are not orthogonal where
+    they cross: the root-sum-square of the two levels read against the
+    unfiltered RMS put D near 100 % there. Rebuilt together and taken
+    away together, they leave nothing."""
+    up = SineTone('Up', 0.5, [100.0, 500.0], [[2.0]] * 2, [0], [100.0])
+    down = SineTone('Down', 0.5, [500.0, 100.0], [[1.5]] * 2, [0], [-100.0])
+    spec = SineSweepSpecification([up, down], [CONTROL],
+                                  ordinate_unit='m/s**2')
+    n = int(5.0 * FS)
+    x = np.zeros(n)
+    start = int(0.5 * FS)
+    for tone, amplitude in ((up, 2.0), (down, 1.5)):
+        argument = tone.argument(1.0 / FS)
+        m = min(len(argument), n - start)
+        x[start:start + m] += amplitude * np.cos(argument[:m])
+    history = _record(x)
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    for name in ('Up', 'Down'):
+        check = check_distortion(history, spec, levels, tone=name)
+        crossing = np.abs(check.frequency - 300.0) < 20.0
+        assert crossing.sum() > 5
+        assert check.distortion[0][crossing].max() < 0.01
+        assert check.distortion.max() < 0.02
+        assert check.passed
+
+
+def _resonance(q, rate, low=200.0, high=400.0, fn=300.0):
+    """A clean linear sweep through a base-driven resonance at `fn` and
+    quality factor `q`: the control channel is the response, whose level
+    climbs and falls through the sweep."""
+    from scipy.signal import bilinear, lfilter
+
+    up = SineTone('Up', 0.5, [low, high], [[2.0]] * 2, [0], [rate])
+    spec = SineSweepSpecification([up], [CONTROL], ordinate_unit='m/s**2')
+    n = int((1.0 + (high - low) / rate) * FS)
+    drive = np.zeros(n)
+    start = int(0.5 * FS)
+    argument = up.argument(1.0 / FS)
+    m = min(len(argument), n - start)
+    drive[start:start + m] = np.cos(argument[:m])
+    wn, zeta = 2.0 * np.pi * fn, 1.0 / (2.0 * q)
+    b, a = bilinear([2.0 * zeta * wn, wn ** 2],
+                    [1.0, 2.0 * zeta * wn, wn ** 2], FS)
+    return _record(lfilter(b, a, drive)), spec
+
+
+def test_a_clean_sweep_through_a_resonance_reads_clean():
+    """A Q of 50 swept at 20 Hz/s: the level climbs twentyfold through
+    the resonance. Read as the level at an instant against the RMS over
+    a span, the two disagreed wherever the level moved inside the span
+    and D read 8.0 % at the peak; the residual over the same span as
+    the rebuilt tone reads under 1 %."""
+    history, spec = _resonance(50.0, 20.0)
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    check = check_distortion(history, spec, levels)
+    peak = np.abs(check.frequency - 300.0) < 15.0
+    assert peak.sum() > 10
+    level = np.abs(np.asarray(levels.levels[0].ordinate))[0]
+    assert level.max() / level.min() > 10.0, 'the level moves a lot'
+    assert check.distortion[0][peak].max() < 0.01
+    # away from the ends, where the drive starting and stopping at full
+    # level rings the resonance at its own frequency, which is not the
+    # tone and is counted
+    middle = (check.frequency > 220.0) & (check.frequency < 380.0)
+    assert check.distortion[0][middle].max() < 0.01
+
+
+def test_a_drifted_sweep_clock_is_rebuilt_on_its_tone():
+    """A record swept at 106 Hz/s against a specification of 100: the
+    extraction corrects the clock (drift_hz), and so must the rebuild,
+    or the tone is rebuilt off itself and read as distortion (91 % at
+    the median uncorrected)."""
+    spec_tone = SineTone('Up', 0.5, [100.0, 500.0], [[2.0]] * 2, [0],
+                         [100.0])
+    run = SineTone('Up', 0.5, [100.0, 524.0], [[2.0]] * 2, [0], [106.0])
+    spec = SineSweepSpecification([spec_tone], [CONTROL],
+                                  ordinate_unit='m/s**2')
+    n = int(5.5 * FS)
+    x = np.zeros(n)
+    start = int(0.5 * FS)
+    argument = run.argument(1.0 / FS)
+    m = min(len(argument), n - start)
+    x[start:start + m] = AMPLITUDE * np.cos(argument[:m])
+    history = _record(x)
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    assert abs(levels.levels[0].drift_hz) > 10.0
+    check = check_distortion(history, spec, levels)
+    assert check.distortion[0][_inside(check)].max() < 0.01
+    assert check.passed
+
+
+def test_a_dead_channel_is_not_judged_and_does_not_pass():
+    history, spec = _sweep()
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    dead = _record(np.zeros(history.ordinate.shape[1]))
+    check = check_distortion(dead, spec, levels)
+    assert not check.judged.any()
+    assert not check.passed, 'nothing judged is not a pass'
+    assert check.describe() == 'Up: no line could be judged'
+    assert any('no tone on the channel to judge against' in note
+               for note in check.notes)
+
+
+def test_a_sample_that_is_not_a_number_leaves_the_channel_unjudged():
+    history, spec = _sweep(harmonic=0.5)
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    x = np.array(history.ordinate[0], copy=True)
+    x[int(2.0 * FS)] = np.nan
+    check = check_distortion(_record(x), spec, levels)
+    assert not check.judged.any()
+    assert not check.passed
+    assert check.notes[0] == (f'{CONTROL}: 1 sample over the tone\'s '
+                              'stretch is not a finite number, so no '
+                              'line is judged')
+
+
+def test_a_channel_is_found_by_its_quantity_as_well_as_its_dof():
+    """Levels read from the accelerometer at 101Z+ are checked against
+    it, not against a force gauge at the same DOF listed first."""
+    history, spec = _sweep()
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    gauge = np.random.default_rng(9).standard_normal(
+        history.ordinate.shape[1])
+    both = TimeHistory(history.abscissa,
+                       np.vstack([gauge, history.ordinate[0]]),
+                       response_dof=[CONTROL, CONTROL],
+                       ordinate_dim=['force', 'acceleration'],
+                       ordinate_unit=['N', 'm/s**2'])
+    check = check_distortion(both, spec, levels)
+    assert check.dimensions == ['acceleration']
+    assert check.passed and check.distortion.max() < 0.02
+    only = TimeHistory(history.abscissa, gauge[None, :],
+                       response_dof=[CONTROL], ordinate_dim=['force'],
+                       ordinate_unit=['N'])
+    with pytest.raises(ValueError, match='read in acceleration'):
+        check_distortion(only, spec, levels)
+
+
+def test_levels_read_from_another_record_are_refused():
+    """Levels whose lines fall outside the tone's stretch of the record
+    are not of it: a record cut short since they were extracted."""
+    history, spec = _sweep()
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    keep = int(3.0 * FS)
+    shorter = TimeHistory(history.abscissa[:keep],
+                          history.ordinate[:, :keep],
+                          response_dof=[CONTROL],
+                          ordinate_dim=['acceleration'],
+                          ordinate_unit=['m/s**2'])
+    with pytest.raises(ValueError, match='Extract them again'):
+        check_distortion(shorter, spec, levels)
 
 
 # ---- the plot -----------------------------------------------------------------
@@ -389,3 +571,23 @@ def test_a_tolerance_edit_reads_again_without_reading_the_record(window,
     assert panel.derived['verdict'].text() == 'within the limit'
     assert panel.derived['limit'].text() == '56.8 % (-4.9 dB)'
     assert 'excess=0.15,' in window.project.journal[-1]
+
+
+def test_stale_levels_are_said_to_be_stale_and_not_checked(window, pump):
+    from visualdynamics.core.sine import SineExtraction
+
+    panel = _shown(window, pump, *_sweep(harmonic=0.5, band=(250.0, 350.0)))
+    assert panel.check is not None
+    # the smoothing moved since the levels were read: the project marks
+    # them stale, and the readout checks nothing against them
+    window.project['Record'].sine_extraction = SineExtraction(cycles=20.0)
+    window._refresh_stale_badges()
+    window.render_current()
+    pump()
+    assert panel.isVisible()
+    assert panel.check is None
+    assert 'These levels are stale' in panel.notes.text()
+    assert panel.derived['verdict'].text() == '—'
+    panel.excess_box.setValue(15.0)
+    pump()
+    assert panel.check is None, 'an edit does not check stale levels'
