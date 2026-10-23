@@ -1665,7 +1665,10 @@ class Project(dict):
         needs one (`Psd.read_tone`): the window sets how far the tone leaks
         and how tall its spike stands. The provenance holds the
         averaging as it was when the spectrum was computed, which is the
-        one that made it even if the record's own has moved since.
+        one that made it even if the record's own has moved since. An
+        FRF and a coherence are read the same way: the transmissibility
+        behind an FRF (`read_transmissibility`) is read from the frames
+        the FRF was.
 
         Parameters
         ----------
@@ -1681,7 +1684,8 @@ class Project(dict):
         record = self.provenance.get(self.name_of(name), {})
         state = record.get('state')
         if (record.get('verb') not in ('compute_psds', 'compute_cpsds',
-                                       'compute_spectra')
+                                       'compute_spectra', 'compute_frfs',
+                                       'compute_multiple_coherence')
                 or not state or state[0] not in ('averaging',
                                                  'averaging+roles')):
             return None
@@ -1769,6 +1773,75 @@ class Project(dict):
         return self._derive(source, history.compute_frfs(method=method),
                             f'{source} {method} FRFs',
                             recipe=('compute_frfs', {'method': method}))
+
+    def read_transmissibility(self, name: Any, record: int = 0) -> Any:
+        """The ASD-ratio transmissibility behind one record of an FRF,
+        beside its H1, with H1's coherence and random error.
+
+        The FRF must have been computed in this project from a time
+        history (Compute FRFs), against one reference. The reading is
+        made from that history, for the record's response and reference,
+        with the averaging the FRF was computed with (`averaging_of`),
+        so it is of the frames the FRF was. Its H1 is the H1 of that
+        pair whichever estimator the FRF used; the ratio, the coherence
+        and the error are what `TimeHistory.read_transmissibility` says.
+
+        Parameters
+        ----------
+        name : str or object
+            The FRF, by name or as the object itself.
+        record : int, default 0
+            Which record of the FRF.
+
+        Returns
+        -------
+        TransmissibilityReading
+            H1, the ASD ratio and the coherence at every line, in SI,
+            with the frames and the averages.
+
+        Raises
+        ------
+        ValueError
+            If the object is not an FRF computed from a time history in
+            this project, or it was computed against more than one
+            reference, where a ratio of two autospectra would credit one
+            input with what several caused.
+        """
+        from .core.data import channel_quantities
+
+        name = self.name_of(name)
+        frf = self[name]
+        provenance = self.provenance.get(name, {})
+        source = self.get(provenance.get('source'))
+        if (not isinstance(frf, Frf)
+                or provenance.get('verb') != 'compute_frfs'
+                or not isinstance(source, TimeHistory)):
+            raise ValueError(
+                f'{name!r} is not an FRF computed from a time history in '
+                'this project, so there are no autospectra behind it to '
+                'divide')
+        references = sorted({str(dof) for dof in frf.reference_dof})
+        if len(references) != 1:
+            raise ValueError(
+                f'{name!r} was computed against {len(references)} '
+                'references; the ASD ratio is one response over one '
+                'input, and with several it would credit one with what '
+                'all of them caused')
+        record = int(record)
+        response = str(frf.response_dof[record])
+        reference = str(frf.reference_dof[record])
+        dimension = str(frf.ordinate_dim[record])
+        if '/' in dimension:
+            # (DOF, quantity) pairs, so a drive point's accelerometer and
+            # its force gauge are not taken one for the other
+            out, into = channel_quantities(dimension)
+            response_channel: Any = (response, out)
+            reference_channel: Any = (reference, into)
+        else:
+            response_channel, reference_channel = response, reference
+        return source.read_transmissibility(
+            response_channel, reference_channel,
+            averaging=self.averaging_of(name))
 
     def compute_multiple_coherence(self, source: Any) -> str:
         """Compute the multiple coherence from a time history (Compute

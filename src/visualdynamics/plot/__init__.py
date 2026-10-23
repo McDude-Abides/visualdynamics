@@ -3090,6 +3090,60 @@ def plot_tone_readout(data: Any, tones: float | Sequence[float],
                         size=size)
 
 
+def plot_transmissibility(reading: Any, *, spread: float = 1.0,
+                          band: tuple[float, float] | None = None,
+                          unit_system: UnitSystem | None = None,
+                          theme: Any = None,
+                          path: str | os.PathLike | None = None,
+                          show: bool = True, title: str | None = None,
+                          size: tuple[int, int] = (1000, 760)) -> Any:
+    """Draw the two transmissibilities of a reading together, with the
+    band H1's random error puts about it and the coherence beneath.
+
+        reading = history.read_transmissibility('101Z+', '1Z+')
+        visualdynamics.plot.plot_transmissibility(reading, path='t.png')
+
+    Drawn by `plot.transmissibility.build_transmissibility`: above, on
+    log axes, H1 solid, the ASD ratio dashed and the band dotted with a
+    faint fill, each named in the legend, so the reader sees where the
+    two agree and where the ratio lifts away; beneath, the coherence the
+    band was read from. The window's FRF view draws the same reading
+    over an FRF with its Transmissibility toggle.
+
+    Parameters
+    ----------
+    reading : TransmissibilityReading
+        From `TimeHistory.read_transmissibility`,
+        `Project.read_transmissibility` or
+        `core.transmissibility.read_transmissibility`.
+    spread : float, default 1.0
+        How many random errors of H1 the band reaches either side.
+    band : tuple of float, optional
+        The (low, high) frequencies the view shows, in Hz; the whole
+        reading when omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .transmissibility import build_transmissibility
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_transmissibility(widget, reading, spread=spread,
+                                      band=band, unit_system=unit_system,
+                                      theme=theme)
+
+    pair = (f'{reading.response} over {reading.reference}: '
+            if reading.response or reading.reference else '')
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{pair}H1 and the ASD ratio',
+                        size=size)
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:

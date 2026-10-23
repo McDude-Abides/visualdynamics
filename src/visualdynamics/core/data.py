@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from .half_power import HalfPower
     from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
+    from .transmissibility import TransmissibilityReading
 
 from ..units import (
     SI,
@@ -2770,6 +2771,91 @@ class TimeHistory(DataArray):
             response_dof=[keys[i][0] for i in responses],
             comment=f'multiple coherence against {len(drives)} references, '
                     f'{averages} averages')
+
+    def read_transmissibility(self, response: Any,
+                              reference: Any = None,
+                              averaging: Averaging | None = None
+                              ) -> TransmissibilityReading:
+        """The ASD-ratio transmissibility of one response over one
+        reference, beside H1, with H1's coherence and random error.
+
+        The ratio is the root of the response's autospectrum over the
+        reference's; H1 is their cross-spectrum over the reference's
+        autospectrum. The ratio counts whatever is on the response that
+        the reference did not cause as response, so it reads over |H1|
+        by one over the root of the coherence, at every line; the error
+        of |H1| follows from the coherence and the averages
+        (`core.transmissibility` sets out both). The three spectra come
+        from the frames `compute_psds` averages and `compute_frfs`
+        estimates from, so this H1 is `compute_frfs(method='H1')`'s for
+        the pair and this coherence the ordinary one
+        `compute_multiple_coherence` gives against the one reference.
+
+        The error is read at the averages the frames are worth, the
+        equivalent count discounted for overlap that the PSD's
+        confidence band uses (`Averaging.statistical_dof`, half its
+        equivalent degrees of freedom), not the frames cut; the reading
+        carries both.
+
+        Parameters
+        ----------
+        response : str or (str, str)
+            The response channel, by DOF or as a (DOF, quantity) pair.
+        reference : str or (str, str), optional
+            The input channel, the same way (a DOF alone picks the
+            excitation channel there, as `reference_channels` does).
+            When omitted, the one channel whose role is 'reference'.
+        averaging : Averaging, optional
+            How to cut the record into frames. Defaults to the record's
+            own `averaging`, or one frame per record.
+
+        Returns
+        -------
+        TransmissibilityReading
+            H1, the ASD ratio and the coherence at every line, in SI as
+            the record is stored, with the frames and the averages.
+
+        Raises
+        ------
+        ValueError
+            If there is not exactly one reference, the response is not
+            a response channel of this history, or there are fewer than
+            two averages.
+        """
+        from .transmissibility import read_transmissibility
+
+        named = None if reference is None else [reference]
+        drives = self.reference_channels(named)
+        if len(drives) != 1:
+            wanted = ('no channel matches the reference given'
+                      if reference is not None and not drives else
+                      f'{len(drives)} channels have the role reference')
+            raise ValueError(
+                'a transmissibility is one response over one reference; '
+                f'{wanted}. Name the reference.')
+        frequencies, keys, drive, responses, cross, frames =             self._cross_spectral_frame('a transmissibility', drives,
+                                       averaging)
+        if isinstance(response, str):
+            found = [i for i in responses if keys[i][0] == response]
+        else:
+            dof, quantity = response
+            found = [i for i in responses
+                     if keys[i][:2] == (str(dof), str(quantity))]
+        if not found:
+            raise ValueError(
+                f'{response!r} is not a response of this history against '
+                f'{drives[0][0]}: the responses are '
+                + ', '.join(sorted({keys[i][0] for i in responses})))
+        x, y = drive[0], found[0]
+        used = self._resolved_averaging(averaging)
+        # the frames of every record were pooled, each record cut the
+        # same way, so the count is the averaging's times the records
+        worth = used.statistical_dof(records=max(frames // used.frames, 1))
+        return read_transmissibility(
+            frequencies, np.real(cross(x, x)), np.real(cross(y, y)),
+            cross(x, y), frames, worth.equivalent / 2.0,
+            response=keys[y][0], reference=keys[x][0],
+            dimension=self._ratio(keys[y][1], keys[x][1]))
 
     def to_sep005(self, name: str | None = None) -> list[dict[str, Any]]:
         """This record as SEP 005 timeseries, the sdypy interchange format

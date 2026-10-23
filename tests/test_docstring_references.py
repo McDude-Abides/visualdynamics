@@ -61,6 +61,8 @@ THEORY = {
                    'force it needs of a shaker',
     'core.dwell': 'the build-up and free decay of a resonator under a '
                   'held tone',
+    'core.transmissibility': 'the H1 estimate, the coherence and the '
+                             'random error of a gain factor',
 }
 
 #: and methods, where the theory lives on the call rather than the module
