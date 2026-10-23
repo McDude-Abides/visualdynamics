@@ -321,8 +321,7 @@ def test_what_cannot_be_checked_is_refused(hann, record):
         psd.rms_check(record, averaging=long)
     with pytest.raises(ValueError, match='zero or more'):
         rms_check(f, np.ones(64), np.ones(8), threshold_db=-0.1)
-    with pytest.raises(ValueError, match='not a finite'):
-        time_rms(np.array([1.0, np.nan]))
+    assert np.isnan(time_rms(np.array([np.nan, np.inf]))),         'no finite sample, no rms'
     with pytest.raises(ValueError, match='two lines'):
         rms_check([1.0], [1.0], np.ones(8))
 
@@ -480,3 +479,142 @@ def test_the_result_is_a_plain_record_of_numbers(hann, record):
     assert isinstance(check, RmsCheck)
     with pytest.raises(AttributeError):
         check.time_rms = 1.0
+
+
+# ---- review, 2026-10-23 ---------------------------------------------------
+
+def _undeclared_pair(seconds=4.0):
+    """Two channels at 1Z+ with no declared units, told apart only by
+    their hints: an acceleration of 2 (raw) rms and a force a million
+    times smaller."""
+    accel = _record(seconds=seconds, seed=7).ordinate[0] / G
+    force = 1e-6 * _record(seconds=seconds, seed=8).ordinate[0] / G
+    t = np.arange(accel.size) / FS
+    return TimeHistory(t, np.vstack([accel, force]),
+                       response_dof=['1Z+', '1Z+'],
+                       dimension_hint=['acceleration', 'force'])
+
+
+def test_two_undeclared_channels_at_one_dof_are_not_pooled():
+    """The hint is part of what makes a channel (`channel_key`): an
+    acceleration and a force at 1Z+, neither declared, are two channels,
+    and a correct acceleration spectrum is not said to be doubled."""
+    history = _undeclared_pair()
+    averaging = _frames(history, window='boxcar', overlap=0.0)
+    psd = history.compute_psds(averaging)
+    assert psd.num_records == 2
+    for record in (0, 1):
+        check = psd.rms_check(history, record, averaging=averaging)
+        assert check.gap_db == pytest.approx(0.0, abs=1e-9)
+        assert check.passed and check.cause is None
+        assert check.samples == history.abscissa.size
+        assert not any('captures' in note for note in check.notes)
+    assert matching_records(history, '1Z+', psd.ordinate_dim[0],
+                            psd.dimension_hint[0]) == [0]
+    assert matching_records(history, '1Z+', psd.ordinate_dim[1],
+                            psd.dimension_hint[1]) == [1]
+
+
+def test_an_unhinted_spectrum_against_two_channels_is_ambiguous():
+    history = _undeclared_pair()
+    psd = history.compute_psds(_frames(history, window='boxcar',
+                                       overlap=0.0))
+    bare = Psd(psd.abscissa, psd.ordinate[:1], response_dof=['1Z+'])
+    assert matching_records(history, '1Z+', bare.ordinate_dim[0]) == []
+    with pytest.raises(ValueError, match=r'two channels at 1Z\+'):
+        bare.rms_check(history)
+
+
+def test_a_band_limited_spectrum_is_not_read_as_a_scaling_error(hann,
+                                                                 record):
+    """A controller's spectrum on 10 to 1000 Hz of a record sampled at
+    2048: the record's power outside those lines is not in the area, so
+    a gap is not a scaling error and none is named."""
+    psd, averaging = hann
+    keep = (psd.abscissa >= 10.0) & (psd.abscissa <= 1000.0)
+    limited = Psd(psd.abscissa[keep], psd.ordinate[:, keep],
+                  response_dof=['1Z+'],
+                  ordinate_dim=['acceleration**2/frequency'])
+    check = limited.rms_check(record, averaging=averaging)
+    assert check.coverage is not None
+    assert '10 to 1000 Hz' in check.coverage
+    assert check.cause is None and not check.explained
+    # the record is 20 to 800 Hz, so this one agrees, but it says why
+    assert check.passed
+    assert any('outside' in note for note in check.notes)
+    # cut inside the record's band, it reads low and says why
+    narrow = (psd.abscissa >= 100.0) & (psd.abscissa <= 400.0)
+    cut = Psd(psd.abscissa[narrow], psd.ordinate[:, narrow],
+              response_dof=['1Z+'],
+              ordinate_dim=['acceleration**2/frequency'])
+    check = cut.rms_check(record, averaging=averaging)
+    assert not check.passed and check.cause is None
+    assert 'not a test of its scaling' in check.verdict
+    # the full spectrum covers 0 to half the rate
+    assert psd.rms_check(record, averaging=averaging).coverage is None
+    # half the power cut away reads -3.01 dB, which is not a two-sided
+    # density when the lines cover part of the band
+    halved = replace_check(check, spectrum_rms=check.time_rms / np.sqrt(2.0))
+    assert halved.gap_db == pytest.approx(-3.0103, abs=1e-4)
+    assert halved.cause is None
+    assert replace_check(halved, coverage=None).cause is not None
+
+
+def test_lines_left_out_of_the_area_are_said(hann, record):
+    psd, averaging = hann
+    holed = copy.deepcopy(psd)
+    holed.ordinate = psd.ordinate.copy()
+    holed.ordinate[0, 100] = np.nan
+    holed.ordinate[0, 101] = -1.0
+    check = holed.rms_check(record, averaging=averaging)
+    assert any('2 lines' in note and 'left out' in note
+               for note in check.notes)
+
+
+def test_samples_not_finite_are_left_out_and_counted():
+    """The rule `time_statistics` reads a record by: a sample that is not
+    finite is left out and counted, not a refusal of the whole record."""
+    from visualdynamics.core.time_statistics import time_statistics
+
+    x = np.array([1.0, np.nan, -1.0, 1.0, np.inf])
+    assert time_rms(x) == pytest.approx(1.0)
+    stats = time_statistics(x, np.arange(x.size) / 4.0) \
+        if 'time' in time_statistics.__code__.co_varnames else None
+    if stats is not None:
+        assert stats.rms == pytest.approx(time_rms(x))
+    check = rms_check(np.arange(0.0, 11.0), np.ones(11), x)
+    assert any('2 samples' in note and 'not finite' in note
+               for note in check.notes)
+
+
+def test_the_window_s_gap_does_not_promise_a_longer_record_helps(hann,
+                                                                 record):
+    psd, averaging = hann
+    check = replace_check(psd.rms_check(record, averaging=averaging),
+                          threshold_db=0.0)
+    assert check.explained
+    assert 'longer record' not in check.verdict
+
+
+def replace_check(check, **changes):
+    from dataclasses import replace
+    return replace(check, **changes)
+
+
+@pytest.mark.parametrize('off, named', [(0.09, True), (0.11, False),
+                                        (0.5, False), (-0.09, True)])
+def test_a_cause_is_named_only_within_a_tenth_of_it(hann, record, off,
+                                                    named):
+    psd, averaging = hann
+    factor = 10.0 ** ((10.0 * np.log10(2.0) + off) / 10.0)
+    check = psd.rms_check(record, averaging=averaging)
+    doubled = replace_check(check, spectrum_rms=check.time_rms
+                            * np.sqrt(factor), framed_rms=None)
+    assert (doubled.cause is not None) is named
+
+
+def test_a_negative_record_is_refused(hann, record):
+    psd, averaging = hann
+    with pytest.raises(ValueError, match='record -1'):
+        psd.rms_check(record, -1, averaging=averaging)
+    assert 'record 5' in refusal(psd, 5)

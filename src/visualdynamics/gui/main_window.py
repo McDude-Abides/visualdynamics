@@ -12573,10 +12573,11 @@ class MainWindow(QMainWindow):
             return None
         dof = str(data.response_dof[record])
         dimension = str(data.ordinate_dim[record])
+        hint = data.dimension_hint[record]
         source = self.project.rms_source(name)
         histories = [key for key, value in self.project.items()
                      if isinstance(value, TimeHistory)
-                     and matching_records(value, dof, dimension)]
+                     and matching_records(value, dof, dimension, hint)]
         if source in histories:
             histories.remove(source)
             histories.insert(0, source)

@@ -42,7 +42,10 @@ correctly scaled spectrum computed with that averaging carries exactly
 that, to rounding, whatever the window. When the gap to the record is
 over the threshold and the gap to the frames is not, the window is the
 whole of the gap: the check still flags it, and says the scaling is
-right and that a longer record or more overlap narrows it.
+right and the window weighted the samples unequally. On a stationary
+random record more overlap evens that out; on a transient the gap is
+where the event fell in the frames, and a longer record need not
+narrow it.
 
 ## From a script
 
@@ -89,13 +92,29 @@ The result is an `RmsCheck`:
 - `passed`, `explained` (a flagged gap that is the window's alone),
   `cause` (the scaling error a gap matches, in words) and `verdict`;
 - the lines summed and their spacing, the samples read, the span on the
-  record's clock, the window and its noise bandwidth, and notes.
+  record's clock, the window and its noise bandwidth, `coverage` (the
+  part of the record's band the lines cover, when it is not all of it),
+  and notes.
 
-The record's rms is read over the span the frames cover, from the
+The frames are the ones `compute_psds` averages, cut, leveled and
+windowed by the same code, and the channel is the one it groups them
+by: the DOF, the quantity and, for a record with no declared units,
+its hint, so an acceleration and a force at one DOF are never pooled.
+A spectrum with no declared units and no hint, against a record with
+two such channels at its DOF, is refused rather than guessed at. The
+record's rms is read over the span the frames cover, from the
 averaging's start to the end of its last frame, with every capture of
 the channel pooled as the average pools them. Frames leveled before
 their window (the averaging's detrend) have the span leveled the same
 way, and the notes say so.
+
+Lines that are not finite or are below zero are left out of the area,
+and samples that are not finite out of the record's rms (the rule the
+time statistics read a record by); the notes count both. A spectrum
+whose lines do not run from 0 to half the sample rate, such as a
+controller's 10 to 1000 Hz, holds only part of the record's power:
+`coverage` says which part, the verdict says the gap is not a test of
+the scaling, and no cause is named.
 
 `plot_rms_check` draws the spectrum with the check written in its
 corner: the judgement in bold ("agree", "the window's gap" or

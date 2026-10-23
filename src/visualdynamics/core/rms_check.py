@@ -147,8 +147,15 @@ class RmsCheck:
     #: when the check was read off a record
     span: tuple[float, float] | None = None
     #: what else the reader should know, in words: a detrend, an
-    #: averaging that is not the spectrum's, a capture count
+    #: averaging that is not the spectrum's, a capture count, lines or
+    #: samples left out
     notes: tuple[str, ...] = ()
+    #: when the spectrum's lines do not run from 0 to half the sample
+    #: rate (a controller's 10 to 1000 Hz), which part they cover, in
+    #: words; None when they cover it all or the rate is not known. The
+    #: record's power outside the lines is not in the area, so a gap is
+    #: then not a test of the scaling and no cause is named.
+    coverage: str | None = None
 
     @property
     def gap_db(self) -> float:
@@ -188,6 +195,7 @@ class RmsCheck:
         right and the frames weighted the record unevenly."""
         framed = self.framed_gap_db
         return bool(not self.passed and framed is not None
+                    and self.coverage is None
                     and np.isfinite(framed) and abs(framed) <= FRAMED_DB
                     and np.isfinite(self.gap_db))
 
@@ -203,7 +211,8 @@ class RmsCheck:
         (m/s²)²/Hz or the other way.
         """
         gap = self.gap_db
-        if self.passed or self.explained or not np.isfinite(gap):
+        if (self.passed or self.explained or not np.isfinite(gap)
+                or self.coverage is not None):
             return None
         bandwidth = self.noise_bandwidth
         if bandwidth is not None and bandwidth > 1.0 + 1e-6:
@@ -240,11 +249,20 @@ class RmsCheck:
             return (f'agree within {within}: the spectrum carries the '
                     "record's mean square")
         side = 'high' if gap > 0 else 'low'
+        if self.coverage is not None:
+            return (f'the spectrum reads {abs(gap):.2f} dB {side}, but '
+                    f"{self.coverage}: the record's power outside them is "
+                    'not in its area, so the gap is not a test of its '
+                    'scaling')
         if self.explained:
+            # a window weights each frame's middle over its ends; on a
+            # stationary record more overlap evens that out, but on a
+            # transient the gap is where the event fell in the frames,
+            # and a longer record need not narrow it
             return (f'the spectrum reads {abs(gap):.3f} dB {side}, all of '
                     "it the window's: it carries the frames' mean square "
-                    'exactly, so the scaling is right, and a longer record '
-                    'or more overlap narrows the gap')
+                    'exactly, so the scaling is right, and the window '
+                    "weighted the record's samples unequally")
         cause = self.cause
         if cause is not None:
             return f'the spectrum reads {abs(gap):.2f} dB {side}: {cause}'
@@ -282,6 +300,16 @@ def _pieces(samples: Any) -> list[np.ndarray]:
     return [np.asarray(samples, dtype=float)]
 
 
+def _finite(samples: ArrayLike | Sequence[ArrayLike]
+            ) -> tuple[np.ndarray, int]:
+    """The finite samples of `samples` pooled, and how many were not."""
+    flat = np.concatenate([piece.ravel() for piece in _pieces(samples)])
+    if flat.size == 0:
+        raise ValueError('there are no samples to take an rms of')
+    finite = np.isfinite(flat)
+    return flat[finite], int(flat.size - finite.sum())
+
+
 def time_rms(samples: ArrayLike | Sequence[ArrayLike]) -> float:
     """The rms of a record's samples: the square root of their mean
     square, with nothing removed.
@@ -289,16 +317,14 @@ def time_rms(samples: ArrayLike | Sequence[ArrayLike]) -> float:
     `samples` is one array, or several (the captures of one channel),
     pooled sample for sample, so a long capture weighs more than a
     short one, as it does in the average. A sample that is not a finite
-    number is refused, since the mean square of a record holding one is
-    not a number either.
+    number is left out, the rule `core.time_statistics` reads a record
+    by, so the two give one rms for one record; `rms_check` counts them
+    in its notes. NaN when no sample is finite.
     """
-    flat = np.concatenate([piece.ravel() for piece in _pieces(samples)])
-    if flat.size == 0:
-        raise ValueError('there are no samples to take an rms of')
-    if not np.all(np.isfinite(flat)):
-        raise ValueError('the record holds a sample that is not a finite '
-                         'number; its rms is not a number either')
-    return float(np.sqrt(np.mean(flat ** 2)))
+    finite, _dropped = _finite(samples)
+    if finite.size == 0:
+        return float('nan')
+    return float(np.sqrt(np.mean(finite ** 2)))
 
 
 def rms_check(frequencies: ArrayLike, values: ArrayLike,
@@ -347,8 +373,13 @@ def rms_check(frequencies: ArrayLike, values: ArrayLike,
     ------
     ValueError
         For a negative threshold, a spectrum on uneven lines or with
-        fewer than two, or a record with no samples or one that is not
-        a finite number.
+        fewer than two, or a record with no samples.
+
+    Notes
+    -----
+    Lines that are not finite or are below zero are left out of the
+    area (`compliance.rms`), and samples that are not finite out of the
+    record's rms (`time_rms`); the result's notes count both.
     """
     from .compliance import rms as area_rms
     from .tone_readout import line_spacing, noise_bandwidth
@@ -368,13 +399,24 @@ def rms_check(frequencies: ArrayLike, values: ArrayLike,
         bandwidth = float(noise_bandwidth(window))
     pooled = _pieces(samples)
     count = int(sum(piece.size for piece in pooled))
+    notes = []
+    density = np.asarray(np.real(values), dtype=float)
+    with np.errstate(invalid='ignore'):
+        unused = int(np.sum(~(np.isfinite(density) & (density >= 0.0))))
+    if unused:
+        notes.append(f'{unused} lines of the spectrum are not finite or '
+                     'are below zero, and are left out of its area')
+    _kept, dropped = _finite(pooled)
+    if dropped:
+        notes.append(f'{dropped} samples of the record are not finite, and '
+                     'are left out of its rms')
     return RmsCheck(
         dof=str(dof), spectrum_rms=area_rms(f, values),
         time_rms=time_rms(pooled), framed_rms=(
             None if framed_rms is None else float(framed_rms)),
         threshold_db=float(threshold_db), lines=int(f.size),
         spacing=float(spacing), samples=count, window=name,
-        noise_bandwidth=bandwidth)
+        noise_bandwidth=bandwidth, notes=tuple(notes))
 
 
 def _level(frame: np.ndarray, detrend: str) -> np.ndarray:
@@ -383,34 +425,86 @@ def _level(frame: np.ndarray, detrend: str) -> np.ndarray:
     if detrend == 'mean':
         return frame - frame.mean()
     if detrend == 'linear':
-        n = np.arange(len(frame), dtype=float)
-        slope, intercept = np.polyfit(n, frame, 1)
-        return frame - (slope * n + intercept)
+        from scipy.signal import detrend as _detrend
+
+        return _detrend(frame, type='linear')
     return frame
 
 
-def matching_records(history: TimeHistory, dof: str,
-                     dimension: str) -> list[int]:
-    """The records of `history` that are the channel a spectrum's record
-    is the autospectrum of: the same DOF, measuring the quantity whose
-    square per hertz `dimension` is ('acceleration' for
-    'acceleration**2/frequency'). A channel whose units are not declared
-    matches a spectrum whose units are not declared, by its DOF alone.
-    Every capture of the channel is returned, in order.
+#: counts in words, for a refusal that names how many channels matched
+_COUNTS = ('no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+           'eight', 'nine')
+
+
+def _channel(history: TimeHistory, dof: str, dimension: str,
+             hint: str | None = None) -> tuple[Any, list[int]]:
+    """(channel key, records) of the one channel of `history` that a
+    spectrum's record at `dof`, of `dimension` and `hint`, is the
+    autospectrum of; ValueError naming why when there is none or more
+    than one.
+
+    A channel is `TimeHistory.channel_key`, the DOF, the dimension and
+    the hint together, the key the PSD itself was averaged by. A
+    declared spectrum matches the channel measuring the quantity whose
+    square per hertz it is. An undeclared one matches an undeclared
+    channel by its hint, so an acceleration and a force at one DOF,
+    neither declared, are two channels, never pooled; with no hint it
+    matches by its DOF alone, and is refused when that names more than
+    one channel.
     """
     from ..units import UNKNOWN
     from .data import channel_quantities
 
-    if dimension == UNKNOWN:
-        wanted = UNKNOWN
+    def quantity(density: str) -> str | None:
+        response, reference = channel_quantities(density)
+        return response if response == reference else None
+
+    keys: dict[Any, list[int]] = {}
+    for i in range(len(history.response_dof)):
+        if str(history.response_dof[i]) == str(dof):
+            keys.setdefault(history.channel_key(i), []).append(i)
+    if dimension != UNKNOWN:
+        wanted = quantity(dimension)
+        found = {key: rows for key, rows in keys.items()
+                 if wanted is not None and key[1] == wanted}
     else:
-        response, reference = channel_quantities(dimension)
-        if response != reference:
-            return []
-        wanted = response
-    return [i for i in range(len(history.response_dof))
-            if str(history.response_dof[i]) == str(dof)
-            and str(history.ordinate_dim[i]) == wanted]
+        undeclared = {key: rows for key, rows in keys.items()
+                      if key[1] == UNKNOWN}
+        if hint is None:
+            found = undeclared
+        else:
+            said = quantity(hint)
+            found = {key: rows for key, rows in undeclared.items()
+                     if said is not None and key[2] == said}
+    if not found:
+        raise ValueError(f'the time history holds no {dof} channel '
+                         f'measuring what {dimension} is the density of')
+    if len(found) > 1:
+        count = len(found)
+        said = ', '.join(str(key[2] or 'no hint') for key in found)
+        raise ValueError(
+            f'the time history holds '
+            f'{_COUNTS[count] if count < len(_COUNTS) else count} '
+            f'channels at {dof} with no declared units ({said}), and the '
+            'spectrum does not say which it is the density of')
+    key, rows = next(iter(found.items()))
+    return key, rows
+
+
+def matching_records(history: TimeHistory, dof: str, dimension: str,
+                     hint: str | None = None) -> list[int]:
+    """The records of `history` that are the channel a spectrum's record
+    is the autospectrum of (`TimeHistory.channel_key`): the same DOF,
+    measuring the quantity whose square per hertz `dimension` is
+    ('acceleration' for 'acceleration**2/frequency'), and for a spectrum
+    whose units are not declared, the channel its `hint` names. Every
+    capture of the channel is returned, in order; none when there is no
+    such channel or more than one could be meant.
+    """
+    try:
+        return _channel(history, dof, dimension, hint)[1]
+    except ValueError:
+        return []
 
 
 def refusal(spectrum: Psd, record: int = 0) -> str | None:
@@ -422,6 +516,11 @@ def refusal(spectrum: Psd, record: int = 0) -> str | None:
     from .data import has_phase
     from .tone_readout import line_spacing
 
+    if not 0 <= int(record) < spectrum.num_records:
+        # a negative index would read another record than the one asked
+        # for, from the end, and say it was this one
+        return (f'record {record} is not one of the '
+                f'{spectrum.num_records} records of this spectrum')
     if spectrum.bandwidth is not None or spectrum.interpolation != 'bin':
         return ('the rms check sums the evenly spaced lines of an averaged '
                 'spectrum; this one is banded or written at breakpoints')
@@ -440,22 +539,42 @@ def refusal(spectrum: Psd, record: int = 0) -> str | None:
     return None
 
 
+def _coverage(frequencies: np.ndarray, rate: float) -> str | None:
+    """Which part of 0 to `rate`/2 the lines cover, in words, when they
+    do not cover it all (the top line may sit half a line short, for an
+    odd frame); None when they do."""
+    spacing = float(frequencies[1] - frequencies[0])
+    top = rate / 2.0
+    if (frequencies[0] <= 0.5 * spacing
+            and frequencies[-1] >= top - spacing * (1.0 + 1e-9)):
+        return None
+    return (f'its lines run {frequencies[0]:g} to {frequencies[-1]:g} Hz '
+            f'of the 0 to {top:g} Hz the record holds')
+
+
 def check_record(spectrum: Psd, history: TimeHistory, record: int = 0, *,
                  averaging: Averaging | None = None,
                  threshold_db: float = GAP_DB) -> RmsCheck:
     """The rms check of record `record` of `spectrum` against the channel
     of `history` it is the autospectrum of.
 
-    The record's rms is read over the span the averaging's frames cover,
-    from its start to the end of its last frame, every capture of the
-    channel pooled, as the average pools them. A frame leveled before
-    its window (`Averaging.detrend`) has its mean or line taken out, so
-    the span is leveled the same way before its rms is taken, and the
-    notes say so: leveled frame by frame, the frames shed a little more
-    of the lowest lines than the span does. The frames' own mean square
-    (`RmsCheck.framed_rms`) is worked out when the averaging has the
+    The frames are the ones a PSD of `history` averages
+    (`TimeHistory._spectral_frame`, under the averaging
+    `TimeHistory._resolved_averaging` settles on), so the check cannot
+    cut, level or window them differently, and the channel is the one
+    those frames are grouped by (`TimeHistory.channel_key`), every
+    capture of it pooled as the average pools them. The record's rms is
+    read over the span the frames cover, from its start to the end of
+    its last frame. A frame leveled before its window
+    (`Averaging.detrend`) has its mean or line taken out, so the span is
+    leveled the same way before its rms is taken, and the notes say so:
+    leveled frame by frame, the frames shed a little more of the lowest
+    lines than the span does. The frames' own mean square
+    (`RmsCheck.framed_rms`) is read when the averaging has the
     spectrum's line spacing; an averaging with another is not the one
-    the spectrum was made with, and the notes say that too.
+    the spectrum was made with, and the notes say that too. A spectrum
+    whose lines do not run from 0 to half the sample rate holds only
+    part of the record's power, and says so (`RmsCheck.coverage`).
 
     Parameters
     ----------
@@ -480,64 +599,53 @@ def check_record(spectrum: Psd, history: TimeHistory, record: int = 0, *,
     ------
     ValueError
         When the record cannot be checked (`refusal`), when `history`
-        holds no such channel, or when the frames do not fit in it.
+        holds no such channel or more than one could be meant, or when
+        the frames do not fit in it.
     """
-    from .averaging import Averaging
-
     reason = refusal(spectrum, record)
     if reason is not None:
         raise ValueError(reason)
     dof = str(spectrum.response_dof[record])
-    rows = matching_records(history, dof, str(spectrum.ordinate_dim[record]))
-    if not rows:
-        raise ValueError(f'the time history holds no {dof} channel measuring '
-                         f'what {spectrum.ordinate_dim[record]} is the '
-                         'density of')
+    key, rows = _channel(history, dof, str(spectrum.ordinate_dim[record]),
+                         spectrum.dimension_hint[record])
+    used = history._resolved_averaging(averaging)
+    grid, _scale, groups = history._spectral_frame(used)
     rate = history.sample_rate
-    samples = len(history.abscissa)
-    if averaging is None:
-        averaging = history.averaging
-    if averaging is None:
-        averaging = Averaging.for_records(samples)
-    if not averaging.fits(samples, rate):
-        raise ValueError(
-            f'{averaging.frames} frames of {averaging.frame_length} samples '
-            f'from {averaging.start:g} s do not fit in {samples} samples')
-    first = averaging.start_sample(rate)
-    stop = first + averaging.span
-    n = averaging.frame_length
-    shape = averaging.shape()
-    power = float(np.sum(shape ** 2))
+    first = used.start_sample(rate)
+    stop = first + used.span
+    power = float(np.sum(used.shape() ** 2))
+    frames = np.real(np.asarray(groups[key]))
     notes = []
-    spans, framed = [], []
-    for i in rows:
-        x = np.asarray(np.real(history.ordinate[i]), dtype=float)
-        spans.append(_level(x[first:stop], averaging.detrend))
-        for k in range(averaging.frames):
-            at = first + k * averaging.hop
-            frame = _level(x[at:at + n], averaging.detrend) * shape
-            framed.append(float(np.sum(frame ** 2)) / power)
-    if averaging.detrend != 'none':
-        notes.append(f"the frames were leveled ({averaging.detrend}) before "
+    spans = [_level(np.asarray(np.real(history.ordinate[i]),
+                               dtype=float)[first:stop], used.detrend)
+             for i in rows]
+    if used.detrend != 'none':
+        notes.append(f"the frames were leveled ({used.detrend}) before "
                      "their window, so the record's span is leveled the "
                      'same way before its rms is taken')
     if len(rows) > 1:
         notes.append(f'{len(rows)} captures of the channel, pooled as the '
                      'average pools them')
-    lines = rate / n
-    spacing = float(np.mean(np.diff(np.asarray(spectrum.abscissa,
-                                               dtype=float))))
-    framed_rms: float | None = float(np.sqrt(np.mean(framed)))
+    lines = float(grid[1] - grid[0])
+    f = np.asarray(spectrum.abscissa, dtype=float)
+    spacing = float(np.mean(np.diff(f)))
+    framed_rms: float | None = float(np.sqrt(
+        np.mean(np.sum(frames ** 2, axis=1)) / power))
     if abs(spacing - lines) > 1e-6 * max(spacing, lines):
         framed_rms = None
         notes.append(f"the averaging gives lines {lines:.4g} Hz apart and "
                      f'the spectrum has them {spacing:.4g} Hz apart, so it '
                      "was not averaged this way; the frames' own mean "
                      'square is not read')
-    check = rms_check(spectrum.abscissa, spectrum.ordinate[record], spans,
+    coverage = _coverage(f, rate)
+    if coverage is not None:
+        notes.append(f"{coverage}: the record's power outside them is not "
+                     'in its area')
+    check = rms_check(f, spectrum.ordinate[record], spans,
                       threshold_db=threshold_db, framed_rms=framed_rms,
-                      window=averaging if framed_rms is not None else None,
+                      window=used if framed_rms is not None else None,
                       dof=dof)
     origin = float(history.abscissa[0])
     span = (origin + first / rate, origin + stop / rate)
-    return replace(check, span=span, notes=tuple(notes))
+    return replace(check, span=span, coverage=coverage,
+                   notes=tuple(notes) + check.notes)
