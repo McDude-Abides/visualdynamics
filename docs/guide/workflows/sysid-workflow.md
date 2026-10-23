@@ -80,7 +80,10 @@ all the drives together account for. A dip means the response holds
 something the drives did not put there (a rattle, ambient noise, a
 nonlinearity) at those frequencies, and an FRF line under a coherence
 dip is a line the control law will invert without a good estimate
-behind it.
+behind it. With one drive, the FRF view's **Transmissibility** toggle
+puts the random error the coherence and the averages give around H1,
+and the ASD ratio beside it, which reads high wherever the coherence is
+low ([The two transmissibilities](../transmissibility.md)).
 
 ![Where to click: with Excitation Time History selected (1), press
 Multiple Coherence in the Averaging view (2)](../images/sysid-coherence-click.png)

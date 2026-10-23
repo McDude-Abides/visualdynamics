@@ -821,6 +821,47 @@ def dwell():
           f'{reading.describe()}')
 
 
+def transmissibility():
+    """The two transmissibilities of one survey: 24 s of random from 20
+    to 2000 Hz at 0.04 g²/Hz, through a 300 Hz resonance at Q 20, with
+    0.6 g rms of noise the input did not cause on the response channel,
+    analyzed at 2.5 Hz lines with 119 Hann frames at half overlap. H1
+    and the ASD ratio are one curve where the coherence is high; above
+    about 1 kHz the ratio lifts away, and H1's band widens instead."""
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_transmissibility
+
+    g, fs, seconds = 9.80665, 5120.0, 24.0
+    n = int(fs * seconds)
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    spectrum = np.fft.rfft(np.random.default_rng(1505).standard_normal(n))
+    spectrum[(f < 20.0) | (f > 2000.0)] = 0.0
+    x = np.fft.irfft(spectrum, n)
+    x *= np.sqrt(0.04 * 1980.0) / np.std(x)
+    r, z = f / 300.0, 1.0 / 40.0
+    resonance = (1.0 + 2j * z * r) / (1.0 - r ** 2 + 2j * z * r)
+    y = np.fft.irfft(np.fft.rfft(x) * resonance, n)
+    y += np.random.default_rng(1506).standard_normal(n) * 0.6
+    history = TimeHistory(np.arange(n) / fs, np.vstack([x, y]) * g,
+                          response_dof=['1Z+', '101Z+'],
+                          ordinate_dim=['acceleration'] * 2,
+                          ordinate_unit=['g'] * 2)
+    history.averaging = Averaging(frame_length=2048, overlap=0.5,
+                                  window='hann').filled(n, fs)
+    reading = history.read_transmissibility('101Z+', '1Z+')
+    plot_transmissibility(reading, band=(20.0, 1990.0), show=False,
+                          size=(1000, 760),
+                          path=str(OUT / 'transmissibility.png'))
+    for frequency in (100.0, 300.0, 1000.0, 1500.0):
+        point = reading.at(frequency)
+        r = point.frequency / 300.0
+        truth = abs((1.0 + 2j * z * r) / (1.0 - r ** 2 + 2j * z * r))
+        print(f'{point.describe("g/g")}; truth {truth:.4g}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -839,6 +880,7 @@ def main():
     replication_fit()
     stroke_readout()
     dwell()
+    transmissibility()
     print('done')
 
 

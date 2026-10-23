@@ -65,6 +65,9 @@ that is not an alpha.
   each mode's frequency and amplitude shift, judged against limits
 - [Reading a dwell against time](dwell.md): a held tone's build-up,
   steady level and ring-down, in cycles
+- [The two transmissibilities, and what H1 is
+  worth](transmissibility.md): the ASD ratio beside H1, and the band
+  H1's coherence and averages give
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):
