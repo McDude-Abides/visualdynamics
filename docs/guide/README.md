@@ -69,8 +69,8 @@ that is not an alpha.
   worth](transmissibility.md): the ASD ratio beside H1, and the band
   H1's coherence and averages give
 - [Checking a sine record for distortion](sine-distortion.md): the
-  unfiltered RMS against the tracked tone, along the sweep, against a
-  limit
+  record less the tracked tones against the tones, along the sweep,
+  against a limit
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

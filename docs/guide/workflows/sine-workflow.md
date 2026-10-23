@@ -240,8 +240,8 @@ project.save('sine.vdyn')
 - The extracted level is the tone and nothing else, as the controller's
   is. What the control channel carried besides it (harmonics from a
   rattle or an amplifier at its limit, noise) is read by the distortion
-  check, the unfiltered RMS against the tracked tone at every line,
-  against a limit ([Checking a sine record for
+  check, the record less the tracked tones against the tones at every
+  line, against a limit ([Checking a sine record for
   distortion](../sine-distortion.md)). Once the levels are extracted,
   the sine view's Distortion readout shows it beside the record.
 - Where the levels wobble, look at the wavelet first. A ripple in an

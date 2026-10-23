@@ -188,7 +188,7 @@ target behind them in gray.
   A tracking filter reads one tone at a time and includes whatever its
   band lets through.
 - What the band leaves out is the distortion check's subject: the
-  unfiltered RMS against the tracked tone, along the sweep
+  record less the tracked tones against the tones, along the sweep
   ([Checking a sine record for distortion](sine-distortion.md)).
 - The filter runs forward only. A controller's filter cannot see
   ahead, so this one does not either, and its lag is part of what it
