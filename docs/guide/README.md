@@ -129,6 +129,9 @@ that is not an alpha.
   comparison counts outside each band, beside how many the scatter of
   an average puts there, and lines combined for judging
 - [Reports](reports.md): symbolic bindings, live text, and one file out
+- [A report plot's caption](report-captions.md): the channel, run,
+  resolution, window, DOF and requirement a spectrum's plot carries,
+  read off its record
 
 For signatures, see the API reference in the site navigation. For the
 layers of the package and the conventions behind them, see
