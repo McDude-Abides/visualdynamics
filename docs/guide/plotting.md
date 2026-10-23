@@ -164,6 +164,7 @@ from the settings the object holds, or from the ones its detector
 would suggest. In a script the marks are locked and cannot be dragged.
 The confidence band is the exception: it is not a setting but what the
 PSD's own average is worth, read from the degrees of freedom it carries
+or from `dof=` when it carries none
 ([What an average is worth](averaging-confidence.md)), and it is drawn
 flat only.
 

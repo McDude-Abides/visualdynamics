@@ -6,7 +6,8 @@ freedom. From that number follows a confidence band, the range around
 the averaged spectrum that the true spectrum lies in at a stated
 confidence. Visual Dynamics works out both from the averaging that
 produced the PSD, shows them in the Averaging view while the averaging
-is being set, and can draw the band on the PSD.
+is being set, and shades the band on the PSD with the **Confidence**
+reading.
 
 These degrees of freedom are statistical. They are not the measurement
 DOFs, the node and direction, that a channel is taken at.
@@ -120,13 +121,63 @@ The functions underneath are in `visualdynamics.core.averaging`:
 `chi_square_factors` and `confidence_bands` for the band, on plain
 arrays.
 
+The legend names each band with its confidence and the count it was
+worked out at, such as **90 % confidence, 17.17 DOF**, and each level's
+edges are dashed their own way, so the band is read in words and line
+style rather than by its shade. Records averaged to different counts
+are named by the range they span.
+
+`Psd.confidence_reading` gives the same band as numbers, one per
+record: the confidence, the count, the two factors and the edges in
+decibels, which `describe` puts in words:
+
+```python
+band = psd.confidence_reading(0.95)[0]
+print(band.describe())
+# 95 % band at 17.17 DOF: -2.5 / +3.5 dB
+```
+
+## The Confidence reading
+
+Select an averaged autospectrum and press **Confidence** on the bar,
+beside **Octave Bands** and **Tones**. The band is shaded on the plot,
+and the pane beside it sets and says what the band is:
+
+- **Confidence**: 90 % or 95 %. The choice is kept for every spectrum
+  drawn after it.
+- **DOF**: *as averaged* takes the spectrum's own equivalent count. A
+  number typed here is used instead, for this spectrum: the way to read
+  the band on a spectrum read from a file, at the count the system that
+  averaged it reports.
+- Below the rule: where the count came from (*the averaging*, *typed*
+  or *not known*), the channel the rows read (the first one drawn), the
+  **Equivalent DOF**, the band's edges **Below** and **Above** the
+  estimate in decibels, and the same edges as **Factors**. A note under
+  them says what the confidence means line by line, and says so when
+  the records drawn were averaged to different counts.
+
+The status line gives the band in words. A spectrum that carries no
+count and has none typed draws no band, and the pane asks for one: a
+band is never guessed. A cross-spectrum and a specification are not
+offered the reading. Like every reading, the view is journaled as the
+call that draws it:
+
+```python
+project['Record PSD'].plot(marks='confidence', levels=[0.95],
+                           path='confidence.png', show=False)
+```
+
+with `dof=` added when a count was typed.
+
 ## What has no count, and what the count leaves out
 
 A spectrum read from a file or banded onto octaves carries no count,
 because its count is not the one its source frames had: banding sums
 lines and raises the count. Its band is refused rather than guessed.
-Pass the count yourself (`psd.confidence_band(0.9, dof=...)`) when you
-know it. Spectra merged into one keep their counts, record by record,
+Pass the count yourself when you know it, as
+`psd.confidence_band(0.9, dof=...)` or
+`psd.plot(marks='confidence', dof=...)`, or type it in the Confidence
+reading's pane. Spectra merged into one keep their counts, record by record,
 when every one of them has a count; if any of them lacks one, the
 merged spectrum has none.
 
