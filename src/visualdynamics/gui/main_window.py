@@ -1012,6 +1012,12 @@ class MainWindow(QMainWindow):
             lambda _wanted: self.render_current())
         self.data_pane.confidence_panel.changed.connect(
             self._confidence_chosen)
+        # the rms check: the toggle redraws, and a time history or a
+        # threshold chosen in its pane checks again where it stands
+        self.data_pane.rms_check_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.rms_check_panel.changed.connect(
+            self._rms_check_chosen)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1183,6 +1189,13 @@ class MainWindow(QMainWindow):
         #: by spectrum name, over the one the spectrum carries
         self._confidence_level: float = CONFIDENCE_LEVELS[0]
         self._confidence_dofs: dict[str, float] = {}
+        #: the rms check on the plot (`_draw_rms_check`): the spectrum,
+        #: the record, the label in the plot's corner and the time
+        #: history it is checked against; None while it is not up
+        self._rms_check: dict[str, Any] | None = None
+        #: the time history and threshold chosen in the rms check's
+        #: pane, by spectrum name, so a redraw keeps them
+        self._rms_check_settings: dict[str, dict[str, Any]] = {}
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -9484,6 +9497,7 @@ class MainWindow(QMainWindow):
         self._clear_tone()
         self._clear_transmissibility()
         self._clear_confidence()
+        self._clear_rms_check()
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -12539,6 +12553,134 @@ class MainWindow(QMainWindow):
                 # the plot went with the drawing it belonged to
                 pass
 
+    def _rms_check_source(self, series):
+        """(name, spectrum, record, histories) when the selection is one
+        plain autospectrum the rms check can read
+        (`core.rms_check.refusal`) and the project holds a time history
+        with its channel: the one it was computed from first, then the
+        others in the project's order. None otherwise, which is also
+        what hides the button."""
+        from ..core.rms_check import matching_records, refusal
+
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if (not isinstance(data, Psd) or isinstance(data, Specification)
+                or name not in self.project):
+            return None
+        record = int(records[0]) if records else 0
+        if refusal(data, record) is not None:
+            return None
+        dof = str(data.response_dof[record])
+        dimension = str(data.ordinate_dim[record])
+        source = self.project.rms_source(name)
+        histories = [key for key, value in self.project.items()
+                     if isinstance(value, TimeHistory)
+                     and matching_records(value, dof, dimension)]
+        if source in histories:
+            histories.remove(source)
+            histories.insert(0, source)
+        if not histories:
+            return None
+        return name, data, record, histories
+
+    def _draw_rms_check(self, name, psd, record, histories):
+        """The rms check of the flat spectrum: the judgement and the gap
+        in the plot's corner (`plot.rms_check.RmsCheckLabel`), the whole
+        check in the pane. One record is checked, the first on the plot:
+        pick a sub-item in the tree to check another. Returns the status
+        line, or None to keep the plot's."""
+        from ..core.rms_check import GAP_DB
+        from ..plot.rms_check import RmsCheckLabel
+        from ..plot.tone_readout import display_units
+
+        plot = next((item for item in self.data_pane.graphics.ci.items
+                     if hasattr(item, 'addItem')), None)
+        if plot is None:
+            return None
+        settings = self._rms_check_settings.get(name, {})
+        history = settings.get('history')
+        if history not in histories:
+            history = histories[0]
+        threshold = float(settings.get('threshold_db', GAP_DB))
+        source = self.project.rms_source(name)
+        panel = self.data_pane.rms_check_panel
+        panel.set_choices(histories, history, source, threshold)
+        scale, _dense, unit = display_units(psd, record, self.unit_system)
+        color = resolve_theme(self.theme_name)['plot_foreground']
+        self._rms_check = {
+            'name': name, 'record': record, 'plot': plot,
+            'label': RmsCheckLabel(plot, color, brief=True),
+            'history': history, 'source': source, 'threshold_db': threshold,
+            'scale': scale, 'unit': unit, 'check': None}
+        panel.show()
+        return self._rms_check_read()
+
+    def _rms_check_read(self):
+        """Make the check as the state says, write it on the plot, in the
+        pane and the status line, and journal the plot that draws it.
+        Returns the status line."""
+        state = self._rms_check
+        if state is None:
+            return None
+        panel = self.data_pane.rms_check_panel
+        try:
+            check = self.project.rms_check(
+                state['name'], state['record'], history=state['history'],
+                threshold_db=state['threshold_db'])
+        except ValueError as refusal:
+            state['check'] = None
+            state['label'].clear()
+            panel.show_check(None, refusal=str(refusal))
+            message = f'No rms check: {refusal}'
+            self._show_status(message)
+            return message
+        state['check'] = check
+        state['label'].show(check, unit=state['unit'], scale=state['scale'])
+        panel.show_check(check, unit=state['unit'], scale=state['scale'])
+        self._journal_rms_check(state)
+        message = f'{check.dof}: ' + check.describe(state['unit'],
+                                                    state['scale'])
+        self._show_status(message)
+        return message
+
+    def _rms_check_chosen(self, settings):
+        """A time history or a threshold chosen in the rms check's pane:
+        kept for this spectrum and the check made again."""
+        state = self._rms_check
+        if state is None:
+            return
+        self._rms_check_settings[state['name']] = dict(settings)
+        if settings.get('history') is not None:
+            state['history'] = settings['history']
+        state['threshold_db'] = float(settings['threshold_db'])
+        self._rms_check_read()
+
+    def _journal_rms_check(self, state):
+        """The rms check, journaled as the headless call that draws it
+        (`_journal_view`)."""
+        name, history = state['name'], state['history']
+        averaging = (f', averaging=project.averaging_of({name!r})'
+                     if history == state['source'] else '')
+        prefix = f'visualdynamics.plot.plot_rms_check(project[{name!r}]'
+        self._journal_view(
+            prefix,
+            f'{prefix}, project[{history!r}], record={state["record"]}'
+            f'{averaging}, threshold_db={state["threshold_db"]!r}, '
+            "path='rms_check.png', show=False)")
+
+    def _clear_rms_check(self):
+        """Take the label off, before every drawing, like every other
+        preview."""
+        state, self._rms_check = self._rms_check, None
+        if state is None:
+            return
+        try:
+            state['label'].remove()
+        except RuntimeError:
+            # the plot went with the drawing it belonged to
+            pass
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -12955,6 +13097,8 @@ class MainWindow(QMainWindow):
                                      is not None,
                                      confidence=self._confidence_source(
                                          series) is not None,
+                                     rms_check=self._rms_check_source(
+                                         series) is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -13247,6 +13391,9 @@ class MainWindow(QMainWindow):
         # axes beside the spectrum's own steps
         toning = toning or (self.data_pane.showing_confidence
                             and self._confidence_source(series) is not None)
+        # and the rms check, whose words go in the flat plot's corner
+        toning = toning or (self.data_pane.showing('rms_check')
+                            and self._rms_check_source(series) is not None)
         offered = (entry is not None and not pairs and not lone_fed
                    and not cursor and not toning
                    and self._waterfall_count(entry) >= 1)
@@ -13341,6 +13488,10 @@ class MainWindow(QMainWindow):
                   and self._confidence_source(series))
         if banded:
             message = self._draw_confidence(*banded) or message
+        checked = (self.data_pane.showing('rms_check')
+                   and self._rms_check_source(series))
+        if checked:
+            message = self._draw_rms_check(*checked) or message
         return message + axis_note
 
     def _paged_series(self, series, entry, pairs, lone_fed):

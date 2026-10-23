@@ -521,6 +521,35 @@ def _draw_amplitude(painter, color):
     painter.drawLine(QPointF(38, 48), QPointF(38, 12))
 
 
+def _draw_rms_check(painter, color):
+    """A density's area beside a record's level, the two meeting.
+
+    The check in miniature: a falling spectrum with the area under it
+    filled, and beside it a single solid bar, the record's rms, whose
+    top a dashed line carries back across to the area's. Two things
+    that should come to the same number, side by side.
+    """
+    faint = QColor(color)
+    faint.setAlpha(110)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(faint))
+    painter.drawPolygon([QPointF(6, 50), QPointF(6, 20), QPointF(14, 18),
+                         QPointF(22, 26), QPointF(30, 34), QPointF(34, 44),
+                         QPointF(34, 50)])
+    painter.setPen(_pen(color, 3))
+    painter.drawPolyline([QPointF(6, 20), QPointF(14, 18), QPointF(22, 26),
+                          QPointF(30, 34), QPointF(34, 44)])
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    painter.drawRect(QRectF(44, 22, 12, 28))
+    pen = QPen(QColor(color), 3)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawLine(QPointF(8, 12), QPointF(58, 12))
+    painter.drawLine(QPointF(50, 12), QPointF(50, 22))
+
+
 def _draw_truncate(painter, color):
     """A trace with its ends grayed away behind two cut lines.
 
@@ -2346,7 +2375,7 @@ def control_icon(name: str) -> QIcon:
      'truncate': _draw_truncate, 'octave': _draw_octave,
      'tone': _draw_tone, 'transmissibility': _draw_transmissibility,
      'confidence': _draw_confidence,
-     'amplitude': _draw_amplitude,
+     'amplitude': _draw_amplitude, 'rms_check': _draw_rms_check,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

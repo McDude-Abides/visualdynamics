@@ -55,6 +55,7 @@ from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
+from .rms_check_panel import RmsCheckPanel
 from .segments_panel import SegmentsPanel
 from .settings_panel import PANEL_WIDTH
 from .shock_panel import ShockPanel
@@ -217,6 +218,8 @@ class DataPane(QWidget):
     transmissibility_toggled = Signal(bool)
     #: the confidence band was asked for (True) or put away (False)
     confidence_toggled = Signal(bool)
+    #: the rms check was asked for (True) or put away (False)
+    rms_check_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -274,6 +277,7 @@ class DataPane(QWidget):
         self.tone_wanted: bool = False
         self.transmissibility_wanted: bool = False
         self.confidence_wanted: bool = False
+        self.rms_check_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
@@ -400,6 +404,10 @@ class DataPane(QWidget):
         # shaded on it; read only, nothing to apply
         self.confidence_panel: ConfidencePanel = ConfidencePanel()
         self.confidence_panel.hide()
+        # the rms from a spectrum beside the rms of its time history,
+        # read beside the spectrum; nothing to apply
+        self.rms_check_panel: RmsCheckPanel = RmsCheckPanel()
+        self.rms_check_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -461,6 +469,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.tone_panel)
         plot_row.addWidget(self.transmissibility_panel)
         plot_row.addWidget(self.confidence_panel)
+        plot_row.addWidget(self.rms_check_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
@@ -1024,6 +1033,20 @@ class DataPane(QWidget):
         self.confidence_action.triggered.connect(
             lambda checked=False: self._choose_toggle('confidence', checked))
         toolbar.addAction(self.confidence_action)
+        # and the check on the spectrum as a whole: the rms from the
+        # area under it beside the rms of the time history it came
+        # from, the gap in dB and the verdict in the pane. A reading of
+        # the spectrum as it is, so a toggle with no act, like the tones
+        self.rms_check_action: QAction = QAction(
+            control_icon('rms_check'), 'RMS Check', self)
+        self.rms_check_action.setCheckable(True)
+        self.rms_check_action.setToolTip(
+            'Check the spectrum against its time history: the rms from '
+            'the area under it beside the rms of the record, the gap in '
+            'dB, and whether it is within the threshold')
+        self.rms_check_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('rms_check', checked))
+        toolbar.addAction(self.rms_check_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1087,7 +1110,8 @@ class DataPane(QWidget):
         fence(toolbar, [
             self.plot_mode_group.actions(),
             [self.waterfall_action],
-            [self.octave_action, self.tone_action, self.confidence_action],
+            [self.octave_action, self.tone_action, self.confidence_action,
+             self.rms_check_action],
             [self.sweep_rate_action],
             [self.transmissibility_action],
             self.comparison_group.actions(),
@@ -1223,9 +1247,9 @@ class DataPane(QWidget):
         self.truncate_toggled.emit(checked)
 
     def _choose_toggle(self, key: str, checked: bool) -> None:
-        """The octave, tones, transmissibility, confidence or
-        sweep-rate button, each a toggle of its own: remember it, put
-        its panel away when it is unchecked, then say so."""
+        """The octave, tones, transmissibility, confidence, rms check
+        or sweep-rate button, each a toggle of its own: remember it,
+        put its panel away when it is unchecked, then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
             getattr(self, f'{key}_panel').hide()
@@ -1879,7 +1903,8 @@ class DataPane(QWidget):
                       octave: bool = False, sine: bool = False,
                       tone: bool = False, fit: bool = False,
                       transmissibility: bool = False,
-                      confidence: bool = False) -> None:
+                      confidence: bool = False,
+                      rms_check: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1897,8 +1922,9 @@ class DataPane(QWidget):
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, `transmissibility` the ASD ratio and H1's band
         behind an FRF computed from a time history, `confidence` the
-        chi-square band of an autospectrum, and `residual` the fit's
-        residual CMIF. The pair,
+        chi-square band of an autospectrum, `rms_check` the rms check
+        of one with a time history to check against, and `residual`
+        the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -1956,6 +1982,7 @@ class DataPane(QWidget):
         # and the band to an autospectrum, the one estimate whose
         # error is chi-square
         self._offer('confidence', 'confidence_panel', confidence)
+        self._offer('rms_check', 'rms_check_panel', rms_check)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -2028,7 +2055,8 @@ class DataPane(QWidget):
                        self.drive_point_action, self.cmif_action,
                        self.octave_action, self.tone_action,
                        self.transmissibility_action,
-                       self.confidence_action, self.sweep_rate_action,
+                       self.confidence_action, self.rms_check_action,
+                       self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):
