@@ -3435,6 +3435,64 @@ def plot_srs_tolerance(measured: Any, specification: Any, *,
                         size=size)
 
 
+def plot_breakpoints(specification: Any, *, channel: str | None = None,
+                     unit_system: UnitSystem | None = None,
+                     theme: Any = None,
+                     path: str | os.PathLike | None = None,
+                     show: bool = True, title: str | None = None,
+                     size: tuple[int, int] = (1000, 700)) -> Any:
+    """One channel of a random specification read by its breakpoints:
+    each segment's slope and area written on it, and the rms
+    accumulated from the low end beneath.
+
+        draft = SpecificationDraft.at_dofs(['1Z+'])   # then shaped
+        visualdynamics.plot.plot_breakpoints(draft, path='areas.png')
+
+    The reading is `core.breakpoints.read_breakpoints`'s. The
+    specification is drawn solid on log-log axes with its breakpoints
+    circled, each segment labeled with its slope in decibels per octave
+    and its area; under it the running rms is dashed, sharing the
+    frequency axis, and its title gives where it ends, the
+    specification's rms. Areas are in the square of the channel's
+    quantity (g² for a density in g²/Hz) and the rms in the quantity.
+
+    Parameters
+    ----------
+    specification : SpecificationDraft or Specification
+        The specification, as a sheet or as the object. An object is
+        read at the lines where its channel's autospectrum is positive.
+    channel : str, optional
+        The channel drawn; the first by default.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.author import SpecificationDraft
+    from .breakpoints import build_breakpoints
+
+    draft = (specification if isinstance(specification, SpecificationDraft)
+             else SpecificationDraft.from_specification(
+                 specification, None if channel is None else [channel]))
+    if channel is not None and channel not in draft.channels:
+        raise ValueError(f'no channel {channel!r} in the specification')
+    k = 0 if channel is None else draft.channels.index(channel)
+    reading = draft.reading(k)
+    name = draft.channels[k]
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_breakpoints(widget, reading, draft.dims[k], name=name,
+                          unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{name}: segment areas and running rms',
+                        size=size)
+
+
 def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
                   low: float | None = None, high: float | None = None,
                   theme: Any = None,

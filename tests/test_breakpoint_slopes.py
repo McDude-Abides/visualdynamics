@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
 
 from visualdynamics.core.author import SpecificationDraft
 from visualdynamics.core.breakpoints import (
@@ -261,3 +262,86 @@ def test_the_entry_rides_the_dict_form():
     del data['entry']
     assert SpecificationDraft.from_dict(data).entry == 'levels', \
         'a record written before the entry existed reads as levels'
+
+
+# ---- the view ----------------------------------------------------------------------
+
+
+def _layout(qt_app):
+    import pyqtgraph as pg
+
+    widget = pg.GraphicsLayoutWidget()
+    widget.resize(900, 700)
+    return widget
+
+
+def test_the_view_writes_each_segment_and_dashes_the_running_rms(qt_app):
+    from visualdynamics.plot.breakpoints import build_breakpoints
+
+    widget = _layout(qt_app)
+    reading = _sheet().reading(0)
+    plot, running = build_breakpoints(widget, reading, 'acceleration', name='1Z+')
+    labels = [item for item in plot.items if getattr(item, 'is_segment_label', False)]
+    texts = [label.textItem.toPlainText() for label in labels]
+    assert len(texts) == 3
+    assert texts[0].startswith('+3.0 dB/oct') and '1.5 g' in texts[0]
+    assert texts[1].startswith('flat') and '16.8 g' in texts[1]
+    assert texts[2].startswith('−3.0 dB/oct') and '27.7 g' in texts[2]
+    assert '(60 %)' in texts[2], 'its share of the whole'
+    # placed in log coordinates, over the middle of each segment
+    assert labels[1].pos().x() == pytest.approx(np.log10(np.sqrt(80.0 * 500.0)))
+    assert labels[1].pos().y() == pytest.approx(np.log10(0.04))
+    curve = next(item for item in running.listDataItems()
+                 if getattr(item, 'is_running_rms', False))
+    assert curve.opts['pen'].style() == Qt.PenStyle.DashLine
+    x, y = curve.getOriginalDataset()
+    assert x[0] == 20.0 and x[-1] == 2000.0
+    assert y[0] == 0.0 and y[-1] == pytest.approx(6.7842, abs=1e-4), 'in g'
+    spec_pen = plot.listDataItems()[0].opts['pen']
+    assert spec_pen.style() == Qt.PenStyle.SolidLine, 'told apart by style'
+    assert 'dashed' in running.titleLabel.text
+    assert '6.784 g at 2000 Hz' in running.titleLabel.text
+    assert '6.784 g rms' in plot.titleLabel.text
+    assert running.getViewBox().state['logMode'][0], 'the frequency axis shared'
+    assert running.getViewBox().linkedView(0) is plot.getViewBox()
+
+
+def test_a_controllers_lines_are_read_but_not_labeled(qt_app):
+    from visualdynamics.plot.breakpoints import MOST_LABELS, build_breakpoints
+
+    f = np.linspace(20.0, 2000.0, MOST_LABELS + 10)
+    reading = read_breakpoints(f, np.full(f.shape, 0.04 * G * G))
+    plot, running = build_breakpoints(_layout(qt_app), reading, 'acceleration')
+    assert not [item for item in plot.items
+                if getattr(item, 'is_segment_label', False)]
+    assert 'too many to label' in plot.titleLabel.text
+    assert '8.899 g at 2000 Hz' in running.titleLabel.text
+
+
+def test_the_readout_is_the_reading_in_words():
+    from visualdynamics.plot.breakpoints import readout
+
+    rows = readout(_sheet().reading(0), 'acceleration')
+    assert [row['segment'] for row in rows] == [
+        '20–80 Hz', '80–500 Hz', '500–2000 Hz', 'total']
+    assert [row['slope'] for row in rows[:3]] == [
+        '+3.0 dB/oct', 'flat', '−3.0 dB/oct']
+    assert [row['area'] for row in rows] == [
+        '1.5 g²', '16.8 g²', '27.73 g²', '46.03 g²']
+    assert [row['running'] for row in rows] == [
+        '1.225 g', '4.278 g', '6.784 g', '6.784 g rms']
+    assert [row['share'] for row in rows] == ['3 %', '37 %', '60 %', '100 %']
+
+
+def test_the_standalone_plot_writes_a_file_from_a_sheet_or_an_object(tmp_path, qt_app):
+    from visualdynamics.plot import plot_breakpoints
+
+    draft = _sheet(channels=('1X+', '1Y+'))
+    path = plot_breakpoints(draft, channel='1Y+', show=False,
+                            path=tmp_path / 'sheet.png')
+    assert (tmp_path / 'sheet.png').stat().st_size > 2000 and str(path).endswith('.png')
+    plot_breakpoints(draft.make(), show=False, path=tmp_path / 'object.png')
+    assert (tmp_path / 'object.png').stat().st_size > 2000
+    with pytest.raises(ValueError, match="no channel '9Z\\+'"):
+        plot_breakpoints(draft, channel='9Z+', show=False,
+                         path=tmp_path / 'none.png')
