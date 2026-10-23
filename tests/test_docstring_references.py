@@ -65,6 +65,8 @@ THEORY = {
                              'random error of a gain factor',
     'core.sine_distortion': 'the distortion of a sinusoidal vibration and '
                             'the tracked tone it is read against',
+    'core.breakpoints': 'a slope in dB per octave as a power law, and the '
+                        'area under each segment of a breakpoint table',
 }
 
 #: and methods, where the theory lives on the call rather than the module

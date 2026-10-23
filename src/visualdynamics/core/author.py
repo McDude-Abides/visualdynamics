@@ -30,10 +30,16 @@ What an author enters in a `SpecificationDraft`:
 - The bands: warning and abort, in decibels below and above the
   target, set per channel and per segment between breakpoints, under
   each channel's `symmetric` and `uniform` constraints.
+- How the levels are typed (`entry`): a level at every breakpoint, or
+  a level at the first and a slope in decibels per octave into each
+  breakpoint after it, the level there computed, as many written
+  tables give them (`core.breakpoints`). The draft holds levels either
+  way; the entry decides what an edit holds still.
 
 The operations on a draft (`scaled_db`, `with_band`, `with_band_edge`,
 `shifted_band`, `constrained`, `with_breakpoint`, `without_breakpoint`,
-`with_all_pairs`, `to_breakpoints`, `to_lines`) each return a new draft
+`with_all_pairs`, `to_breakpoints`, `to_lines`, `with_entry`,
+`with_slope`, `with_level`, `with_slope_breakpoint`) each return a new draft
 and leave the original unchanged, so a script reads as a sequence of
 statements, and so does a session's journal.
 """
@@ -51,6 +57,7 @@ from .transform import MOTIONS, _modal_dim, modal_dofs
 if TYPE_CHECKING:                                    # pragma: no cover
     from collections.abc import Sequence
 
+    from .breakpoints import BreakpointReading
     from .channel_table import ChannelTable
     from .data import Specification
     from .shapes import ShapeSet
@@ -72,6 +79,12 @@ STARTER_LEVEL = 1.0
 #: how far a specification's own cross terms or bands may wander over
 #: frequency and still be read as one coherence, one phase, one band
 CONSTANT_TOLERANCE = 1e-6
+
+
+#: the two ways a sheet's levels are typed: a level at every
+#: breakpoint, or a level at the first and a slope in decibels per
+#: octave into each one after it
+ENTRIES = ('levels', 'slopes')
 
 
 #: the grid a dragged or stepped limit lands on, in decibels. A
@@ -124,6 +137,13 @@ class SpecificationDraft:
         spacing: The frequency spacing in Hz of the lines form, or the
             spacing remembered from the specification the sheet was
             opened from. `to_lines` uses it when no spacing is given.
+        entry: 'levels', a level typed at every breakpoint, or
+            'slopes', a level at the first breakpoint and a slope in
+            decibels per octave into each one after it, the level
+            there computed. The levels are held either way. Under
+            'slopes', `with_level` holds every slope after the level
+            it changes, as `with_slope` does; under 'levels' it
+            changes that level alone.
     """
     # Each channel has its own band settings, and the bands are dragged
     # on the plot per section, not typed in a pane (Brandon,
@@ -141,6 +161,7 @@ class SpecificationDraft:
     sources: list[str] = field(default_factory=list)
     form: str = 'breakpoints'
     spacing: float | None = None
+    entry: str = 'levels'
 
     def __post_init__(self) -> None:
         from .validate import dofs as _dofs
@@ -168,6 +189,7 @@ class SpecificationDraft:
         self.sources = [str(s) for s in self.sources]
         self.form = str(self.form)
         self.spacing = None if self.spacing is None else float(self.spacing)
+        self.entry = str(self.entry)
         self.validate()
 
     # ---- the doors in ---------------------------------------------------------
@@ -620,8 +642,8 @@ class SpecificationDraft:
         specifications, a band that is not below and above the
         target, a band that breaks its channel's `symmetric` or
         `uniform` constraint, a form other than 'breakpoints' or
-        'lines', or a spacing that is not positive. Every draft is
-        checked when it is made.
+        'lines', a spacing that is not positive, or an entry other than
+        'levels' or 'slopes'. Every draft is checked when it is made.
         """
         n = self.num_channels
         if not n:
@@ -696,6 +718,9 @@ class SpecificationDraft:
                              f'{self.form!r}')
         if self.spacing is not None and not self.spacing > 0:
             raise ValueError('a frequency spacing is positive')
+        if self.entry not in ENTRIES:
+            raise ValueError(f"levels are typed as 'levels' or 'slopes', not "
+                             f'{self.entry!r}')
 
     def _sources(self) -> list[str]:
         return self.sources or [''] * self.num_channels
@@ -723,7 +748,7 @@ class SpecificationDraft:
                   'bands': [_normal_bands(entry) for entry in self.bands],
                   'notes': list(self.notes),
                   'sources': list(self.sources), 'form': self.form,
-                  'spacing': self.spacing}
+                  'spacing': self.spacing, 'entry': self.entry}
         fields.update(changes)
         return SpecificationDraft(**fields)
 
@@ -1133,6 +1158,191 @@ class SpecificationDraft:
             levels=[[v for i, v in enumerate(row) if i != k]
                     for row in self.levels],
             bands=self._bands_on(frequencies))
+
+    # ---- written by slope ---------------------------------------------------
+
+    def with_entry(self, entry: str) -> SpecificationDraft:
+        """The same draft with its levels typed another way.
+
+        Nothing in the requirement changes: the draft holds levels
+        either way, and the entry decides what `with_level` holds
+        still.
+
+        Parameters
+        ----------
+        entry : {'levels', 'slopes'}
+            'levels', a level at every breakpoint, or 'slopes', a level
+            at the first and a slope in decibels per octave into each
+            breakpoint after it.
+
+        Returns
+        -------
+        SpecificationDraft
+            A new draft; this one is unchanged. Any other entry raises
+            `ValueError`.
+        """
+        return self._copy(entry=str(entry))
+
+    def slopes_db(self) -> list[list[float]]:
+        """Each channel's slope in decibels per octave on each segment,
+        one row per channel, one fewer than the breakpoints: the table
+        as it is written by slope (`core.breakpoints.segment_slopes`)."""
+        from .breakpoints import segment_slopes
+
+        return [[float(s) for s in segment_slopes(self.frequencies, row)]
+                for row in self.levels]
+
+    def with_slope(self, segment: int, db_per_octave: float,
+                   channels: list[str] | None = None) -> SpecificationDraft:
+        """The same draft with one segment's slope typed.
+
+        The level at the segment's end is the one the slope reaches
+        from its start, and every segment after it keeps its slope, so
+        the levels past it move together. Bands, pairs and the levels
+        before the segment are unchanged.
+
+        Parameters
+        ----------
+        segment : int
+            The segment by index from 0: segment k runs from breakpoint
+            k to breakpoint k + 1.
+        db_per_octave : float
+            The slope. Plus 3 is the documents' plus 3 dB per octave,
+            an exponent of 0.9966; `core.breakpoints.OCTAVE_DB` is an
+            exponent of exactly one.
+        channels : list of str, optional
+            Which channels; all of them when omitted.
+
+        Returns
+        -------
+        SpecificationDraft
+            A new draft; this one is unchanged. A segment the draft
+            does not have, or a channel it does not have, raises
+            `ValueError`.
+        """
+        from .breakpoints import levels_with_slope
+
+        levels = [list(row) for row in self.levels]
+        for k in self._channel_indices(channels):
+            levels[k] = [float(v) for v in levels_with_slope(
+                self.frequencies, levels[k], segment, db_per_octave)]
+        return self._copy(levels=levels)
+
+    def with_level(self, breakpoint: int, level: float,
+                   channels: list[str] | None = None) -> SpecificationDraft:
+        """The same draft with one breakpoint's level typed, the way the
+        draft's `entry` says.
+
+        Under 'levels' that level changes and nothing else. Under
+        'slopes' the slope into the breakpoint changes and every slope
+        after it is held, so the levels past it move by the same factor;
+        typed at the first breakpoint, the whole table moves with it.
+
+        Parameters
+        ----------
+        breakpoint : int
+            The breakpoint by index from 0.
+        level : float
+            The level, in the channel's SI density unit, positive.
+        channels : list of str, optional
+            Which channels; all of them when omitted.
+
+        Returns
+        -------
+        SpecificationDraft
+            A new draft; this one is unchanged. A breakpoint or channel
+            the draft does not have, or a level that is not positive,
+            raises `ValueError`.
+        """
+        from .breakpoints import levels_holding_slopes
+
+        breakpoint, level = int(breakpoint), float(level)
+        if not 0 <= breakpoint < len(self.frequencies):
+            raise ValueError(f'the draft has {len(self.frequencies)} '
+                             f'breakpoints; no breakpoint {breakpoint + 1}')
+        if not (np.isfinite(level) and level > 0):
+            raise ValueError('a level is positive and finite')
+        levels = [list(row) for row in self.levels]
+        for k in self._channel_indices(channels):
+            if self.entry == 'slopes':
+                levels[k] = [float(v) for v in levels_holding_slopes(
+                    self.frequencies, levels[k], breakpoint, level)]
+            else:
+                levels[k][breakpoint] = level
+        return self._copy(levels=levels)
+
+    def with_slope_breakpoint(self, frequency: float, db_per_octave: float,
+                              channels: list[str] | None = None
+                              ) -> SpecificationDraft:
+        """The same draft with a breakpoint entered as a slope and the
+        next frequency, the level there computed.
+
+        This is the line of a table that reads "plus 3 dB per octave to
+        80 Hz": the slope runs from the breakpoint below `frequency` to
+        it. Past the last breakpoint the table grows by one segment.
+        Inside a segment the breakpoint splits it (`with_breakpoint`,
+        both halves wearing its band) and the slope is typed on the
+        lower half (`with_slope`), so the segments above keep their
+        slopes. At a frequency that is already a breakpoint, the slope
+        into it is typed. The channels not named take the level the
+        power law between their neighbors gives, or the last
+        breakpoint's past the end.
+
+        Parameters
+        ----------
+        frequency : float
+            The next frequency, in Hz, above the first breakpoint.
+        db_per_octave : float
+            The slope from the breakpoint below it.
+        channels : list of str, optional
+            Which channels the slope is typed for; all of them when
+            omitted.
+
+        Returns
+        -------
+        SpecificationDraft
+            A new draft; this one is unchanged. A frequency at or below
+            the first breakpoint raises `ValueError`, since there is no
+            breakpoint below it for the slope to run from.
+        """
+        frequency = float(frequency)
+        if not frequency > self.frequencies[0]:
+            raise ValueError(
+                f'a slope runs up from the breakpoint below it, and '
+                f'{frequency:g} Hz is not above the first breakpoint at '
+                f'{self.frequencies[0]:g} Hz')
+        split = self.with_breakpoint(frequency)
+        segment = split.frequencies.index(frequency) - 1
+        return split.with_slope(segment, db_per_octave, channels)
+
+    def reading(self, channel: int | str = 0) -> BreakpointReading:
+        """One channel's table read: each segment's slope in decibels
+        per octave, its area by the closed form, and the rms
+        accumulated from the lowest breakpoint
+        (`core.breakpoints.read_breakpoints`), in the channel's SI
+        units: areas in the square of its quantity, rms in its
+        quantity.
+
+        Parameters
+        ----------
+        channel : int or str, default 0
+            The channel by index or by name.
+
+        Returns
+        -------
+        BreakpointReading
+            The slopes, the areas and the running rms.
+        """
+        from .breakpoints import read_breakpoints
+
+        if isinstance(channel, (int, np.integer)):
+            k = int(channel)
+            if not 0 <= k < self.num_channels:
+                raise ValueError(f'the draft has {self.num_channels} '
+                                 f'channels; no channel {k + 1}')
+        else:
+            k = self._channel_indices([channel])[0]
+        return read_breakpoints(self.frequencies, self.levels[k])
 
     def to_breakpoints(self, tolerance: float = 1e-6) -> SpecificationDraft:
         """The same requirement as the few points it was written from.
@@ -1564,7 +1774,8 @@ class SpecificationDraft:
                            'uniform': entry['uniform']}
                           for entry in self.bands],
                 'notes': list(self.notes), 'sources': list(self.sources),
-                'form': self.form, 'spacing': self.spacing}
+                'form': self.form, 'spacing': self.spacing,
+                'entry': self.entry}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SpecificationDraft:
@@ -1576,7 +1787,8 @@ class SpecificationDraft:
                     for i, j, value in data.get('pairs', [])},
                    data.get('bands', []),
                    data.get('notes', []), data.get('sources', []),
-                   data.get('form', 'breakpoints'), data.get('spacing'))
+                   data.get('form', 'breakpoints'), data.get('spacing'),
+                   data.get('entry', 'levels'))
 
 
 def default_bands(segments: int) -> dict[str, Any]:
