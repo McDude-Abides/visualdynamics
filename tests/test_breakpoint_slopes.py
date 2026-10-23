@@ -519,6 +519,58 @@ def test_a_level_typed_by_slope_holds_the_slopes_after_it(window, pump):
     assert draft.slopes_db()[0][0] == pytest.approx(3.0)
 
 
+def test_scale_selected_under_slopes_scales_levels_and_passes_over_slopes(window, pump):
+    """Under Slopes the grid holds a level and a slope a channel. Scale
+    selected scales the selected levels as they stand, so the slopes
+    into and out of a scaled row follow from the levels, and a slope
+    cell in the selection is not a level and is passed over."""
+    panel = _open(window, pump)
+    key = window._author_door[1]
+    panel.slopes_button.click()
+    pump()
+    assert _type(panel.points, 1, 2, '-3')
+    pump()
+    before = [list(row) for row in window._drafts[key].levels]
+    slopes = window._drafts[key].slopes_db()
+    # every cell, slopes among them: every level up by 3 dB, every slope
+    # held, and a slope is not multiplied as though it were a level
+    panel.points.selectAll()
+    panel.scale_box.setValue(3.0)
+    panel.scale_button.click()
+    pump()
+    draft = window._drafts[key]
+    for k, row in enumerate(before):
+        assert draft.levels[k] == pytest.approx([v * 10 ** 0.3 for v in row],
+                                                rel=1e-12)
+    assert np.asarray(draft.slopes_db()) == pytest.approx(np.asarray(slopes), abs=1e-12)
+    assert draft.slopes_db()[0][0] == pytest.approx(-3.0)
+    made = window.project['Channels Specification']
+    assert np.real(made.ordinate[0][1]) == pytest.approx(before[0][1] * 10 ** 0.3,
+                                                         rel=1e-12)
+    # one breakpoint's row: its levels down 6 dB, and the slope into
+    # it, shown beside them, steepens by 6 dB over log2(100) octaves
+    scaled = [list(row) for row in draft.levels]
+    panel.points.clearSelection()
+    panel.points.selectRow(1)
+    panel.scale_box.setValue(-6.0)
+    panel.scale_button.click()
+    pump()
+    draft = window._drafts[key]
+    assert draft.levels[0] == pytest.approx(
+        [scaled[0][0], scaled[0][1] * 10 ** -0.6], rel=1e-12)
+    steeper = -3.0 - 6.0 / np.log2(100.0)
+    assert draft.slopes_db()[0][0] == pytest.approx(steeper, rel=1e-9)
+    assert float(_text(panel.points, 1, 2)) == pytest.approx(steeper, rel=1e-4)
+    # a slope column alone holds no level to scale
+    panel.points.clearSelection()
+    panel.points.selectColumn(2)
+    panel.scale_box.setValue(6.0)
+    panel.scale_button.click()
+    pump()
+    assert 'select the levels' in panel.problem.text()
+    assert window._drafts[key].levels == draft.levels, 'nothing scaled'
+
+
 def test_areas_write_on_the_plot_draw_the_running_rms_and_read_out(window, pump):
     import pyqtgraph as pg
 
