@@ -111,6 +111,10 @@ with each segment's slope and area written on it and
 the running rms beneath, as the specification sheet's *Areas and
 running rms* does ([Writing a random specification by
 slope](breakpoint-slopes.md)).
+`plot_chance(psd, spec, combine=8)` draws one channel of a random
+comparison as its level over the target in dB, the lines outside each
+band counted beside what chance puts there
+([Lines outside a band by chance](comparison-chance.md)).
 `plot_shock_check(history)` draws a shock record's raw velocity beside
 its positive and negative spectra, a figure the app does not show: the
 Shocks view states the same check in words

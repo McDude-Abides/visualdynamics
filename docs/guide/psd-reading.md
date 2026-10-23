@@ -87,5 +87,6 @@ of that same area), with a table of the numbers beneath. Nothing is
 colored, since a specification on its own has nothing to be compared
 against. Records picked in the tree restrict both readings. A
 specification selected together with a measurement offers the
-comparison's three readings instead: *Spectra*, *RMS Error* and
-*Lines Out* ([How a comparison is judged](compliance.md)).
+comparison's four readings instead: *Spectra*, *RMS Error*,
+*Lines Out* ([How a comparison is judged](compliance.md)) and *Chance*
+([Lines outside a band by chance](comparison-chance.md)).

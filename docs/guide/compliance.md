@@ -251,3 +251,6 @@ result['abort_percent']                       # and the band outside abort
 The array form, `compliance.outside`, judges a limit and a measurement
 held as plain arrays by the same rule, and `compliance.comparable`
 returns, in words, why a pair is not compared, or None when it is.
+`core.chance.compare_chance` makes the same comparison and sets beside
+each count the number of lines chance alone puts outside at the PSD's
+degrees of freedom ([Lines outside a band by chance](comparison-chance.md)).

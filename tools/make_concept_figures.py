@@ -971,6 +971,44 @@ def amplitude_spectrum():
               f'{np.median(read.amplitude[0, 200:380]) / g:.4f} g')
 
 
+def comparison_chance():
+    """Lines outside a band by chance: white noise averaged over sixty
+    unwindowed frames (120 degrees of freedom) against a flat
+    specification at its true level, warning at 1.5 dB and abort at
+    3 dB, with sixteen adjacent lines raised 2.5 dB as a real excursion
+    would be. Judged eight lines at a time, the scatter goes and the
+    excursion stays."""
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.chance import compare_chance, describe_chance
+    from visualdynamics.core.data import Specification, TimeHistory
+    from visualdynamics.plot import plot_chance
+
+    rate = 5120.0
+    averaging = Averaging(frame_length=1024, overlap=0.0, window='boxcar',
+                          frames=60)
+    noise = np.random.default_rng(3).standard_normal(averaging.span)
+    history = TimeHistory(np.arange(averaging.span) / rate, noise[None],
+                          response_dof=['1Z+'], ordinate_dim=['acceleration'])
+    history.averaging = averaging
+    psd = history.compute_psds()
+    # the excursion: sixteen lines from 1,200 Hz, 2.5 dB over
+    raised = (psd.abscissa >= 1200.0) & (psd.abscissa < 1280.0)
+    psd.ordinate[0, raised] *= 10.0 ** 0.25
+    level = np.full((1, 2), 2.0 / rate)
+    spec = Specification(np.array([30.0, 1970.0]), level, response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         **{f'{pair}_{side}': level * 10.0 ** (sign * db / 10.0)
+                            for pair, db in (('warning', 1.5), ('abort', 3.0))
+                            for side, sign in (('lower', -1), ('upper', 1))})
+    for combine in (1, 8):
+        result = compare_chance(spec, psd, scale_db=0, combine=combine)
+        print(f'combine {combine}: {describe_chance(result, "warning")}')
+    plot_chance(psd, spec, combine=8, scale_db=0, show=False,
+                path=str(OUT / 'comparison-chance.png'))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -993,6 +1031,7 @@ def main():
     sine_distortion()
     breakpoint_slopes()
     amplitude_spectrum()
+    comparison_chance()
     print('done')
 
 

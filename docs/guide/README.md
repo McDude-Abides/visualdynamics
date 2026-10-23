@@ -101,6 +101,9 @@ that is not an alpha.
   freedom of an averaged PSD, and the confidence band they give
 - [How a comparison is judged](compliance.md): the one cell rule,
   every pairing of PSD and specification, and the edge cases
+- [Lines outside a band by chance](comparison-chance.md): the lines a
+  comparison counts outside each band, beside how many the scatter of
+  an average puts there, and lines combined for judging
 - [Reports](reports.md): symbolic bindings, live text, and one file out
 
 For signatures, see the API reference in the site navigation. For the
