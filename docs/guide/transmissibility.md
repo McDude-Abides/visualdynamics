@@ -2,7 +2,7 @@
 
 Transmissibility is the motion at one point over the motion at another,
 a response over an input, at each frequency. From random data it is
-computed two ways, and both are commonly labelled transmissibility.
+computed two ways, and both are commonly labeled transmissibility.
 They agree where the measurement is clean and part company exactly
 where it is not, so a plot that does not say which one it is has not
 said what it is.
@@ -39,8 +39,23 @@ T_\text{ASD} = \frac{|H_1|}{\sqrt{\gamma^2}}
 \]
 
 so the ratio always reads at or over H1, by \(-10\log_{10}\gamma^2\)
-decibels: 1.4 dB at a coherence of 0.73, 4.1 dB at 0.39. That excess is
-noise counted as motion of the article.
+decibels: 1.4 dB at a coherence of 0.73, 4.1 dB at 0.39. The gap says
+the coherence is under one. It does not say which of the two is nearer
+the truth; that depends on where the content the input did not cause
+is:
+
+- **On the response** (a noise floor, a rattle, another source), H1 is
+  unbiased and the ratio reads high, by \(1/\sqrt{\gamma^2}\).
+- **On the input channel** (the input sensor's own noise), H1 reads
+  low, by \(\gamma^2\), and the ratio low by \(\sqrt{\gamma^2}\), so
+  the ratio is the nearer of the two. With the survey below's noise
+  moved to its input channel, at 6 g rms, the truth at 1,000 Hz is
+  0.100, H1 reads 0.073 and the ratio 0.084, 1.2 dB above H1.
+- **Leakage** at a sharp resonance, a nonlinearity or a second input
+  lower the coherence as well, and bias both estimates.
+
+So the gap is a reason to look at the measurement, not a correction to
+apply to either curve.
 
 What H1 is worth at a line follows from its coherence and the number of
 averages behind it. The normalized random error of its magnitude is
@@ -73,9 +88,9 @@ point.magnitude                       # |H1|, 0.108 (the truth is 0.100)
 point.asd_ratio                       # 0.126, the ratio
 point.coherence                       # 0.730
 point.error                           # 0.040, the random error of |H1|
-point.overstatement_db                # +1.4, the ratio over H1
+point.ratio_to_h1_db                  # +1.4, the ratio to H1 in dB
 print(point.describe('g/g'))
-# 1000 Hz: H1 0.1077 g/g (±4.0 %, coherence 0.730); ASD ratio 0.126 g/g, +1.4 dB over H1
+# 1000 Hz: H1 0.1077 g/g (±4.0 %, coherence 0.730); ASD ratio 0.126 g/g, +1.4 dB from H1
 
 lower, upper = reading.band(1.0)      # |H1| (1 -+ error) at every line
 visualdynamics.plot.plot_transmissibility(reading, band=(20, 1990),
@@ -90,7 +105,13 @@ references is refused: a ratio of two autospectra would credit one
 input with what all of them caused.
 
 The values are in SI, as every record is stored; for an acceleration
-over an acceleration that is the same number in g/g. The same reading
+over an acceleration that is the same number in g/g. Against a force
+reference the same reading is an FRF and the ratio of its spectra, not
+a transmissibility, and it is titled and noted that way
+(`reading.title`). A record with a sample that is not a number in the
+frames read is refused, naming the channel: that one sample spreads to
+every line of the average, and read on it would look like a line with
+no input power or no coherence. The same reading
 works on three averaged spectra as
 `visualdynamics.core.transmissibility.read_transmissibility(frequency,
 gxx, gyy, gxy, frames, averages)`, and `frf_random_error(coherence,
@@ -108,8 +129,9 @@ legend. Below about 600 Hz they are one curve, with a coherence near 1.
 Above it the response falls toward the noise: at 1,000 Hz the truth is
 0.100, H1 reads 0.108 with a 4.0 % error and the ratio 0.126; at
 1,500 Hz the truth is 0.043, H1 reads 0.047 with an 8.3 % error and the
-ratio 0.075, 4.1 dB over. The ratio reads high wherever the coherence is
-low; H1 scatters about the truth, and its band says by how much.
+ratio 0.075, 4.1 dB over. The noise here is on the response, so the
+ratio reads high wherever the coherence is low, and H1 scatters about
+the truth, its band saying by how much.
 
 ## In the app
 
@@ -119,8 +141,8 @@ dashed and H1's band dotted, with a key in the corner saying which line
 is which. Where the FRF is Hv or H2, H1 is drawn solid beside it, since
 the band belongs to H1. A dashed cursor stands on the resonance; drag
 it anywhere. The pane beside the plot shows the reading at the
-cursor's line: |H1| and its phase, the ASD ratio and how far over H1 it
-reads, the coherence, the random error and the band it gives, and the
+cursor's line: |H1| and its phase, the ASD ratio and how far it
+stands from H1, the coherence, the random error and the band it gives, and the
 frames and the independent averages, with notes under them. The status
 line says the same in one line.
 
