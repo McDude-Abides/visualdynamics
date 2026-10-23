@@ -5,10 +5,10 @@ A sine controller holds the tone it reads through its tracking band and
 sees nothing else, so the levels the extraction reads say nothing of
 what else was on the channel. Once the levels have been extracted, this
 readout sits under the extraction's settings and checks them
-(`core.sine_distortion.check_distortion`): the channel's unfiltered RMS
-against the RMS of the tracked tone at every line of the sweep, as a
-distortion in percent and dB, against the limit a tolerance on the ratio
-sets (the unfiltered RMS 5 % over the tone by default, a distortion of
+(`core.sine_distortion.check_distortion`): the RMS of the record less
+the tracked tones against the RMS of the tones at every line of the
+sweep, as a distortion in percent and dB, against the limit a tolerance
+on the ratio sets (the unfiltered RMS 5 % over the tone by default, a distortion of
 32 %). On a channel chosen here (a control channel, since those are the
 ones the extraction reads), it gives the limit, the worst reading and
 where, how many lines are over, and the verdict in words. The small plot
@@ -19,7 +19,8 @@ dashed across it, the same drawing `plot_sine_distortion` makes
 It is a reading, not an act: nothing is made, so there is no button,
 and an edit reads again at once. It reads the levels already extracted
 and never extracts them itself, since an extraction is the long part,
-so beside a record with no levels it stays away (principle 3).
+so beside a record with no levels it stays away (principle 3), and
+beside levels the project marks stale it says so and checks nothing.
 """
 
 from __future__ import annotations
@@ -103,6 +104,9 @@ class DistortionPanel(QWidget):
         self._levels: Any = None
         self._key: tuple | None = None
         self.check: Any = None
+        #: why the levels shown are stale, when they are: nothing is
+        #: checked against them until they are extracted again
+        self._stale: str | None = None
         self._loading = False
 
         self.tone_box: QComboBox = QComboBox()
@@ -145,17 +149,20 @@ class DistortionPanel(QWidget):
     # ---- what is being read -------------------------------------------------
 
     def show_distortion(self, history: Any, specification: Any,
-                        levels: Any) -> Any:
+                        levels: Any, stale: str | None = None) -> Any:
         """Check the extracted `levels` of `history` against
         `specification` and show it; hide, and return None, when there are
         no levels to check (principle 3). The tone and channel boxes list
         what the levels hold and keep the ones chosen while the levels
         keep them; the tone row shows only when there is more than one.
-        Returns the check, or None when there is none or it was refused
-        (the refusal is shown)."""
+        `stale` is the project's reason the levels are stale, if they
+        are: then nothing is checked and the reason is shown, since the
+        levels describe the record as it was. Returns the check, or None
+        when there is none or it was refused (the refusal is shown)."""
         if levels is None or not len(levels):
             self.hide()
             self.check = None
+            self._stale = None
             return None
         self._loading = True
         try:
@@ -169,7 +176,12 @@ class DistortionPanel(QWidget):
         self.tone_box.setVisible(several)
         self._history, self._specification = history, specification
         self._levels = levels
+        self._stale = stale or None
         self.show()
+        if stale:
+            self._refused(f'These levels are stale ({stale}); extract them '
+                          'again to check the record against them.')
+            return None
         self._read()
         return self.check
 
@@ -192,10 +204,11 @@ class DistortionPanel(QWidget):
     # ---- the reading ------------------------------------------------------
 
     def _edited(self, *_args: Any) -> None:
-        if not self._loading and self._history is not None:
+        if (not self._loading and self._history is not None
+                and self._stale is None):
             self._read()
 
-    def _refused(self, refusal: Exception) -> None:
+    def _refused(self, refusal: Exception | str) -> None:
         self.check = None
         self._key = None
         for value in self.derived.values():

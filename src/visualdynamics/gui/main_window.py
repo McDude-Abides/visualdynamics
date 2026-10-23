@@ -11915,9 +11915,13 @@ class MainWindow(QMainWindow):
         panel.dwell.show_dwell(history, specs[0], self.unit_system)
         # and what the channel carried besides the tone, once the levels
         # are extracted; the readout hides itself beside a record with
-        # none, since it reads the extraction and never runs it
+        # none, since it reads the extraction and never runs it, and
+        # says so rather than checking levels whose settings have moved
+        levels = self._extracted_levels(history, specs[0])
         panel.distortion.show_distortion(
-            history, specs[0], self._extracted_levels(history, specs[0]))
+            history, specs[0], levels,
+            stale=None if levels is None
+            else self._stale.get(self.project.name_of(levels)))
 
     def _journal_dwell(self, history, specification, reading):
         """The dwell readout, journaled as the headless call that draws
