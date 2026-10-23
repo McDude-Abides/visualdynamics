@@ -427,6 +427,26 @@ def _draw_octave(painter, color):
                          QPointF(right, 26 if top == 38 else 33))
 
 
+def _draw_transmissibility(painter, color):
+    """A resonance drawn solid, and a dashed line that rides it and
+    lifts away at the right.
+
+    What the button puts on the plot, in miniature: H1 with its peak,
+    and the ASD ratio, which agrees with it where the coherence is high
+    and reads over it where uncorrelated noise is on the response. The
+    two are told apart by the dash, as on the plot.
+    """
+    solid = [(6, 40), (18, 38), (26, 30), (30, 12), (34, 30), (42, 44),
+             (58, 54)]
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(_curve(solid))
+    dashed = _pen(color, 3)
+    dashed.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(dashed)
+    painter.drawPath(_curve([(42, 40), (50, 36), (58, 34)]))
+
+
 def _draw_tone(painter, color):
     """A spike standing on a flat floor, a triangle on its top.
 
@@ -2240,7 +2260,7 @@ def control_icon(name: str) -> QIcon:
      'kurtosis': _draw_kurtosis, 'statistics': _draw_statistics,
      'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,
-     'tone': _draw_tone,
+     'tone': _draw_tone, 'transmissibility': _draw_transmissibility,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

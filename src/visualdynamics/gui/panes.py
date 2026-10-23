@@ -63,6 +63,7 @@ from .stroke_panel import StrokePanel
 from .sweep_rate_panel import SweepRatePanel
 from .tone_panel import TonePanel
 from .toolbars import fence, shows_anything, tidy
+from .transmissibility_panel import TransmissibilityPanel
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
 
@@ -209,6 +210,8 @@ class DataPane(QWidget):
     octave_toggled = Signal(bool)
     #: the tone readout was asked for (True) or put away (False)
     tone_toggled = Signal(bool)
+    #: the transmissibility reading was asked for (True) or put away
+    transmissibility_toggled = Signal(bool)
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
@@ -264,6 +267,7 @@ class DataPane(QWidget):
         self.truncate_wanted: bool = False
         self.octave_wanted: bool = False
         self.tone_wanted: bool = False
+        self.transmissibility_wanted: bool = False
         self.sweep_rate_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
@@ -373,6 +377,8 @@ class DataPane(QWidget):
         self.octave_panel.hide()
         self.tone_panel: TonePanel = TonePanel()
         self.tone_panel.hide()
+        self.transmissibility_panel: TransmissibilityPanel =             TransmissibilityPanel()
+        self.transmissibility_panel.hide()
         # the modes a sine sweep is checked against, beside the sweep
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
@@ -427,6 +433,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.octave_panel)
         plot_row.addWidget(self.srs_tolerance_panel)
         plot_row.addWidget(self.tone_panel)
+        plot_row.addWidget(self.transmissibility_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
         plot_row.addWidget(self.signature_panel)
@@ -936,6 +943,26 @@ class DataPane(QWidget):
         self.tone_action.triggered.connect(
             lambda checked=False: self._choose_toggle('tone', checked))
         toolbar.addAction(self.tone_action)
+        # an FRF read behind: the ASD-ratio transmissibility beside H1
+        # and the band H1's coherence and averages give, with a cursor
+        # read in the pane. A reading of an FRF that exists, so a toggle
+        # with no act, like the tones
+        self.transmissibility_action: QAction = QAction(
+            control_icon('transmissibility'), 'Transmissibility', self)
+        self.transmissibility_action.setCheckable(True)
+        self.transmissibility_action.setToolTip(
+            'Draw the ASD-ratio transmissibility, the root of the '
+            'response ASD over the input ASD, dashed beside H1, with the '
+            "band H1's random error puts about it from its coherence "
+            'and averages: the ratio reads high wherever uncorrelated '
+            'noise is on the response, and H1 does not')
+        self.transmissibility_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('transmissibility',
+                                                      checked))
+        # offered by the render that draws an FRF computed from a time
+        # history, and by nothing else, so it starts put away
+        self.transmissibility_action.setVisible(False)
+        toolbar.addAction(self.transmissibility_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
         # whether the rate lets the mode build. A reading of the
@@ -1001,6 +1028,7 @@ class DataPane(QWidget):
             [self.waterfall_action],
             [self.octave_action, self.tone_action],
             [self.sweep_rate_action],
+            [self.transmissibility_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
             self.replication_group.actions(),
@@ -1130,9 +1158,9 @@ class DataPane(QWidget):
         self.truncate_toggled.emit(checked)
 
     def _choose_toggle(self, key: str, checked: bool) -> None:
-        """The octave, tones or sweep-rate button, each a toggle of its
-        own: remember it, put its panel away when it is unchecked, then
-        say so."""
+        """The octave, tones, transmissibility or sweep-rate button,
+        each a toggle of its own: remember it, put its panel away when
+        it is unchecked, then say so."""
         setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
             getattr(self, f'{key}_panel').hide()
@@ -1775,7 +1803,8 @@ class DataPane(QWidget):
                       averaging: bool = False, shocks: bool = False,
                       residual: bool = False,
                       octave: bool = False, sine: bool = False,
-                      tone: bool = False, fit: bool = False) -> None:
+                      tone: bool = False, fit: bool = False,
+                      transmissibility: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when there are none.
 
@@ -1791,7 +1820,9 @@ class DataPane(QWidget):
         the stroke readout, for a record with acceleration in a declared
         unit to integrate. `octave` offers the
         octave bands of a plain density, `tone` the tone readout of a plain
-        autospectrum, and `residual` the fit's residual CMIF. The pair,
+        autospectrum, `transmissibility` the ASD ratio and H1's band
+        behind an FRF computed from a time history, and `residual` the
+        fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
         the code that draws offers them afterwards.
         """
@@ -1842,6 +1873,10 @@ class DataPane(QWidget):
         # (principle 3)
         self._offer('octave', 'octave_panel', octave)
         self._offer('tone', 'tone_panel', tone)
+        # and the transmissibility behind an FRF whose history is in the
+        # project, read on its magnitude
+        self._offer('transmissibility', 'transmissibility_panel',
+                    transmissibility)
         self.residual_action.setVisible(residual)
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
@@ -1913,6 +1948,7 @@ class DataPane(QWidget):
         for action in (*readings, self.curves_action, self.map_action,
                        self.drive_point_action, self.cmif_action,
                        self.octave_action, self.tone_action,
+                       self.transmissibility_action,
                        self.sweep_rate_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,

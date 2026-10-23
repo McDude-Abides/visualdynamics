@@ -997,6 +997,9 @@ class MainWindow(QMainWindow):
         self.data_pane.tone_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.tone_panel.changed.connect(self._tone_window_chosen)
+        # and the transmissibility behind an FRF: the toggle redraws
+        self.data_pane.transmissibility_toggled.connect(
+            lambda _wanted: self.render_current())
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -1148,6 +1151,13 @@ class MainWindow(QMainWindow):
         #: so a redraw finds it where it was
         self._tone_windows: dict[str, tuple[str, float | None]] = {}
         self._tone_frequencies: dict[str, float] = {}
+        #: the transmissibility reading on an FRF's magnitude
+        #: (`_draw_transmissibility`): the reading, the cursor and the
+        #: overlay; None while it is not up. And where each FRF
+        #: record's cursor was left, so a redraw finds it there
+        self._transmissibility: dict[str, Any] | None = None
+        self._transmissibility_frequencies: dict[tuple[str, int],
+                                                 float] = {}
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
         #: which comparison the plot is drawing, so the compliance table
@@ -9447,6 +9457,7 @@ class MainWindow(QMainWindow):
         self._refused_comparison = None
         self._clear_octave()
         self._clear_tone()
+        self._clear_transmissibility()
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -12154,6 +12165,141 @@ class MainWindow(QMainWindow):
             # the plot went with the drawing it belonged to
             pass
 
+    def _transmissibility_source(self, series):
+        """(name, FRF, records) when the selection is one FRF drawn as
+        its magnitude, computed in this project from a time history
+        against one reference: the FRF the transmissibility reading can
+        be read behind (`Project.read_transmissibility`). None
+        otherwise, which is also what hides the button."""
+        if len(series) != 1:
+            return None
+        name, data, records = series[0]
+        if (not isinstance(data, Frf) or name not in self.project
+                or self.data_pane.component() != 'magnitude'):
+            return None
+        provenance = self.project.provenance.get(name, {})
+        if (provenance.get('verb') != 'compute_frfs'
+                or not isinstance(self.project.get(provenance.get('source')),
+                                  TimeHistory)
+                or len({str(dof) for dof in data.reference_dof}) != 1):
+            return None
+        return name, data, records
+
+    def _draw_transmissibility(self, name, frf, records):
+        """The transmissibility reading over the FRF's magnitude: the
+        ASD ratio dashed, the band H1's error gives, H1 itself where the
+        FRF is another estimator (`plot.transmissibility`), a cursor to
+        drag and the reading at its line in the pane.
+
+        One record is read, the first on the plot: pick a sub-item in
+        the tree to read another. Returns the status line, or None to
+        keep the plot's.
+        """
+        import pyqtgraph as pg
+        from PySide6.QtCore import Qt
+
+        from ..plot.transmissibility import (
+            TransmissibilityOverlay,
+            display_scale,
+        )
+
+        plot = next((item for item in self.data_pane.graphics.ci.items
+                     if hasattr(item, 'addItem')), None)
+        if plot is None:
+            return None
+        record = int(records[0]) if records else 0
+        panel = self.data_pane.transmissibility_panel
+        try:
+            reading = self.project.read_transmissibility(name, record)
+        except ValueError as refusal:
+            panel.show_reading(None)
+            panel.show()
+            message = f'No transmissibility read: {refusal}'
+            self._show_status(message)
+            return message
+        estimator = str(self.project.provenance.get(name, {})
+                        .get('params', {}).get('method', ''))
+        scale, unit = display_scale(reading, self.unit_system)
+        color = resolve_theme(self.theme_name)['plot_foreground']
+        overlay = TransmissibilityOverlay(plot, color)
+        overlay.show(reading, scale=scale, draw_h1=estimator != 'H1')
+        f = np.asarray(reading.frequency, dtype=float)
+        frequency = self._transmissibility_frequencies.get((name, record))
+        if frequency is None or not f[0] <= frequency <= f[-1]:
+            # the tallest H1 off DC that the input accounts for at least
+            # half of: the resonance, where a reading starts. Lines the
+            # input barely drives (out of its band) can hold a far taller
+            # H1 of nothing; a record with no such line starts at its
+            # middle
+            values = reading.magnitude[1:]
+            finite = np.isfinite(values) & (reading.coherence[1:] >= 0.5)
+            frequency = (float(f[1 + int(np.argmax(
+                np.where(finite, values, -np.inf)))]) if finite.any()
+                else float(f[len(f) // 2]))
+        log_x = plot.getViewBox().state['logMode'][0]
+        cursor = pg.InfiniteLine(
+            pos=float(np.log10(frequency)) if log_x else frequency,
+            angle=90, movable=True,
+            pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
+        plot.addItem(cursor, ignoreBounds=True)
+        self._transmissibility = {
+            'name': name, 'record': record, 'reading': reading,
+            'plot': plot, 'cursor': cursor, 'overlay': overlay,
+            'estimator': estimator, 'scale': scale, 'unit': unit,
+            'log_x': log_x, 'point': None}
+        cursor.sigPositionChanged.connect(self._transmissibility_moved)
+        # journaled as the headless call that draws it; the cursor is a
+        # place to read, not a parameter of the figure
+        prefix = ('visualdynamics.plot.plot_transmissibility('
+                  f'project.read_transmissibility({name!r}')
+        self._journal_view(
+            prefix, f"{prefix}, {record}), path='transmissibility.png', "
+                    "show=False)")
+        panel.show()
+        return self._transmissibility_moved()
+
+    def _transmissibility_moved(self, _line=None):
+        """Read the line under the cursor, mark it, write it in the pane
+        and the status line. Returns the status line."""
+        state = self._transmissibility
+        if state is None:
+            return None
+        value = float(state['cursor'].value())
+        frequency = 10.0 ** value if state['log_x'] else value
+        reading = state['reading']
+        f = reading.frequency
+        frequency = float(np.clip(frequency, f[0], f[-1]))
+        self._transmissibility_frequencies[
+            (state['name'], state['record'])] = frequency
+        point = reading.at(frequency)
+        state['point'] = point
+        state['overlay'].mark(point.frequency)
+        self.data_pane.transmissibility_panel.show_reading(
+            reading, point, estimator=state['estimator'],
+            scale=state['scale'], unit=state['unit'])
+        message = (f'{reading.response} over {reading.reference}, '
+                   + point.describe(state['unit'], state['scale']))
+        self._show_status(message)
+        return message
+
+    def _clear_transmissibility(self):
+        """Take the cursor and the overlay off, before every drawing,
+        like every other preview."""
+        state, self._transmissibility = self._transmissibility, None
+        if state is None:
+            return
+        try:
+            state['cursor'].sigPositionChanged.disconnect(
+                self._transmissibility_moved)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            state['overlay'].remove()
+            state['plot'].removeItem(state['cursor'])
+        except RuntimeError:
+            # the plot went with the drawing it belonged to
+            pass
+
     def _draw_truncation(self, history):
         """Gray the ends being cut away and put the span beside it.
 
@@ -12565,6 +12711,9 @@ class MainWindow(QMainWindow):
                                      is not None,
                                      tone=self._tone_source(series)
                                      is not None,
+                                     transmissibility=self.
+                                     _transmissibility_source(series)
+                                     is not None,
                                      # a declared unit, as the readings
                                      # require (`core.shaker`)
                                      fit=history is not None and any(
@@ -12846,6 +12995,10 @@ class MainWindow(QMainWindow):
         # 13 ms on 200 autospectra, and is wanted only while it is up
         toning = (self.data_pane.showing_tone
                   and self._tone_source(series) is not None)
+        # and the transmissibility's, read off the flat magnitude
+        toning = toning or (
+            self.data_pane.showing('transmissibility')
+            and self._transmissibility_source(series) is not None)
         offered = (entry is not None and not pairs and not lone_fed
                    and not cursor and not toning
                    and self._waterfall_count(entry) >= 1)
@@ -12932,6 +13085,10 @@ class MainWindow(QMainWindow):
         toned = self.data_pane.showing_tone and self._tone_source(series)
         if toned:
             message = self._draw_tone(*toned) or message
+        behind = (self.data_pane.showing('transmissibility')
+                  and self._transmissibility_source(series))
+        if behind:
+            message = self._draw_transmissibility(*behind) or message
         return message + axis_note
 
     def _paged_series(self, series, entry, pairs, lone_fed):
