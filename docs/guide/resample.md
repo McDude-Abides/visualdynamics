@@ -39,26 +39,32 @@ line counts 400, 800 and 1,600 on an analyzer's menu come from.
 ## Resampling
 
 `resample(history, rate)`, or `history.resample(rate)`, filters every
-channel through a zero-phase Butterworth low-pass with its corner at
-the new rate over 2.56 (`anti_alias_filter`), then keeps every q-th
-sample. The new rate must divide the record's into a whole factor of at
+channel through a zero-phase Butterworth low-pass (`anti_alias_filter`),
+then keeps every q-th sample. The new rate must divide the record's into a whole factor of at
 least 2; a rate that does not is refused with the nearest two that do.
 The filter runs forward and backward, as the Filter reading's does, so
 nothing moves in time and the edge transients land at the record's
-ends. The result keeps the records' descriptions and the source's clock
-at every q-th sample. It does not carry the averaging or the shock
-windows, since an averaging counts its frame in samples, which spans
-another time at the new rate.
+ends. The result keeps the records' descriptions, the source's clock at
+every q-th sample (a record that starts at 3.25 s still does), and the
+shock windows, which are in seconds from the record's start. It does
+not carry the averaging, since an averaging counts its frame in
+samples, which spans another time at the new rate. The channels are
+filtered and decimated one at a time, so the record filtered at the
+full rate is never held whole beside it.
 
-The default design order is 8 (`ORDER`). Run forward and backward it
-rolls off as a sixteenth-order filter, and at the lowest frequency that
-can fold into the span, the new rate less the span (3,120 Hz at
-5,120 Hz, 1.56 spans), it is 62 dB down: past the 50 dB test documents
-commonly ask of an anti-alias filter. Seventh order is the least that
-gets there, and sixth falls short at about 46 dB. The corner sits on
-the span's top line, where the zero-phase pair is 6.02 dB down by
-definition, so the top few lines of the span carry part of the
-roll-off.
+The filter's corner is at 1.2 times the span (`CORNER`), 2,400 Hz at
+5,120 Hz, among the dropped lines and below the new Nyquist frequency.
+A zero-phase pair is 6.02 dB down at its nominal corner, so a corner on
+the span would take the span's top line 6 dB down and 0.9 of the span
+1.5 dB down; at 1.2 spans the span is flat to 0.1 dB. The lowest
+frequency that can fold into the span is the new rate less the span
+(3,120 Hz at 5,120 Hz, 1.56 spans), 1.3 corners up. The default design
+order is 12 (`ORDER`), which run forward and backward is 55.8 dB down
+there taking 51,200 Hz to 5,120 Hz, 55.1 dB taking 81,920 Hz to
+5,120 Hz, and never less than 54.7 dB at any factor: past the 50 dB
+test documents commonly ask of an anti-alias filter. Eleventh order
+just gets there at large factors, and tenth falls short at about
+46 dB.
 
 `resample(history, rate, anti_alias=False)` keeps every q-th sample
 with no filter and issues an `AliasWarning` every time. Use it only for
@@ -97,7 +103,8 @@ plot_resample(history, 5120.0, frequencies=[4600.0], path='resample.png')
 ```
 
 `read_resample` resamples one channel three ways, filtered first,
-decimated bare, and decimated then low-passed at the span, and turns
+decimated bare, and decimated then low-passed through the same filter,
+and turns
 each and the record as recorded into an autospectrum on one line
 spacing (Hann frames, half overlapped, 1,024 samples at the new rate by
 default). Each frequency given above the new Nyquist frequency is
@@ -108,7 +115,7 @@ is the one folded.
 Decimated bare, the 4,600 Hz resonance stands at 520 Hz at
 0.0667 g²/Hz, the height of a 1 g tone on a 5 Hz Hann line, and the
 whole floor between 2,560 and 40,960 Hz has folded on top of the real
-one, sixteen times as high. Low-passed at 2,000 Hz after the
+one, sixteen times as high. Low-passed at 2,400 Hz after the
 decimation, the 520 Hz line is unchanged. Filtered first, the
 resonance is gone: the line at 520 Hz is the floor, 79.8 dB below the
 alias. The 300 Hz tone comes through all three at its height.
@@ -124,14 +131,11 @@ at 2,000 Hz and the Nyquist frequency at 2,560 Hz are marked, and the
 | Reading | What it is |
 |---|---|
 | `source_rate`, `rate`, `factor` | the record's rate, the new one, and how many samples make one |
-| `nyquist`, `span`, `corner` | half the new rate, the alias-free span, and the filter's corner, at the span |
+| `nyquist`, `span`, `corner` | half the new rate, the alias-free span, and the filter's corner, 1.2 spans |
 | `lines`, `kept`, `dropped`, `resolution` | the spectra's lines to the Nyquist frequency, inside the span and above it, and their spacing |
 | `gain_at_span`, `lowest_fold`, `gain_at_fold` | the filter's zero-phase gain at the span's top, the lowest frequency that folds into the span, and the gain there |
 | `folds` | each frequency folded: where it lands, whether inside the span or among the dropped lines, and the level at the alias decimated bare, low-passed after, and filtered first, with the last two in dB against the bare |
 | `spectra` | the four autospectra the levels are read from |
-
-The figure was drawn on Windows, so its typeface differs from the
-other figures in this guide.
 
 ## In the app
 
