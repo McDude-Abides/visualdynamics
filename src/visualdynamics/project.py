@@ -1708,6 +1708,82 @@ class Project(dict):
         except (TypeError, ValueError):
             return None
 
+    def rms_source(self, name: Any) -> str | None:
+        """The name of the time history a computed autospectrum was made
+        from, from its provenance, or None when it records none (an
+        imported spectrum) or that record is no longer in the project.
+
+        Parameters
+        ----------
+        name : str or object
+            The spectrum, by name or as the object itself.
+
+        Returns
+        -------
+        str or None
+        """
+        from .core.data import TimeHistory
+
+        record = self.provenance.get(self.name_of(name), {})
+        source = record.get('source')
+        if (record.get('verb') != 'compute_psds' or source not in self
+                or not isinstance(self[source], TimeHistory)):
+            return None
+        return source
+
+    def rms_check(self, spectrum: Any, record: int = 0, *,
+                  history: Any = None,
+                  threshold_db: float | None = None) -> Any:
+        """Check one record of an autospectrum against the time history
+        it came from (the rms check): the rms from the area under the
+        spectrum beside the record's own rms, the gap in dB, and the
+        verdict.
+
+        A computed spectrum is checked against the record its
+        provenance names, over the frames it was averaged with
+        (`averaging_of`), so a record whose averaging has moved since
+        is still read as the spectrum saw it. An imported spectrum, or
+        one checked against another record, takes `history` and that
+        record's own averaging. `Psd.rms_check` does the reading.
+
+        Parameters
+        ----------
+        spectrum : str or object
+            The autospectrum, by name or as the object itself.
+        record : int, default 0
+            Which record of the spectrum.
+        history : str or object, optional
+            The time history to check against; the one the spectrum
+            was computed from when omitted.
+        threshold_db : float, optional
+            The gap, in dB either way, beyond which the two disagree;
+            `core.rms_check.GAP_DB` when omitted.
+
+        Returns
+        -------
+        RmsCheck
+
+        Raises
+        ------
+        ValueError
+            When no time history is given and the spectrum records
+            none, or when `Psd.rms_check` refuses.
+        """
+        name = self.name_of(spectrum)
+        source = self.rms_source(name)
+        if history is None:
+            if source is None:
+                raise ValueError(
+                    f'{name} records no time history it was computed '
+                    'from; name the one to check it against')
+            history = source
+        history_name = self.name_of(history)
+        averaging = (self.averaging_of(name) if history_name == source
+                     else None)
+        return self[name].rms_check(self[history_name], record,
+                                    averaging=averaging,
+                                    threshold_db=threshold_db)
+
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:
         """Integrate a spectrum onto proportional octave bands (Compute

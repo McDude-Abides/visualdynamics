@@ -71,6 +71,9 @@ THEORY = {
                         'area under each segment of a breakpoint table',
     'core.chance': 'the chi-square scatter of an averaged autospectrum '
                    'and the degrees of freedom of lines combined',
+    'core.rms_check': 'the area under an autospectrum against the mean '
+                      'square of its record, and the window that makes '
+                      'it an estimate',
 }
 
 #: and methods, where the theory lives on the call rather than the module

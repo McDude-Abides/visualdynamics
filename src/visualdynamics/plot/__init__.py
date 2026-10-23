@@ -3563,6 +3563,89 @@ def plot_transmissibility(reading: Any, *, spread: float = 1.0,
                         size=size)
 
 
+def plot_rms_check(data: Any, history: Any, record: int = 0, *,
+                   averaging: Any = None,
+                   threshold_db: float | None = None,
+                   unit_system: UnitSystem | None = None,
+                   theme: Any = None,
+                   path: str | os.PathLike | None = None,
+                   show: bool = True, title: str | None = None,
+                   size: tuple[int, int] = (1000, 700)) -> Any:
+    """Draw one record of an autospectrum with its rms check written on
+    it: the rms from the spectrum beside the rms of the time history it
+    came from, the gap in dB and the verdict in words.
+
+        visualdynamics.plot.plot_rms_check(asd, history, path='rms.png')
+
+    The record is drawn as `plot_series` draws it, the check is made by
+    `Psd.rms_check` with the same arguments, and
+    `plot.rms_check.add_rms_check` writes it in the plot's top-right
+    corner, where the RMS Check reading in the window writes it too.
+
+    Parameters
+    ----------
+    data : Psd
+        The autospectrum.
+    history : TimeHistory
+        The record it was computed from.
+    record : int, default 0
+        Which record of `data`.
+    averaging : Averaging, optional
+        How `data` was averaged; `history`'s own when omitted
+        (`Project.averaging_of` gives a computed spectrum's).
+    threshold_db : float, optional
+        The gap, in dB either way, beyond which the two disagree;
+        `core.rms_check.GAP_DB` when omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from .rms_check import add_rms_check
+    from .tone_readout import display_units
+
+    check = data.rms_check(history, record, averaging=averaging,
+                           threshold_db=threshold_db)
+    us = DEFAULT_SYSTEM if unit_system is None else unit_system
+    scale, _dense, unit = display_units(data, record, us)
+
+    def build(widget: Any) -> Any:
+        build_plots(widget, [(None, data, [record])], unit_system=us,
+                    theme=theme)
+        plot = next(item for item in widget.ci.items
+                    if hasattr(item, 'addItem'))
+        add_rms_check(plot, check,
+                      color=resolve_theme(theme)['plot_foreground'],
+                      unit=unit, scale=scale)
+        # headroom over the trace for the words in the corner, so they
+        # write over no line; the plot is locked to its data's extents,
+        # so the lock is lifted to the new top first
+        box = plot.getViewBox()
+        log_y = box.state['logMode'][1]
+        shown = np.abs(np.asarray(data.ordinate[record], dtype=np.float64)
+                       ) * _dense
+        shown = shown[np.isfinite(shown) & (shown > 0.0 if log_y else True)]
+        if len(shown) and log_y:
+            low, high = np.log10(shown.min()), np.log10(shown.max())
+            reach = max(high - low, 0.5)
+            low, high = low - 0.05 * reach, high + 0.75 * reach
+        elif len(shown):
+            low, high = 0.0, 1.9 * shown.max()
+        if len(shown):
+            box.setLimits(yMin=low, yMax=high)
+            plot.setYRange(low, high, padding=0.0)
+
+    gap = check.gap_db
+    said = f'{gap:+.3f} dB' if np.isfinite(gap) else 'no gap'
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{data.response_dof[record]}: '
+                                        f'rms check, {said}'),
+                        size=size)
+
+
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:

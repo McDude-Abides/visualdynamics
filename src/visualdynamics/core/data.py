@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from .amplitude_spectrum import AmplitudeSpectrum
     from .averaging import Averaging, ConfidenceBand
     from .half_power import HalfPower
+    from .rms_check import RmsCheck
     from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
     from .transmissibility import TransmissibilityReading
@@ -3931,6 +3932,55 @@ class Psd(_Bands, DataArray):
         return read_tone(self.abscissa, self.ordinate[record], frequency,
                          window=window, parameter=parameter, snap=snap,
                          unit=unit, warn=warn)
+
+    def rms_check(self, history: TimeHistory, record: int = 0, *,
+                  averaging: Averaging | None = None,
+                  threshold_db: float | None = None) -> RmsCheck:
+        """Check one record of this autospectrum against the time history
+        it came from: the rms from the area under it beside the record's
+        own rms, and the gap between them in dB.
+
+        The area under a density is the mean square of its record, so a
+        correctly scaled spectrum gives back the record's rms;
+        `core.rms_check.check_record` does the check and says how, and
+        `visualdynamics.plot.plot_rms_check` draws it.
+
+        Parameters
+        ----------
+        history : TimeHistory
+            The record this spectrum was computed from; the channel with
+            this record's DOF and quantity is the one read, every
+            capture of it pooled.
+        record : int, default 0
+            Which record of this spectrum.
+        averaging : Averaging, optional
+            How the spectrum was averaged, which sets the span the
+            record's rms is read over and the frames' own mean square;
+            `history`'s own when omitted. A project gives a computed
+            spectrum's as `Project.averaging_of`.
+        threshold_db : float, optional
+            The gap, in dB either way, beyond which the two disagree;
+            `core.rms_check.GAP_DB` when omitted.
+
+        Returns
+        -------
+        RmsCheck
+            Both rms in the record's unit (SI, as stored), the gap, the
+            frames' own rms when the averaging is known, and the
+            verdict.
+
+        Raises
+        ------
+        ValueError
+            For a banded spectrum, one written at breakpoints or a cross
+            spectrum, when `history` holds no such channel, or when the
+            frames do not fit in it.
+        """
+        from .rms_check import GAP_DB, check_record
+
+        return check_record(self, history, record, averaging=averaging,
+                            threshold_db=(GAP_DB if threshold_db is None
+                                          else threshold_db))
 
     def area(self, record: int = 0, low: float | None = None,
              high: float | None = None) -> float:
