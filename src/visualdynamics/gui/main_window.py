@@ -968,6 +968,8 @@ class MainWindow(QMainWindow):
         # a dwell read in the sine view is journaled as the call that
         # draws it, as every parameterized reading is
         self.data_pane.sine_panel.dwell.read.connect(self._journal_dwell)
+        self.data_pane.sine_panel.distortion.read.connect(
+            self._journal_distortion)
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(
@@ -11911,6 +11913,11 @@ class MainWindow(QMainWindow):
         # and a held tone, read against time where its story is; the
         # readout hides itself beside a specification that only sweeps
         panel.dwell.show_dwell(history, specs[0], self.unit_system)
+        # and what the channel carried besides the tone, once the levels
+        # are extracted; the readout hides itself beside a record with
+        # none, since it reads the extraction and never runs it
+        panel.distortion.show_distortion(
+            history, specs[0], self._extracted_levels(history, specs[0]))
 
     def _journal_dwell(self, history, specification, reading):
         """The dwell readout, journaled as the headless call that draws
@@ -11928,6 +11935,43 @@ class MainWindow(QMainWindow):
             f'{prefix}, tone={reading.tone!r}, segment={reading.segment!r}, '
             f'channel={reading.dof!r}, share={reading.share!r}, '
             "path='dwell.png', show=False)")
+
+    def _extracted_levels(self, history, specification):
+        """The sine level set most recently extracted from `history`
+        against `specification`, by the project's own record of what each
+        object was made from; None when there is none."""
+        try:
+            record = self.project.name_of(history)
+            sweep = self.project.name_of(specification)
+        except (KeyError, ValueError):
+            return None
+        for name in reversed(list(self.project.names)):
+            made = self.project.provenance.get(name, {})
+            if (made.get('verb') == 'extract_sine'
+                    and made.get('source') == record
+                    and (made.get('params') or {}).get('specification')
+                    == sweep):
+                return self.project[name]
+        return None
+
+    def _journal_distortion(self, history, specification, levels, check,
+                            dof):
+        """The distortion readout, journaled as the headless call that
+        draws it (`_journal_view`): `plot_sine_distortion` with the tone,
+        the channel and the tolerance the readout used."""
+        try:
+            record = self.project.name_of(history)
+            sweep = self.project.name_of(specification)
+            extracted = self.project.name_of(levels)
+        except (KeyError, ValueError):
+            return
+        prefix = ('visualdynamics.plot.plot_sine_distortion('
+                  f'project[{record!r}], project[{sweep!r}], '
+                  f'project[{extracted!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, tone={check.tone!r}, channel={dof!r}, '
+            f"excess={check.excess!r}, path='distortion.png', show=False)")
 
     def _octave_source(self, series):
         """The one density the octave reading would band — a PSD, a

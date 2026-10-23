@@ -4291,6 +4291,72 @@ def plot_dwell(history: Any, specification: Any, *, tone: str | None = None,
                         size=size)
 
 
+def plot_sine_distortion(history: Any, specification: Any,
+                         levels: Any = None, *, tone: str | None = None,
+                         channel: str | None = None,
+                         excess: float | None = None,
+                         cycles: float | None = None, theme: Any = None,
+                         path: str | os.PathLike | None = None,
+                         show: bool = True, title: str | None = None,
+                         size: tuple[int, int] = (1000, 620)) -> Any:
+    """Draw a sine tone's distortion against frequency, the limit
+    across it.
+
+        visualdynamics.plot.plot_sine_distortion(history, spec, levels,
+                                                 path='distortion.png')
+
+    The check is `core.sine_distortion.check_distortion`, with the same
+    arguments: the channel's unfiltered RMS against the RMS of the tone
+    the extraction tracked, at every line of `levels` (extracted here
+    when omitted). It is drawn by `plot.sine_distortion.build_distortion`:
+    the limit dashed, each control channel (or only `channel`) as a solid
+    curve with its own hollow marker, the same marker filled on a line
+    over the limit, and each named in the legend with its worst reading
+    and its verdict in words. The window's sine view reads the same check
+    in its Distortion readout.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The recording.
+    specification : SineSweepSpecification
+        The sweep the drive followed.
+    levels : SineLevelSet, optional
+        The levels extracted from `history`; extracted when omitted.
+    tone, cycles
+        As for `core.sine_distortion.check_distortion`.
+    channel : str, optional
+        The one control channel drawn; every channel the levels hold by
+        default.
+    excess : float, optional
+        The share the unfiltered RMS may stand above the tone's,
+        `core.sine_distortion.DISTORTION_EXCESS` by default.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.sine_distortion import DISTORTION_EXCESS, check_distortion
+    from .sine_distortion import build_distortion
+
+    check = check_distortion(
+        history, specification, levels, tone=tone,
+        channels=None if channel is None else [channel],
+        excess=DISTORTION_EXCESS if excess is None else excess,
+        cycles=cycles)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_distortion(widget, check, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{check.tone}, distortion',
+                        size=size)
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,

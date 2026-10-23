@@ -13,7 +13,10 @@ button runs the project verb with whatever is set at that moment, the
 same split as in the filter panel, since these are also settings
 carried by the record. Under the button, when the specification holds a
 dwell, the dwell readout reads it against time (`gui.dwell_panel`); a
-held tone is one point over frequency, and its story is in time.
+held tone is one point over frequency, and its story is in time. And once
+the levels have been extracted, the distortion readout checks them
+against the record read unfiltered (`gui.distortion_panel`): what the
+channel carried besides the tone the extraction tracked.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.sine import CYCLES_LADDER, SineExtraction
+from .distortion_panel import DistortionPanel
 from .dwell_panel import DwellPanel
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import (
@@ -188,7 +192,13 @@ class SinePanel(QWidget):
         self.dwell: DwellPanel = DwellPanel()
         self.dwell.hide()
         grid.addWidget(self.dwell, len(rows) + 4 + len(derived), 0, 1, 2)
-        grid.setRowStretch(len(rows) + 5 + len(derived), 1)
+        # the distortion readout, shown only beside extracted levels; it
+        # reads them and the record and sets nothing the extraction uses
+        self.distortion: DistortionPanel = DistortionPanel()
+        self.distortion.hide()
+        grid.addWidget(self.distortion, len(rows) + 5 + len(derived), 0, 1,
+                       2)
+        grid.setRowStretch(len(rows) + 6 + len(derived), 1)
         commit_on_enter(self.cycles_box, self.target_box)
         self.mode_box.currentIndexChanged.connect(self._edited)
         self.cycles_box.valueChanged.connect(self._edited)
@@ -308,6 +318,7 @@ class SinePanel(QWidget):
         if self._sampled:
             self.preview.show_samples(self._sampled)
         self.dwell.apply_theme(colors)
+        self.distortion.apply_theme(colors)
 
 
 def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:

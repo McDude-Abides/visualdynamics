@@ -63,6 +63,8 @@ THEORY = {
                   'held tone',
     'core.transmissibility': 'the H1 estimate, the coherence and the '
                              'random error of a gain factor',
+    'core.sine_distortion': 'the distortion of a sinusoidal vibration and '
+                            'the tracked tone it is read against',
 }
 
 #: and methods, where the theory lives on the call rather than the module
