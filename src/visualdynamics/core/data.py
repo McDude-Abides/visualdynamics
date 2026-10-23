@@ -51,7 +51,7 @@ from numpy.typing import ArrayLike
 
 if TYPE_CHECKING:
     from ..units import UnitSystem
-    from .averaging import Averaging
+    from .averaging import Averaging, ConfidenceBand
     from .half_power import HalfPower
     from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
@@ -3498,30 +3498,9 @@ class Psd(_Bands, DataArray):
             given, if it holds cross terms (whose error is not
             chi-square), or if a count or the level is out of range.
         """
-        # A cross term's magnitude has a different error law, and a
-        # band drawn on it as if chi-square would be a claim nobody
-        # computed. Refused rather than skipped, so the caller knows.
-        # A record is an autospectrum only when its two DOFs are one
-        # and its two quantities are one: force against acceleration
-        # at a drive point names 1X+ twice and is still a cross term,
-        # whose real part alone the band would otherwise have been
-        # drawn on (2026-10-16).
         from .averaging import chi_square_factors
 
-        for i in range(self.num_records):
-            response, reference = self.record_pair(i)
-            first, second = channel_quantities(self.ordinate_dim[i])
-            if response != reference or first != second:
-                raise ValueError('a chi-square band is on an '
-                                 'autospectrum; this PSD holds cross '
-                                 f'terms ({self.record_label(i)})')
-        counts = self.statistical_dof if dof is None else dof
-        if counts is None:
-            raise ValueError(
-                'this PSD does not say what it was averaged over; pass '
-                'dof, or compute it from a time history')
-        counts = np.broadcast_to(np.asarray(counts, dtype=float),
-                                 (self.num_records,))
+        counts = self._band_counts(dof)
         values = np.real(self.ordinate)
         factors = np.array([chi_square_factors(n, level) for n in counts])
         edges = []
@@ -3537,6 +3516,92 @@ class Psd(_Bands, DataArray):
             edge.interpolation = self.interpolation
             edges.append(edge)
         return edges[0], edges[1]
+
+    def confidence_reading(self, level: float = 0.90,
+                           dof: float | ArrayLike | None = None
+                           ) -> list[ConfidenceBand]:
+        """The chi-square band on each record, as the reading states it:
+        one `core.averaging.ConfidenceBand` per record, holding the
+        confidence, the degrees of freedom it was worked out at, the two
+        factors and their decibels (`ConfidenceBand.describe` puts them
+        in words), and the edges in this spectrum's units.
+
+        The same band `confidence_band` returns as two PSDs, from the
+        same counts by the same rule, so a number read here is the edge
+        drawn on the plot.
+
+        Parameters
+        ----------
+        level : float, optional
+            The confidence, a fraction: 0.90 by default, 0.95 for the
+            stricter band.
+        dof : float or array-like, optional
+            The statistical degrees of freedom, one number for every
+            record or one per record. Defaults to `statistical_dof`.
+
+        Returns
+        -------
+        list of ConfidenceBand
+            One per record, in record order.
+
+        Raises
+        ------
+        ValueError
+            As `confidence_band` raises: no degrees of freedom known or
+            given, a cross term among the records, or a count or the
+            level out of range.
+        """
+        from .averaging import confidence_bands
+
+        counts = self._band_counts(dof)
+        values = np.real(self.ordinate)
+        return [confidence_bands(values[i], counts[i], levels=[level])[0]
+                for i in range(self.num_records)]
+
+    def is_autospectrum(self) -> bool:
+        """Whether every record is an autospectrum, a channel against
+        itself: one DOF and one quantity on both sides. Only such a
+        spectrum has a chi-square band (`confidence_band`).
+
+        Returns
+        -------
+        bool
+        """
+        return self._cross_term() is None
+
+    def _cross_term(self) -> int | None:
+        """The first record that is a cross term, or None."""
+        # A record is an autospectrum only when its two DOFs are one
+        # and its two quantities are one: force against acceleration
+        # at a drive point names 1X+ twice and is still a cross term,
+        # whose real part alone the band would otherwise have been
+        # drawn on (2026-10-16).
+        for i in range(self.num_records):
+            response, reference = self.record_pair(i)
+            first, second = channel_quantities(self.ordinate_dim[i])
+            if response != reference or first != second:
+                return i
+        return None
+
+    def _band_counts(self, dof: float | ArrayLike | None) -> np.ndarray:
+        """Each record's degrees of freedom for its band: `dof` spread
+        over the records, or the spectrum's own. One statement of the
+        refusals, read by `confidence_band` and `confidence_reading`."""
+        # A cross term's magnitude has a different error law, and a
+        # band drawn on it as if chi-square would be a claim nobody
+        # computed. Refused rather than skipped, so the caller knows.
+        cross = self._cross_term()
+        if cross is not None:
+            raise ValueError('a chi-square band is on an autospectrum; '
+                             'this PSD holds cross terms '
+                             f'({self.record_label(cross)})')
+        counts = self.statistical_dof if dof is None else dof
+        if counts is None:
+            raise ValueError(
+                'this PSD does not say what it was averaged over; pass '
+                'dof, or compute it from a time history')
+        return np.broadcast_to(np.asarray(counts, dtype=float),
+                               (self.num_records,))
 
     def principal_shapes(self, quantity: str | None = None
                          ) -> tuple[list[str], np.ndarray, str]:

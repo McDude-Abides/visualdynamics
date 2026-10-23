@@ -645,6 +645,22 @@ class ConfidenceBand:
         positive number."""
         return 10.0 * float(np.log10(self.upper_factor))
 
+    def describe(self) -> str:
+        """The band in words, as the app and the plots state it: the
+        confidence, the degrees of freedom it was worked out at
+        (`dof_text`) and its two edges in decibels from the estimate,
+        such as '90 % band at 225.9 DOF: -0.8 / +0.9 dB'."""
+        return (f'{round(self.level * 100)} % band at {dof_text(self.dof)} '
+                f'DOF: {self.lower_db:+.1f} / {self.upper_db:+.1f} dB')
+
+
+def dof_text(dof: float) -> str:
+    """A count of statistical degrees of freedom as it is shown: four
+    significant figures, so an equivalent count reads 225.9 and a whole
+    one 120, the same figure in the Averaging view, the confidence
+    reading and a plot's legend."""
+    return f'{float(dof):.4g}'
+
 
 def confidence_bands(estimate: ArrayLike, dof: float,
                      levels: Sequence[float] = CONFIDENCE_LEVELS

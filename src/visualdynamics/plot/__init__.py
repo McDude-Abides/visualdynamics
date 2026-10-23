@@ -2213,7 +2213,8 @@ def confidence_preview(items: Iterable[Any], psd: Any,
                        colors: Mapping[str, str],
                        records: Sequence[int] | None = None,
                        levels: Sequence[float] | None = None,
-                       unit_system: UnitSystem | None = None
+                       unit_system: UnitSystem | None = None,
+                       dof: float | Sequence[float] | None = None
                        ) -> list[tuple[Any, Any]]:
     """Draw the chi-square confidence band of an averaged PSD over it.
 
@@ -2224,22 +2225,28 @@ def confidence_preview(items: Iterable[Any], psd: Any,
     The bands share one color, the specification's gray, and the
     narrower one is shaded over the wider, so the inner band reads
     darker; the edges of each level are
-    dashed their own way (`BAND_STYLES`) and named in the legend. The
-    band is drawn behind the data and widens the plot's limits to take
-    it in, so its top edge is not cut off at the highest peak.
+    dashed their own way (`BAND_STYLES`) and named in the legend with
+    the confidence and the degrees of freedom the band was worked out
+    at, '90 % confidence, 225.9 DOF', so the band is read in words and
+    line style rather than by its shade. The band is drawn behind the
+    data and widens the plot's limits to take it in, so its top edge is
+    not cut off at the highest peak.
 
     Bands are drawn only on plots whose quantity matches, and only for
     `records` when given, as `octave_preview` draws its steps. Returns
     the (plot, item) pairs added, edges and fills, so the caller can
     take them away again. The spectrum's own degrees of freedom are
-    used (`Psd.statistical_dof`); one that has none is refused with the
-    `ValueError` `Psd.confidence_band` raises.
+    used (`Psd.statistical_dof`) unless `dof` is given, one number for
+    every record or one per record, as for a spectrum read from a file
+    whose count is known from the system that averaged it; a spectrum
+    with neither is refused with the `ValueError` `Psd.confidence_band`
+    raises.
     """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor
 
-    from ..core.averaging import CONFIDENCE_LEVELS
+    from ..core.averaging import CONFIDENCE_LEVELS, dof_text
 
     levels = list(CONFIDENCE_LEVELS if levels is None else levels)
     us = unit_system or DEFAULT_SYSTEM
@@ -2249,9 +2256,11 @@ def confidence_preview(items: Iterable[Any], psd: Any,
               is not None else None)
     dashes = {'dash': Qt.PenStyle.DashLine, 'dot': Qt.PenStyle.DotLine,
               'dashdot': Qt.PenStyle.DashDotLine}
+    # each record's count, as the reading states it, for the legend
+    counts = [band.dof for band in psd.confidence_reading(levels[0], dof)]
     bands = []
     for n, level in enumerate(levels):
-        lower, upper = psd.confidence_band(level)
+        lower, upper = psd.confidence_band(level, dof)
         bands.append((level, BAND_STYLES[n % len(BAND_STYLES)],
                       lower.display_ordinate(us),
                       upper.display_ordinate(us)))
@@ -2270,6 +2279,7 @@ def confidence_preview(items: Iterable[Any], psd: Any,
         key = getattr(item, 'series_key', None)
         log_y = bool(key[3]) if key is not None else False
         reach = []
+        banded = []
         for k in wanted:
             if key is not None and (psd.ordinate_dim[k],
                                     psd.dimension_hint[k]) \
@@ -2310,15 +2320,22 @@ def confidence_preview(items: Iterable[Any], psd: Any,
                     drawn.append((item, fill))
                 reach.extend((float(np.min(low[finite])),
                               float(np.max(high[finite]))))
+                banded.append(counts[k])
         if not reach:
             continue
         legend = getattr(item, 'legend', None)
         if legend is not None:
+            # the count beside the confidence: a band's width means
+            # nothing without it, and records averaged differently are
+            # given as the range they span
+            fewest, most = min(banded), max(banded)
+            worth = (dof_text(fewest) if dof_text(fewest) == dof_text(most)
+                     else f'{dof_text(fewest)} to {dof_text(most)}')
             for level, style, _lows, _highs in sorted(bands):
                 legend.addItem(pg.PlotDataItem(
                     [], [], pen=pg.mkPen(color, width=1,
                                          style=dashes[style])),
-                    f'{round(level * 100)} % confidence')
+                    f'{round(level * 100)} % confidence, {worth} DOF')
         # widen the limits the plot was locked to, so the band's top
         # edge over the highest peak can be seen (`_Extents.lock`)
         top, bottom = max(reach), min(reach)
@@ -2335,11 +2352,12 @@ def confidence_preview(items: Iterable[Any], psd: Any,
 
 
 def _mark(layout, data, marks, theme=None, per_octave=None,
-          unit_system=None, levels=None, records=None):
+          unit_system=None, levels=None, records=None, dof=None):
     """A reading over every plot in `layout` — the frames, the shocks,
     the cut, the filter's preview or the octave steps — as the window's
     toggles draw it (`viz.marks.held_reading`), or a PSD's confidence
-    band (`confidence_preview`, at `levels`), which is drawn flat only.
+    band (`confidence_preview`, at `levels` and `dof`), which is drawn
+    flat only.
 
     Locked, because a mark you can drag is a mark that reports the drag
     to somebody, and in a standalone plot there is nobody. Returns the
@@ -2354,6 +2372,10 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
         # a word (2026-10-16)
         raise ValueError("levels are the confidence of marks='confidence'"
                          f', not of marks={marks!r}')
+    if dof is not None and marks != 'confidence':
+        # the same for a count, which only a band is worked out from
+        raise ValueError("dof is the count of marks='confidence', not "
+                         f'of marks={marks!r}')
     if marks is None:
         return []
     colors = resolve_theme(theme)
@@ -2367,7 +2389,8 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
             raise TypeError('a confidence band is drawn on a PSD, not '
                             f'on {type(data).__name__}')
         return confidence_preview(plots, data, colors, records=records,
-                                  levels=levels, unit_system=unit_system)
+                                  levels=levels, unit_system=unit_system,
+                                  dof=dof)
     held = held_reading(data, marks)
     if marks == 'octave':
         return octave_preview(
@@ -2403,6 +2426,7 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
               marks: str | None = None,
               per_octave: int | None = None,
               levels: Sequence[float] | None = None,
+              dof: float | Sequence[float] | None = None,
               **kwargs: Any) -> Any:
     """Plot a data array in a window, or save it to a file with `path`.
 
@@ -2425,7 +2449,9 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
     averaged PSD, 'confidence' shades the chi-square band the true
     spectrum lies in (`confidence_preview`), at the confidence `levels`
     given, 90 and 95 percent by default, from the degrees of freedom
-    the PSD was averaged to. `levels` with any other mark is refused.
+    the PSD was averaged to, or from `dof` when given (one count, or
+    one per record), and the legend states both. `levels` or `dof` with
+    any other mark is refused.
     """
     # the pane owns which part of a complex ordinate is drawn, so the
     # draw reads it back rather than being told once at the call
@@ -2441,7 +2467,8 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
         build_plot(widget, data, unit_system=unit_system, theme=theme,
                    component=component, **kwargs)
         overlays.extend(_mark(widget, data, marks, theme, per_octave,
-                              unit_system, levels, kwargs.get('records')))
+                              unit_system, levels, kwargs.get('records'),
+                              dof))
 
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or repr(data), size=size,

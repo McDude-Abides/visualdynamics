@@ -223,8 +223,11 @@ def test_a_wide_band_widens_the_plot_s_limits(qt_app, averaged):
 
 
 def test_each_level_is_named_and_dashed_its_own_way(qt_app, averaged):
+    """Named with the count it was worked out at, in words, beside the
+    confidence: a band's width means nothing without it."""
     import pyqtgraph as pg
 
+    from visualdynamics.core.averaging import dof_text
     from visualdynamics.plot import build_plot, confidence_preview
     from visualdynamics.theme import theme
 
@@ -234,7 +237,9 @@ def test_each_level_is_named_and_dashed_its_own_way(qt_app, averaged):
                                records=[0])
     plot = drawn[0][0]
     names = [label.text for _sample, label in plot.legend.items]
-    assert '90 % confidence' in names and '95 % confidence' in names
+    count = dof_text(averaged.statistical_dof[0])
+    assert f'90 % confidence, {count} DOF' in names
+    assert f'95 % confidence, {count} DOF' in names
     styles = {item.opts['pen'].style() for _plot, item in drawn
               if isinstance(item, pg.PlotDataItem)}
     assert len(styles) == 2, 'told apart by more than the shading'
