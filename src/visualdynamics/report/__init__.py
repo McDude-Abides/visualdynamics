@@ -3309,6 +3309,14 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
     if max_points is not None and int(max_points) < MIN_TRIM_POINTS:
         raise ValueError(f'max_points is {max_points}; a curve keeps at '
                          f'least {MIN_TRIM_POINTS} points')
+    # a setting that would do nothing is refused, not ignored
+    if max_points is not None and geometry is not None:
+        raise ValueError('max_points thins a plot\'s curves, and a scene has '
+                         'none; choose its modes by passing fewer shapes')
+    if (component != 'magnitude' and geometry is None and data is not None
+            and not np.iscomplexobj(getattr(data, 'ordinate', None))):
+        raise ValueError(f'component reads complex data, and this data is '
+                         f'real: {component!r} would draw it as it is')
     if channels is not None:
         if isinstance(channels, str):
             channels = [channels]

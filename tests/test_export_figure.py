@@ -617,3 +617,76 @@ def test_a_scene_carries_its_shapes_only_when_given(tmp_path):
     [still] = json.loads(pathlib.Path(visualdynamics.export_figure(
         tmp_path / 'b.json', geometry=plate)).read_text())['blocks']
     assert len(moving['modes']) == 1 and not still['modes']
+
+
+def test_the_split_pair_draws_under_a_strict_content_security_policy(
+        qt_app, tmp_path):
+    """Served over HTTP to a page whose policy allows scripts and styles
+    from its own origin only (styles also by nonce) and no inline script
+    at all, the renderer mounts the figure, fetched with `load`, with no
+    violation of the policy reported."""
+    import functools
+    import http.server
+    import threading
+
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+
+    psd, spec = _pair()
+    visualdynamics.export_figure(tmp_path / 'a.json', psd, specification=spec,
+                                 channel='101Z+', theme='light',
+                                 renderer=tmp_path / 'figure.js')
+    (tmp_path / 'page.js').write_text(
+        "window.violations = [];"
+        "document.addEventListener('securitypolicyviolation',"
+        " e => window.violations.push(e.violatedDirective));"
+        "VisualDynamicsFigure.load(document.getElementById('fig'), 'a.json',"
+        " {pageScroll: true}).then(() => { window.mounted = true; },"
+        " e => { window.mounted = String(e); });", encoding='utf-8')
+    (tmp_path / 'host.html').write_text(
+        '<!DOCTYPE html><html><head><meta charset="utf-8">'
+        '<meta http-equiv="Content-Security-Policy" content="default-src '
+        "'self'; script-src 'self'; style-src 'self' 'nonce-n1'\">"
+        '</head><body><div id="fig"></div>'
+        '<script src="figure.js" nonce="n1"></script>'
+        '<script src="page.js"></script></body></html>', encoding='utf-8')
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(tmp_path))
+    handler.log_message = lambda *_a: None
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    view = web_view()
+    view.resize(800, 600)
+    view.load(QUrl(f'http://127.0.0.1:{server.server_address[1]}/host.html'))
+    view.show()
+    probe = ("(() => { if (!window.mounted) return null;"
+             "const c = document.querySelector('#fig section canvas');"
+             "if (window.mounted === true && (!c || !c.height)) return null;"
+             "return JSON.stringify({mounted: window.mounted,"
+             " violations: window.violations,"
+             " legend: Array.from(document.querySelectorAll("
+             "   '#fig .legend span'), s => s.textContent)}); })()")
+    try:
+        got = json.loads(web_read(view, probe))
+    finally:
+        web_close(view)
+        server.shutdown()
+        server.server_close()
+    assert got['mounted'] is True, got
+    assert got['violations'] == [], got
+    assert got['legend'][:2] == ['101Z+', 'measured']
+
+
+def test_a_setting_that_would_do_nothing_is_refused(tmp_path):
+    from visualdynamics import mesh
+
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, unit=None)
+    with pytest.raises(ValueError, match='max_points thins a plot.s curves, '
+                                         'and a scene has none'):
+        visualdynamics.export_figure(tmp_path / 'a.json', geometry=plate,
+                                     max_points=100)
+    psd, _spec = _pair()
+    with pytest.raises(ValueError, match="component reads complex data, and "
+                                         "this data is real: 'phase'"):
+        visualdynamics.export_figure(tmp_path / 'a.json', psd,
+                                     component='phase')

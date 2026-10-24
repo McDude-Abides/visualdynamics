@@ -110,4 +110,6 @@ modes by passing fewer shapes.
 A figure with nothing to draw is refused rather than written as an
 empty frame, with the reason: a record of zeros on a logarithmic axis,
 one missing throughout, one with no samples, or a comparison whose
-channel the specification does not hold.
+channel the specification does not hold. A setting that would do
+nothing is refused too: `max_points` on a scene, and a `component`
+other than the magnitude for data that is real.
