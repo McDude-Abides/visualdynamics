@@ -25,15 +25,14 @@ default here (`DISTORTION_EXCESS`). Five percent over is a distortion of
 sqrt(1.05**2 - 1) = 0.320, 32 % or -9.9 dB (`distortion_limit`), which is
 the line the check draws and the figure a line is flagged above.
 
-Why the residual rather than the ratio of two readings (Brandon,
-2026-10-23). Read as the unfiltered RMS over the tone's, D rests on two
-things that need not hold. The tones must be orthogonal to each other
-for their powers to add: two clean tones sweeping through each other are
-not, where they cross, and read a distortion near 100 % there. And the
-two readings must cover the same stretch of the record: a level the
-filter read at an instant and an RMS read over a span differ wherever
-the level moves inside the span, so a clean sweep through a sharp
-resonance read 100 % on its far side. The residual is read over the same
+The residual is read directly because D taken from two readings, the
+unfiltered RMS over the tone's, rests on two things that need not
+hold. The tones must be orthogonal to each other for their powers to
+add, and two tones sweeping through each other are not orthogonal where
+they cross. And the two readings must cover the same stretch of the
+record: a level read at an instant and an RMS read over a span differ
+wherever the level moves inside the span, as it does through a sharp
+resonance. The residual is read over the same
 samples as the tones it is measured against, and two tones that beat or
 cross are rebuilt together and subtracted together, so neither
 assumption is made.
@@ -93,6 +92,12 @@ read against are set out in these.
    Measurement Procedures*, 4th ed. Wiley. The mean square of a sum of
    orthogonal components as the sum of their mean squares.
 """
+
+# The first version read D from two readings, the unfiltered RMS over
+# the tone's level; two clean tones crossing read near 100 % and so did
+# the far side of a clean sweep through a sharp resonance (a Q of 50 at
+# 20 Hz/s read 8 % where the residual reads under 1 %). The residual
+# replaced it on review (Brandon, 2026-10-23).
 
 from __future__ import annotations
 
@@ -455,8 +460,9 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
     Raises ValueError when `excess` or `cycles` is not more than zero, when
     the recording is not evenly sampled, when the levels hold no such tone
     or channel, when the recording carries no record of a channel in the
-    quantity its levels were read in, when the levels were read at times
-    the recording does not hold, or when the recording holds less of the
+    quantity its levels were read in, when the levels do not say when
+    each line was read or were read at times the recording does not
+    hold, or when the recording holds less of the
     tone than one span.
 
     Parameters
@@ -528,6 +534,11 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
             f'{chosen.name}: the recording holds '
             f'{(phase[-1] - phase[0]) / (2.0 * np.pi):.3g} cycles of the '
             f'tone, less than the {cycles:g} the RMS is read over')
+    if level.seconds is None:
+        raise ValueError(
+            f'{chosen.name}: the levels do not say when each line was '
+            'read, so there is no span of the recording to check. Extract '
+            'them from the recording again')
     seconds = np.asarray(level.seconds, dtype=float)
     at = np.round(seconds / dt).astype(np.int64)
     if len(at) and (at.min() < first or at.max() >= min(last, samples)):

@@ -455,6 +455,16 @@ def test_a_channel_is_found_by_its_quantity_as_well_as_its_dof():
         check_distortion(only, spec, levels)
 
 
+def test_levels_that_do_not_say_when_they_were_read_are_refused():
+    """Levels built through the API or loaded without their times have
+    no span to check; the refusal is a ValueError the panel shows."""
+    history, spec = _sweep()
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    levels.levels[0].seconds = None
+    with pytest.raises(ValueError, match='do not say when each line'):
+        check_distortion(history, spec, levels)
+
+
 def test_levels_read_from_another_record_are_refused():
     """Levels whose lines fall outside the tone's stretch of the record
     are not of it: a record cut short since they were extracted."""

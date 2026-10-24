@@ -60,8 +60,7 @@ sweep through each other are rebuilt and taken away together, so a
 clean crossing reads clean. And the rebuilt tone follows the level as
 it climbs through a resonance, over the same samples the residual is
 read on, so a clean sweep through a resonance with a Q of 50 at
-20 Hz/s reads under 1 % at the peak; read instead as the tone's level
-at an instant against the unfiltered RMS over the span, it read 8 %.
+20 Hz/s reads under 1 % at the peak.
 
 Take a 1 g sweep from 100 to 500 Hz with a third harmonic at 10 % of
 the tone all the way and at 50 % from 250 to 350 Hz, as a rattle would
