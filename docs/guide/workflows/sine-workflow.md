@@ -244,6 +244,12 @@ project.save('sine.vdyn')
   line, against a limit ([Checking a sine record for
   distortion](../sine-distortion.md)). Once the levels are extracted,
   the sine view's Distortion readout shows it beside the record.
+- The levels are placed at the specified frequency whether the tone
+  was there or not. The frequency check reads the tone's own frequency
+  off the record at every line and judges it against a band, a share
+  of the frequency with a floor in hertz ([Checking a sine tone's
+  frequency](../sine-frequency.md)); the sine view's Frequency readout
+  shows it under the Distortion readout.
 - Where the levels wobble, look at the wavelet first. A ripple in an
   extracted level can come from the article (a resonance swept
   through), from the test (two tones beating in one band), or from the

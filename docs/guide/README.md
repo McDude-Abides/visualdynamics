@@ -82,6 +82,9 @@ that is not an alpha.
 - [Checking a sine record for distortion](sine-distortion.md): the
   record less the tracked tones against the tones, along the sweep,
   against a limit
+- [Checking a sine tone's frequency](sine-frequency.md): the tone's own
+  frequency on the record against the specification's, along the
+  sweep, against a band
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

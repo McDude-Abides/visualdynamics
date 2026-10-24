@@ -1114,6 +1114,45 @@ def rms_check():
         print(f'rms check: {check.describe("g", 1.0 / g)}')
 
 
+def sine_frequency():
+    """A 1 g sweep from 20 to 500 Hz at 100 Hz/s whose tone drifts
+    high along it, on frequency at the start and 2.5 % high at the end,
+    sampled at 4096 Hz, against a band of 2 % or 1 Hz."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.sine import (
+        SineSweepSpecification,
+        SineTone,
+        extract_sine,
+    )
+    from visualdynamics.core.sine_frequency import check_frequency
+    from visualdynamics.plot import plot_sine_frequency
+
+    g, rate = 9.80665, 4096.0
+    tone = SineTone('Up', 0.5, [20.0, 500.0], [[g]] * 2, [0], [100.0])
+    spec = SineSweepSpecification([tone], ['1Z+'], ordinate_unit='m/s**2')
+    t = np.arange(int(tone.duration() * rate)) / rate
+    drive = tone.frequency_at(t) * (1.0 + 0.025 * t / tone.duration())
+    x = np.zeros(int(6.0 * rate))
+    start = int(0.5 * rate)
+    x[start:start + len(t)] = g * np.cos(2.0 * np.pi * np.cumsum(drive)
+                                         / rate)
+    history = TimeHistory(np.arange(len(x)) / rate, x[None, :],
+                          response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'],
+                          ordinate_unit=['m/s**2'])
+    levels = extract_sine(history, spec, cycles=10.0, workers=1)
+    plot_sine_frequency(history, spec, levels, tolerance=0.02, floor=1.0,
+                        show=False, size=(1000, 600),
+                        path=str(OUT / 'sine-frequency.png'))
+    check = check_frequency(history, spec, levels, tolerance=0.02,
+                            floor=1.0)
+    over = check.over[0]
+    print(f'sine frequency: outside from {check.specified[over].min():.0f} '
+          f'Hz; {check.describe()}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1139,6 +1178,7 @@ def main():
     comparison_chance()
     plot_composition()
     rms_check()
+    sine_frequency()
     print('done')
 
 

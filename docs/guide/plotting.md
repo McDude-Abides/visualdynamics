@@ -150,6 +150,10 @@ two transmissibilities](transmissibility.md)).
 distortion against frequency with the limit across it, the reading the
 sine view's Distortion readout shows ([Checking a sine record for
 distortion](sine-distortion.md)).
+`plot_sine_frequency(history, specification, levels)` draws a tone's
+frequency error against frequency with the band either side of zero,
+the reading the sine view's Frequency readout shows ([Checking a sine
+tone's frequency](sine-frequency.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and
