@@ -53,6 +53,7 @@ from .mesh_solids_panel import MeshSolidsPanel
 from .modes_panel import ModesPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
+from .profile_panel import ProfilePanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
 from .rms_check_panel import RmsCheckPanel
@@ -223,6 +224,9 @@ class DataPane(QWidget):
     #: a sine specification's sweep-rate reading was asked for (True)
     #: or put away (False)
     sweep_rate_toggled = Signal(bool)
+    #: a sine specification's profile reading was asked for (True) or
+    #: put away (False)
+    sine_profile_toggled = Signal(bool)
     #: the fit's residual CMIF was toggled
     residual_toggled = Signal(bool)
     shocks_toggled = Signal(bool)
@@ -279,6 +283,7 @@ class DataPane(QWidget):
         self.confidence_wanted: bool = False
         self.rms_check_wanted: bool = False
         self.sweep_rate_wanted: bool = False
+        self.sine_profile_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
         self.kurtosis_wanted: bool = False
         #: and the time statistics, the same way
@@ -412,6 +417,10 @@ class DataPane(QWidget):
         # drawn through their bands; the Sweep Rate reading shows it
         self.sweep_rate_panel: SweepRatePanel = SweepRatePanel()
         self.sweep_rate_panel.hide()
+        # what a sine specification's profile is read with, beside the
+        # profile drawn three ways; the Sine Profile reading shows it
+        self.sine_profile_panel: ProfilePanel = ProfilePanel()
+        self.sine_profile_panel.hide()
         self.wavelet_panel: WaveletPanel = WaveletPanel()
         self.wavelet_panel.hide()
         # the time statistics' settings and their table, beside the
@@ -472,6 +481,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.rms_check_panel)
         plot_row.addWidget(self.segments_panel)
         plot_row.addWidget(self.sweep_rate_panel)
+        plot_row.addWidget(self.sine_profile_panel)
         plot_row.addWidget(self.signature_panel)
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
@@ -1061,11 +1071,30 @@ class DataPane(QWidget):
             'rate is under 87 fn / Q\u00b2 oct/min on a log sweep, '
             'fn\u00b2 / Q\u00b2 Hz/s on a linear one')
         self.sweep_rate_action.triggered.connect(
-            lambda checked=False: self._choose_toggle('sweep_rate', checked))
+            lambda checked=False: self._choose_spec_reading('sweep_rate',
+                                                            checked))
         # offered by the render that draws a sine specification, and by
         # nothing else, so it starts put away
         self.sweep_rate_action.setVisible(False)
         toolbar.addAction(self.sweep_rate_action)
+        # the same specification read as segments of constant
+        # displacement, velocity and acceleration, drawn three ways with
+        # the crossovers checked; the other reading of the specification
+        # alone, so it shares the sweep rate's fence and takes turns
+        # with it
+        self.sine_profile_action: QAction = QAction(
+            control_icon('sine_profile'), 'Sine Profile', self)
+        self.sine_profile_action.setCheckable(True)
+        self.sine_profile_action.setToolTip(
+            'Read the tone as segments of constant displacement, velocity '
+            'and acceleration: the profile drawn three ways, each '
+            'crossover checked against its breakpoint, and the most it '
+            'asks for in each')
+        self.sine_profile_action.triggered.connect(
+            lambda checked=False: self._choose_spec_reading('sine_profile',
+                                                            checked))
+        self.sine_profile_action.setVisible(False)
+        toolbar.addAction(self.sine_profile_action)
         # ---- and out of the fence again -----------------------------
         # the fit's residual CMIF: what is left after the confirmed
         # modes are taken out — the curve Find Mode hunts. A plot
@@ -1112,7 +1141,7 @@ class DataPane(QWidget):
             [self.waterfall_action],
             [self.octave_action, self.tone_action, self.confidence_action,
              self.rms_check_action],
-            [self.sweep_rate_action],
+            [self.sweep_rate_action, self.sine_profile_action],
             [self.transmissibility_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
@@ -1271,12 +1300,26 @@ class DataPane(QWidget):
             getattr(self, panel).hide()
 
     def offer_sweep_rate(self, offered: bool) -> None:
-        """Show or hide the Sweep Rate toggle, for a sine specification;
-        checked as it was last left. Its panel goes with it when it is
-        not offered or not checked."""
+        """Show or hide the Sweep Rate and Sine Profile toggles, the two
+        readings of a sine specification alone; each checked as it was
+        last left. A panel goes with its toggle when it is not offered or
+        not checked."""
         self._offer('sweep_rate', 'sweep_rate_panel', offered)
+        self._offer('sine_profile', 'sine_profile_panel', offered)
         if offered:
             self.toolbar.setVisible(True)
+
+    def _choose_spec_reading(self, key: str, checked: bool) -> None:
+        """The Sweep Rate or Sine Profile button: one reading of the
+        specification at a time, so checking one puts the other away
+        before the toggle is said."""
+        if checked:
+            other = 'sine_profile' if key == 'sweep_rate' else 'sweep_rate'
+            if getattr(self, f'{other}_wanted'):
+                getattr(self, f'{other}_action').setChecked(False)
+                setattr(self, f'{other}_wanted', False)
+                getattr(self, f'{other}_panel').hide()
+        self._choose_toggle(key, checked)
 
     def _choose_reading(self, checked: bool) -> None:
         """The kurtosis, statistics, wavelet or replication fit button: a
@@ -2056,7 +2099,7 @@ class DataPane(QWidget):
                        self.octave_action, self.tone_action,
                        self.transmissibility_action,
                        self.confidence_action, self.rms_check_action,
-                       self.sweep_rate_action,
+                       self.sweep_rate_action, self.sine_profile_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

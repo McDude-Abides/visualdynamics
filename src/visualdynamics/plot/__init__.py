@@ -5147,6 +5147,97 @@ def plot_sine_frequency(history: Any, specification: Any,
                         size=size)
 
 
+def plot_sine_profile(source: Any, *, tone: str | None = None,
+                      channel: str | None = None,
+                      tolerance: float | None = None,
+                      slope_tolerance: float | None = None,
+                      interpolated: bool = True,
+                      unit_system: UnitSystem | None = None,
+                      theme: Any = None,
+                      path: str | os.PathLike | None = None,
+                      show: bool = True, title: str | None = None,
+                      size: tuple[int, int] = (1000, 900)) -> Any:
+    """Draw a sine profile three ways, displacement, velocity and
+    acceleration against frequency, with its crossovers marked.
+
+        visualdynamics.plot.plot_sine_profile(profile, path='profile.png')
+        visualdynamics.plot.plot_sine_profile(spec, path='profile.png')
+
+    `source` is a `core.sine_profile.SineProfile`, written segment by
+    segment, or a `SineSweepSpecification`, whose tone (`tone`, the first
+    by default) is read back as a profile at control channel `channel`
+    (the first by default) by `core.sine_profile.read_profile`; with
+    `interpolated`, the tone's own level as it runs it is drawn dashed
+    over the profile read from it. It is drawn by
+    `plot.sine_profile.build_profile`: three rows on one log frequency
+    axis, each titled with the most the profile asks for in its
+    quantity, each crossover a line across the rows with its check in
+    words in the legend. The window's Sine Profile reading on a sine
+    specification's bar shows the same.
+
+    Parameters
+    ----------
+    source : SineProfile or SineSweepSpecification
+        What is drawn.
+    tone, channel : str, optional
+        For a specification, which tone and which control channel.
+    tolerance : float, optional
+        How far a breakpoint may stand from its solved crossover and
+        still check, a share of it;
+        `core.sine_profile.CROSSOVER_TOLERANCE` for a specification and
+        the profile's own for a profile, by default.
+    slope_tolerance : float, optional
+        For a specification, how far a stretch's slope may stand from
+        a quantity held constant, dB per octave;
+        `core.sine_profile.SLOPE_TOLERANCE` by default.
+    interpolated : bool, default True
+        For a specification, draw the tone's interpolated level too.
+    unit_system : UnitSystem, optional
+        The units the rows are read in.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.sine import SineSweepSpecification
+    from ..core.sine_profile import (
+        CROSSOVER_TOLERANCE,
+        SLOPE_TOLERANCE,
+        SineProfile,
+        read_profile,
+    )
+    from ..core.sine_profile import interpolated as tone_level
+    from .sine_profile import build_profile
+
+    if isinstance(source, SineProfile):
+        profile = (source if tolerance is None
+                   else SineProfile(source.segments, tolerance=tolerance))
+        level, name = None, 'profile'
+    elif isinstance(source, SineSweepSpecification):
+        profile = read_profile(
+            source, tone, channel,
+            tolerance=CROSSOVER_TOLERANCE if tolerance is None else tolerance,
+            slope_tolerance=(SLOPE_TOLERANCE if slope_tolerance is None
+                             else slope_tolerance))
+        level = tone_level(source, tone, channel) if interpolated else None
+        name = (tone or source.tones[0].name) + ', read as a profile'
+    else:
+        raise TypeError('plot_sine_profile draws a SineProfile or a '
+                        f'SineSweepSpecification, not {type(source).__name__}')
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_profile(widget, profile, interpolated=level,
+                             unit_system=unit_system, theme=theme, name=name)
+
+    low, high = profile.band
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'sine profile, {low:g} to {high:g} Hz',
+                        size=size)
+
 
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,

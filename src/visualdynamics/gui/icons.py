@@ -789,6 +789,22 @@ def _draw_sweep_rate(painter, color):
     painter.drawLine(QPointF(27.7, 36), QPointF(38.5, 26))
 
 
+def _draw_sine_profile(painter, color):
+    """A sine profile on log axes: a displacement rising to a
+    crossover, a flat acceleration, a second rise and the top level,
+    with the first crossover dashed down through it, which is what the
+    reading checks."""
+    faint = QColor(color)
+    faint.setAlpha(150)
+    dashed = QPen(faint, 3)
+    dashed.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(dashed)
+    painter.drawLine(QPointF(24, 6), QPointF(24, 58))
+    painter.setPen(_pen(color, 5))
+    painter.drawPolyline([QPointF(4, 54), QPointF(24, 34), QPointF(38, 34),
+                          QPointF(48, 18), QPointF(60, 18)])
+
+
 def _draw_replication_fit(painter, color):
     """A record's travel between two stops.
 
@@ -2379,6 +2395,7 @@ def control_icon(name: str) -> QIcon:
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,
+     'sine_profile': _draw_sine_profile,
      'replication_fit': _draw_replication_fit,
      'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,
      'automatic': _draw_automatic,

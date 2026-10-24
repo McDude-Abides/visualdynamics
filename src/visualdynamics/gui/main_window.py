@@ -984,6 +984,12 @@ class MainWindow(QMainWindow):
             lambda _wanted: self.render_current())
         self.data_pane.sweep_rate_panel.changed.connect(
             lambda _settings: self.render_current())
+        # and the profile reading the same way: the three rows and the
+        # crossovers are the reading of the settings being made
+        self.data_pane.sine_profile_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.sine_profile_panel.changed.connect(
+            lambda _settings: self.render_current())
         self.data_pane.octave_panel.changed.connect(
             lambda _per: self.render_current())
         # the points rule's band and rule redraw the judgement at once:
@@ -20159,6 +20165,12 @@ class MainWindow(QMainWindow):
             return self._render_sweep_rate(
                 spec, tone, [level for level in matched if level.tone == tone],
                 chosen(sine_dofs(spec)) if picked_dofs else None) + note
+        if self.data_pane.showing('sine_profile'):
+            self.data_pane.show_srs_views(False)
+            tone = pick_tone(tones)
+            dofs = chosen(sine_dofs(spec)) if picked_dofs else []
+            return self._render_sine_profile(
+                spec, tone, dofs[0] if dofs else None) + note
         self.data_pane.show_srs_views(bool(matched), kind='sine')
         showing_bars = (matched
                         and self.data_pane.srs_reading('sine') != 'curves')
@@ -20286,6 +20298,75 @@ class MainWindow(QMainWindow):
                 f'through {len(settings["modes"])} mode'
                 f'{"s" * (len(settings["modes"]) != 1)}, {fast} too fast'
                 + flagged)
+
+    def _render_sine_profile(self, spec, tone, channel=None):
+        """A sine specification's tone read as a profile: segments of
+        constant displacement, velocity and acceleration drawn three ways
+        with every crossover marked and checked, and what it asks for in
+        the panel beside it.
+
+        The tone is read at `channel`, the first control channel when
+        None (`core.sine_profile.read_profile`). A tone that is not
+        written in segments of the three quantities is refused, the
+        refusal is shown in the panel, and its own level is drawn alone.
+        Every number is `core.sine_profile`'s; the plot is
+        `plot_sine_profile`'s.
+        """
+        from ..core.sine_profile import interpolated, read_profile
+        from ..plot.sine_profile import build_profile
+
+        pane = self.data_pane
+        panel = pane.sine_profile_panel
+        panel.show()
+        pane.offer_waterfall(False)
+        pane.show_waterfall(False)
+        pane.show_pairs([])
+        settings = panel.settings()
+        pane.graphics.clear()
+        try:
+            level = (interpolated(spec, tone, channel)
+                     if settings['interpolated'] else None)
+        except ValueError as refusal:
+            panel.show_profile(None, str(refusal))
+            return f'{tone}: {refusal}'
+        try:
+            profile = read_profile(
+                spec, tone, channel,
+                slope_tolerance=settings['slope_tolerance'])
+        except ValueError as refusal:
+            if level is None:
+                level = interpolated(spec, tone, channel)
+            build_profile(pane.graphics, None, interpolated=level,
+                          unit_system=self.unit_system,
+                          theme=self.theme_name)
+            panel.show_profile(None, str(refusal))
+            return f'{tone}: not a profile of segments; {refusal}'
+        build_profile(pane.graphics, profile, interpolated=level,
+                      unit_system=self.unit_system, theme=self.theme_name,
+                      name=f'{tone}, read as a profile')
+        panel.show_profile(profile, unit_system=self.unit_system)
+        self._journal_sine_profile(spec, tone, channel, settings)
+        bad = sum(not crossing.checks for crossing in profile.crossings)
+        return (f'{tone}: {len(profile.segments)} segment'
+                f'{"s" * (len(profile.segments) != 1)}, '
+                + (f'{bad} crossover{"s" * (bad != 1)} not checking'
+                   if bad else 'every crossover checks'))
+
+    def _journal_sine_profile(self, spec, tone, channel, settings):
+        """The profile reading, journaled as the headless call that
+        draws it (`_journal_view`)."""
+        try:
+            name = self.project.name_of(spec)
+        except (KeyError, ValueError):
+            return
+        prefix = ('visualdynamics.plot.plot_sine_profile('
+                  f'project[{name!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, tone={tone!r}, channel={channel!r}, '
+            f"slope_tolerance={settings['slope_tolerance']!r}, "
+            f"interpolated={settings['interpolated']!r}, "
+            "path='sine_profile.png', show=False)")
 
     def _show_sweep_rate_table(self, tone, checks, swept):
         """Every pass, and every Q read off a level, in the table under

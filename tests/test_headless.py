@@ -304,6 +304,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_srs_points': 'plot_srs_tolerance',
         '_render_chance': 'plot_chance',
         '_render_sweep_rate': 'plot_sweep_rate',
+        '_render_sine_profile': 'plot_sine_profile',
         '_render_banded': 'viz.banded.plot_banded_stage',
         '_render_ratio': 'plot.plot_ratio',
         '_render_snr': 'plot.plot_snr',

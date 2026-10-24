@@ -74,6 +74,9 @@ THEORY = {
     'core.rms_check': 'the area under an autospectrum against the mean '
                       'square of its record, and the window that makes '
                       'it an estimate',
+    'core.sine_profile': 'the relation between a tone\'s displacement, '
+                         'velocity and acceleration, and the crossover '
+                         'frequency between segments',
     'core.sine_frequency': 'the estimator of the tone and the frequency '
                            'band it is judged against',
 }
