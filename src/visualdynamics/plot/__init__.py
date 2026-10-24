@@ -139,8 +139,13 @@ def legend_below(layout: Any, plot: Any, row: int,
         first entry's width and every later name drew past its edge.
         """
 
-        def __init__(self, view, **kwargs):
+        def __init__(self, view, host, **kwargs):
             super().__init__(**kwargs)
+            # the layout the row is placed in, held rather than asked
+            # for: `parentItem()` called while a nested panel was being
+            # torn down wrapped the half-destroyed layout and corrupted
+            # the heap when the figure closed (2026-10-24)
+            self._host = host
             # pyqtgraph's legend ignores transformations — built to float
             # over the data at a fixed screen size — so any drawing of the
             # plot at a scale passed it by: printed at three times, every
@@ -181,11 +186,18 @@ def legend_below(layout: Any, plot: Any, row: int,
         def setGeometry(self, *args):
             """Centered on the axes, not on the strip: the cell spans the
             left axis too, so its own center sits right of the data."""
+            import shiboken6
             from PySide6.QtCore import QRectF
 
             rect = args[0] if len(args) == 1 else QRectF(*args)
-            parent = self.parentItem()
-            if parent is not None and self._view.scene() is not None:
+            parent = self._host
+            # A figure closing deletes its layouts first, and Qt lays the
+            # row out once more on the way down. Mapped through a layout
+            # already deleted, a legend in a nested panel crashed the
+            # interpreter (2026-10-24); a row being torn down has no
+            # axes to center on.
+            if shiboken6.isValid(parent) and shiboken6.isValid(self._view) \
+                    and self._view.scene() is not None:
                 axes = parent.mapRectFromScene(
                     self._view.sceneBoundingRect())
                 rect = QRectF(axes.center().x() - rect.width() / 2,
@@ -216,11 +228,12 @@ def legend_below(layout: Any, plot: Any, row: int,
 
     style = ({'labelTextColor': colors['plot_foreground']}
              if colors else {})
-    legend = Row(plot.getViewBox(), colCount=LEGEND_COLUMNS, offset=None,
-                 labelTextSize=text_size or LEGEND_TEXT_SIZE, **style)
+    host = getattr(layout, 'ci', layout)
+    legend = Row(plot.getViewBox(), host, colCount=LEGEND_COLUMNS,
+                 offset=None, labelTextSize=text_size or LEGEND_TEXT_SIZE,
+                 **style)
     layout.addItem(legend, row=2 * row + 1, col=0)
-    grid = getattr(layout, 'ci', layout).layout
-    grid.setAlignment(legend, Qt.AlignmentFlag.AlignHCenter)
+    host.layout.setAlignment(legend, Qt.AlignmentFlag.AlignHCenter)
     plot.legend = legend
     return legend
 
@@ -384,6 +397,21 @@ def background_brush(colors: Mapping[str, str]) -> Any:
     gradient.setColorAt(0.0, QColor(colors['plot_background_top']))
     gradient.setColorAt(1.0, QColor(colors['plot_background']))
     return QBrush(gradient)
+
+
+def _ground(layout: Any, colors: Mapping[str, str]) -> None:
+    """Paint the plot background on a layout that owns one.
+
+    A panel nested in a figure (``layout.addLayout(row, col)``) has no
+    background of its own; the figure it sits in paints the ground
+    under it, so the builders draw into a panel as they draw into a
+    whole figure.
+    """
+    # the builders called setBackground unconditionally, which only the
+    # layout widget has, so a figure of two panels side by side could
+    # not be drawn at all and had to be stitched from two images
+    if hasattr(layout, 'setBackground'):
+        layout.setBackground(background_brush(colors))
 
 
 def display_limits(data: Any,
@@ -658,7 +686,7 @@ def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Seq
     us = unit_system or DEFAULT_SYSTEM
     colors = resolve_theme(theme)
     layout.clear()
-    layout.setBackground(background_brush(colors))
+    _ground(layout, colors)
 
     rows, labels, abscissa = [], [], None
     multiple = len({name for name, _, _ in series if name}) > 1
@@ -1051,7 +1079,7 @@ def build_cmif(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[int
     us = unit_system or DEFAULT_SYSTEM
     colors = resolve_theme(theme)
     layout.clear()
-    layout.setBackground(background_brush(colors))
+    _ground(layout, colors)
     plot = layout.addPlot(row=0, col=0)
     foreground = pg.mkPen(colors['plot_foreground'])
     for edge in ('left', 'bottom', 'top', 'right'):
@@ -1167,7 +1195,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
     us = unit_system or DEFAULT_SYSTEM
     colors = resolve_theme(theme)
     layout.clear()
-    layout.setBackground(background_brush(colors))
+    _ground(layout, colors)
 
     multiple = len({name for name, _, _ in series if name}) > 1
     groups, group_marks, requested = {}, {}, 0
@@ -2362,8 +2390,6 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
     to somebody, and in a standalone plot there is nobody. Returns the
     overlays so the caller can keep them alive.
     """
-    import pyqtgraph as pg
-
     from ..viz.marks import held_reading, octave_steps
 
     if levels is not None and marks != 'confidence':
@@ -2378,7 +2404,7 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
     if marks is None:
         return []
     colors = resolve_theme(theme)
-    plots = [item for item in layout.ci.items if isinstance(item, pg.PlotItem)]
+    plots = figure_plots(layout)
     if marks == 'confidence':
         # a property of the spectrum rather than a setting held on it,
         # so it has no `held_reading` and no stage counterpart
@@ -2676,10 +2702,13 @@ def _plot_window(build: Callable[[Any], Any], theme: Any = None,
     not in the picture. Shown, it comes up in the app's own data pane,
     so a plot opened from a script wears the same bar as the one in the
     window. Returns the pane, or the path. A .png is written by
-    `save_image`, at `EXPORT_DPI` when that is set.
+    `save_image`, at `EXPORT_DPI` when that is set. A size that is not
+    two positive numbers, or a file type no image writer here knows, is
+    refused before anything is drawn (`_check_target`).
     """
     import pyqtgraph as pg
 
+    _check_target(path, size)
     app = _application()
     colors = resolve_theme(theme)
     pg.setConfigOption('background', colors['plot_background'])
@@ -2694,21 +2723,333 @@ def _plot_window(build: Callable[[Any], Any], theme: Any = None,
 
     widget = pg.GraphicsLayoutWidget(title=title or '', size=size)
     widget.resize(*size)
-    build(widget)
-    # the widget must be shown and events flushed, or it never gets
-    # a resize and the export captures an unlaid-out scene
-    widget.show()
-    app.processEvents()
-    path = str(path)
-    if path.lower().endswith('.svg'):
-        pg.exporters.SVGExporter(widget.scene()).export(path)
-    else:
-        # the theme's background, painted first: pyqtgraph's exporter
-        # painted its own and defaulted to black, so a light-themed
-        # export once came out on black in a report page that is white
-        save_image(widget, path, dpi=EXPORT_DPI, theme=theme)
-    widget.close()
+    # closed whatever the build does: a script's own build that raised
+    # left a hidden top-level widget behind for every failed attempt
+    try:
+        build(widget)
+        # the widget must be shown and events flushed, or it never gets
+        # a resize and the export captures an unlaid-out scene
+        widget.show()
+        app.processEvents()
+        path = str(path)
+        if path.lower().endswith('.svg'):
+            pg.exporters.SVGExporter(widget.scene()).export(path)
+        else:
+            # the theme's background, painted first: pyqtgraph's exporter
+            # painted its own and defaulted to black, so a light-themed
+            # export once came out on black in a report page that is white
+            save_image(widget, path, dpi=EXPORT_DPI, theme=theme)
+    finally:
+        widget.close()
     return path
+
+
+def _check_target(path: str | os.PathLike | None,
+                  size: Any) -> None:
+    """Refuse a figure that cannot be made, before it is drawn.
+
+    The size is two positive, finite numbers of logical pixels. The
+    file's extension picks its writer: .svg is drawn as vectors, and
+    anything else must be a raster type Qt's image writer knows (.png,
+    .jpg and so on). Asked for a .pdf, the export used to build the
+    whole figure and then report only that the file could not be
+    written.
+    """
+    try:
+        width, height = (float(value) for value in size)
+    except (TypeError, ValueError):
+        raise ValueError(f'size is (width, height) in pixels, not {size!r}'
+                         ) from None
+    if not (np.isfinite(width) and np.isfinite(height)
+            and width > 0 and height > 0):
+        raise ValueError('size is two positive numbers of pixels, not '
+                         f'{size!r}')
+    if path is None:
+        return
+    suffix = os.path.splitext(str(path))[1].lower().lstrip('.')
+    if suffix == 'svg':
+        return
+    from PySide6.QtGui import QImageWriter
+
+    known = {bytes(name).decode().lower()
+             for name in QImageWriter.supportedImageFormats()}
+    if suffix not in known:
+        said = f'.{suffix}' if suffix else 'no extension'
+        raise ValueError(f'a figure is written as .png or .svg (or another '
+                         f'image type), and {str(path)!r} has {said}')
+
+
+# ---- composing a figure of your own ------------------------------------
+#
+# The calls below are what a script needs to draw a figure the package
+# has no single view for (several readings on one axis, marks and words
+# over them, panels side by side) without reaching into the private
+# machinery every standalone plot goes through. They add no drawing of
+# their own: `compose` is `_plot_window` with the arguments a script may
+# set, `as_series` is how `plot_series` reads its items, and the rest
+# read what `build_plots` already records (`series_key`) and what
+# pyqtgraph already holds (each axis's log mode). Written for a book's
+# figure scripts, which called `_plot_window` and `_as_series` directly
+# and repeated the log10 and the range pinning by hand in every chapter
+# (2026-10-24).
+
+
+def compose(build: Callable[[Any], Any], *, theme: Any = None,
+            path: str | os.PathLike | None = None, show: bool = True,
+            title: str | None = None, size: tuple[int, int] = (1000, 700),
+            frequency_axis: str | None = None) -> Any:
+    """Draw a figure of your own, in the frame every plot here uses.
+
+        def build(layout):
+            build_plots(layout, as_series([psd, specification]))
+            plot = figure_plots(layout, 'acceleration**2/frequency')[0]
+            pin(plot, x=(20.0, 2000.0))
+
+        compose(build, path='figure.png', theme='light', size=(900, 460))
+
+    `build(layout)` draws into a pyqtgraph ``GraphicsLayoutWidget``, with
+    the package's builders (`build_plots`, `legend_below`, the views'
+    own ``build_*`` functions) and with pyqtgraph's own items for marks
+    and words. Panels side by side are nested layouts,
+    ``layout.addLayout(row=0, col=1)``, and `build_plots` draws into one
+    as it draws into the whole figure.
+
+    Written to a file, the figure is laid out off screen at `size` and
+    exported, with no window and no event loop of your own. Shown, it
+    comes up in the application's data pane. This is the one path every
+    standalone plot in the package takes, so a composed figure is drawn,
+    themed and exported exactly as theirs are.
+
+    Parameters
+    ----------
+    build : callable
+        Called once with the layout to draw into.
+    theme : str or dict, optional
+        'light' or 'dark', or a resolved theme; the application's when
+        omitted.
+    path : str or path-like, optional
+        Where to write the figure. The extension picks the format: .svg,
+        or .png (at `EXPORT_DPI` when that is set) or another image
+        type.
+    show : bool, default True
+        Without `path`: open the pane, blocking until it is closed when
+        no event loop is running. False returns it unopened.
+    title : str, optional
+        The window's title.
+    size : (int, int), default (1000, 700)
+        Width and height in logical pixels.
+    frequency_axis : {'log', 'linear', 'default'}, optional
+        How frequency axes are drawn while this figure is built, put
+        back afterwards (`visualdynamics.core.data.frequency_axis`).
+        Only with `path`: a shown pane may redraw after the setting has
+        been put back.
+
+    Returns
+    -------
+    str or DataPane
+        The path written, or the pane.
+
+    Raises
+    ------
+    TypeError
+        If `build` is not callable.
+    ValueError
+        If `size` is not two positive numbers, the extension names no
+        image type, `frequency_axis` is not a setting, or it is given
+        without `path`.
+    OSError
+        If the file cannot be written.
+    """
+    from ..core.data import frequency_axis as axis_setting
+
+    if not callable(build):
+        raise TypeError('build is a function that draws into the layout, '
+                        f'not a {type(build).__name__}')
+    if frequency_axis is None:
+        return _plot_window(build, theme=theme, path=path, show=show,
+                            title=title, size=size)
+    if path is None:
+        raise ValueError('frequency_axis applies to a figure written to '
+                         'path: a shown pane may redraw after the setting '
+                         'is put back')
+    _check_target(path, size)
+    before = axis_setting()
+    # set through the setting itself, which refuses a mode it does not
+    # know before anything is drawn
+    axis_setting(frequency_axis)
+    try:
+        return _plot_window(build, theme=theme, path=path, show=show,
+                            title=title, size=size)
+    finally:
+        axis_setting(before)
+
+
+def figure_plots(layout: Any, dimension: str | None = None) -> list[Any]:
+    """The plots in a figure, in reading order; or those of one quantity.
+
+    Reading order is top to bottom, then left to right, and a nested
+    panel's plots are read where the panel sits. A legend is not a plot
+    and is left out.
+
+    `build_plots` stacks one plot per quantity, so the plot to draw a
+    mark on is found by what it draws, not by its row. With `dimension`
+    (a dimension expression as a record's ``ordinate_dim`` holds it:
+    'length', 'acceleration**2/frequency'), only the plots drawing that
+    quantity are returned. A plot a script drew itself records no
+    quantity, and only the unfiltered list holds it.
+
+    Parameters
+    ----------
+    layout : GraphicsLayoutWidget or GraphicsLayout
+        The figure, or one panel of it.
+    dimension : str, optional
+        The quantity to find.
+
+    Returns
+    -------
+    list of pyqtgraph.PlotItem
+        Every plot, or every plot drawing `dimension`.
+
+    Raises
+    ------
+    UnitError
+        If `dimension` names a dimension the units do not track.
+    ValueError
+        If no plot in the figure draws `dimension`; the message names
+        the quantities it does draw.
+    """
+    import pyqtgraph as pg
+
+    from ..units import parse_dimension
+
+    wanted = (None if dimension is None
+              else sorted(parse_dimension(dimension)))
+    found: list[Any] = []
+
+    def walk(container: Any) -> None:
+        # pyqtgraph keeps {item: [(row, col), ...]} in the order items
+        # were added, which is not the order they are read in
+        cells = getattr(container, 'ci', container).items
+        for item, _places in sorted(cells.items(),
+                                    key=lambda pair: min(pair[1])):
+            if isinstance(item, pg.PlotItem):
+                found.append(item)
+            elif isinstance(item, pg.GraphicsLayout):
+                walk(item)
+
+    walk(layout)
+    if wanted is None:
+        return found
+    keys = [getattr(plot, 'series_key', None) for plot in found]
+    matched = [plot for plot, key in zip(found, keys)
+               if key is not None
+               and sorted(parse_dimension(key[1])) == wanted]
+    if not matched:
+        drawn = sorted({key[1] for key in keys if key is not None})
+        held = (f'it draws {", ".join(drawn)}' if drawn
+                else 'it holds no plot drawn from data')
+        raise ValueError(f'no plot in this figure draws {dimension}; {held}')
+    return matched
+
+
+def to_view(plot: Any, x: ArrayLike | None = None,
+            y: ArrayLike | None = None) -> tuple[Any, Any]:
+    """Data coordinates as the plot's view holds them.
+
+    A plot drawn on a log axis works in decades: its view holds log10 of
+    the data. A curve added with ``plot.plot`` is converted by pyqtgraph,
+    but a line (``InfiniteLine``), a label (``TextItem``), a set of
+    markers and a range are placed in view coordinates, and a value
+    placed without the conversion lands at its own logarithm. This
+    converts each axis as that axis is drawn.
+
+    Parameters
+    ----------
+    plot : pyqtgraph.PlotItem
+        The plot the coordinates are for.
+    x, y : float or array_like, optional
+        Values in the plot's display units; either may be omitted.
+
+    Returns
+    -------
+    (x, y)
+        Each converted, a float for a number and an array for an array,
+        or None where it was omitted.
+
+    Raises
+    ------
+    ValueError
+        If a value is not finite, or is zero or negative on a log axis;
+        neither has a place on the plot.
+    """
+    log_x, log_y = plot.getViewBox().state['logMode']
+    return (_view_axis(x, bool(log_x), 'x'), _view_axis(y, bool(log_y), 'y'))
+
+
+def _view_axis(values: ArrayLike | None, log: bool, name: str) -> Any:
+    """One axis's values in view coordinates (`to_view`)."""
+    if values is None:
+        return None
+    array = np.asarray(values, dtype=float)
+    bad = ~np.isfinite(array)
+    if bad.any():
+        raise ValueError(f'{name} holds {int(bad.sum())} value(s) that are '
+                         'not finite, which have no place on a plot')
+    if log:
+        low = array[array <= 0.0]
+        if low.size:
+            raise ValueError(f'the {name} axis is drawn in decades, and '
+                             f'{name} = {float(low.flat[0]):g} has no '
+                             'logarithm')
+        array = np.log10(array)
+    return float(array) if array.ndim == 0 else array
+
+
+def pin(plot: Any, x: tuple[float, float] | None = None,
+        y: tuple[float, float] | None = None) -> None:
+    """Fix a plot's range, in data units, so it opens where it is told.
+
+    Panels meant to be compared need one scale. `build_plots` frames
+    each plot on its own data and limits zoom and pan to that frame, so
+    a range set straight on the plot is clamped back inside it; and on a
+    log axis the range is in decades. This sets the range from data
+    units (`to_view`), turns autorange off on that axis, and makes the
+    pinned range the plot's outer limit, as the data's own frame was.
+
+    Parameters
+    ----------
+    plot : pyqtgraph.PlotItem
+        The plot to pin.
+    x, y : (float, float), optional
+        The low and high ends, in the plot's display units; either may
+        be omitted.
+
+    Raises
+    ------
+    ValueError
+        If a range is not two values, its low end is not below its high
+        end, or an end has no place on the axis (`to_view`).
+    """
+    view = plot.getViewBox()
+    for axis, span in (('x', x), ('y', y)):
+        if span is None:
+            continue
+        try:
+            low, high = (float(end) for end in span)
+        except (TypeError, ValueError):
+            raise ValueError(f'{axis} is a (low, high) range, not {span!r}'
+                             ) from None
+        ends = to_view(plot, **{axis: [low, high]})[0 if axis == 'x' else 1]
+        if not low < high:
+            raise ValueError(f'{axis} runs from low to high, and {low:g} is '
+                             f'not below {high:g}')
+        lo, hi = float(ends[0]), float(ends[1])
+        view.setLimits(**{f'{axis}Min': lo, f'{axis}Max': hi})
+        view.disableAutoRange(axis=axis)
+        if axis == 'x':
+            plot.setXRange(lo, hi, padding=0)
+        else:
+            plot.setYRange(lo, hi, padding=0)
 
 
 def plot_mac(shapes: ShapeSet, other: ShapeSet | None = None, *,
@@ -2888,17 +3229,73 @@ def plot_photos(photos: Photos, picks: Iterable[int] | None = None, *,
                         title=title or 'Photos', size=size)
 
 
-def _as_series(items):
-    """Whatever was handed in, as the (name, data, records) the builders
-    take: a bare data array, or a (name, data) or (name, data, records)
-    tuple, in any mixture."""
+def as_series(items: Iterable[Any]
+              ) -> list[tuple[str | None, Any, list[int] | None]]:
+    """Data arrays as the (name, data, records) list the builders take.
+
+        build_plots(layout, as_series([psd, ('Spec', specification)]))
+
+    Each item is a data array, ``(name, data)``, or ``(name, data,
+    records)`` to draw only some of its records, in any mixture. The
+    name prefixes the record's legend entries when more than one object
+    is named. This is how `plot_series` reads its items, so a figure
+    built with `compose` takes them the same way.
+
+    Parameters
+    ----------
+    items : iterable
+        Data arrays and tuples, as above.
+
+    Returns
+    -------
+    list of (str or None, DataArray, list of int or None)
+        One entry per item, `records` None for every record.
+
+    Raises
+    ------
+    TypeError
+        If an item holds something that is not a data array, a name that
+        is not a string, or records that are not indices.
+    ValueError
+        If nothing is given, a tuple is not two or three long, or
+        `records` is empty or names a record the array does not have.
+    """
     series = []
-    for item in items:
+    for position, item in enumerate(items):
         if isinstance(item, tuple):
-            name, data, *rest = item
-            series.append((name, data, rest[0] if rest else None))
+            if len(item) not in (2, 3):
+                raise ValueError(f'item {position} is a tuple of {len(item)}; '
+                                 'an item is (name, data) or (name, data, '
+                                 'records)')
+            name, data = item[0], item[1]
+            records = item[2] if len(item) == 3 else None
         else:
-            series.append((None, item, None))
+            name, data, records = None, item, None
+        if not (hasattr(data, 'num_records') and hasattr(data, 'ordinate')):
+            raise TypeError(f'item {position} is a {type(data).__name__}, '
+                            'not a data array')
+        if name is not None and not isinstance(name, str):
+            raise TypeError(f'item {position} is named by a '
+                            f'{type(name).__name__}, not a string')
+        if records is not None:
+            # a bare index is one record, as a list of one would be
+            picked = np.atleast_1d(np.asarray(records))
+            if picked.size == 0:
+                raise ValueError(f'item {position} picks no records')
+            if not np.issubdtype(picked.dtype, np.integer):
+                raise TypeError(f'item {position} picks records by '
+                                f'{picked.dtype} values, not indices')
+            records = [int(i) for i in picked]
+            # a negative index is Python's count from the end, which no
+            # record list means: -1 drew the last record without a word
+            outside = [i for i in records if not 0 <= i < data.num_records]
+            if outside:
+                raise ValueError(f'item {position} has {data.num_records} '
+                                 f'record(s), so record(s) {outside} are not '
+                                 'in it')
+        series.append((name, data, records))
+    if not series:
+        raise ValueError('nothing to draw: no data arrays were given')
     return series
 
 
@@ -2920,7 +3317,7 @@ def plot_series(items: Sequence[tuple[str | None, Any, Sequence[int] | None]], u
     and the other keyword arguments are as for `build_plots`. Returns
     the pane, or the path written.
     """
-    series = _as_series(items)
+    series = as_series(items)
 
     def build(widget: Any) -> Any:
         build_plots(widget, series, unit_system=unit_system, theme=theme,
@@ -3001,8 +3398,7 @@ def plot_half_power(data: Any, near: float, record: int = 0, *,
     def build(widget: Any) -> Any:
         build_plots(widget, [(None, data, [record])], unit_system=us,
                     theme=theme)
-        plot = next(item for item in widget.ci.items
-                    if hasattr(item, 'addItem'))
+        plot = figure_plots(widget)[0]
         add_half_power(plot, reading,
                        color=resolve_theme(theme)['plot_foreground'],
                        scale=scale)
@@ -3080,8 +3476,7 @@ def plot_tone_readout(data: Any, tones: float | Sequence[float],
     def build(widget: Any) -> Any:
         build_plots(widget, [(None, data, [record])], unit_system=us,
                     theme=theme)
-        plot = next(item for item in widget.ci.items
-                    if hasattr(item, 'addItem'))
+        plot = figure_plots(widget)[0]
         for reading in readings:
             add_tone_readout(plot, reading, data.abscissa,
                              color=resolve_theme(theme)['plot_foreground'],
@@ -3364,7 +3759,7 @@ def plot_comparison(measured: Any, specification: Any, *,
     `pair` is not one of the shared channels. Returns the pane, or the
     path written.
     """
-    series = _as_series([(None, measured), (None, specification)])
+    series = as_series([(None, measured), (None, specification)])
     series, _dropped = bounded_by_specification(series)
     pairs = specification_pairs(series)
     if not pairs:
@@ -4878,9 +5273,9 @@ def plot_replication_segments(measured: Any, specification: Any,
                         size=size)
 
 
-__all__ = ['MAX_RECORDS', 'axis_label', 'build_photos', 'build_plot',
-           'build_plots',
+__all__ = ['MAX_RECORDS', 'as_series', 'axis_label', 'build_photos',
+           'build_plot', 'build_plots', 'compose', 'figure_plots', 'pin',
            'plot_bars', 'plot_cmif', 'plot_coherence_map', 'plot_comparison',
            'plot_data', 'plot_mac', 'plot_photos', 'plot_replication',
            'plot_replication_segments',
-           'plot_series', 'save_plot']
+           'plot_series', 'save_plot', 'to_view']
