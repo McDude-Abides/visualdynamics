@@ -50,9 +50,12 @@ def test_the_toggle_puts_the_bars_over_the_table(showing, pump):
         'no thresholds: nothing to be out of'
     assert chart.lines == [], 'and no shaded zones'
     assert [label for label, _v in chart.rows] == list(spec.response_dof)
-    assert np.allclose(chart.values(),
-                       [specification_rms(spec, i)
-                        for i in range(spec.num_records)])
+    # read in the display unit, as the heading names it
+    shown = [float(window.unit_system.from_si(
+        specification_rms(spec, i),
+        spec.ordinate_dim[i].replace('**2/frequency', '')))
+        for i in range(spec.num_records)]
+    assert np.allclose(chart.values(), shown)
     assert all(chart.beyond(v) is None for v in chart.values())
     assert chart.plot.getAxis('bottom').labelText.startswith('RMS level')
     summary = chart.summary.toPlainText()
@@ -63,7 +66,7 @@ def test_the_toggle_puts_the_bars_over_the_table(showing, pump):
     model = window.table.model()
     assert model.rowCount() == spec.num_records
     assert float(model.index(0, 1).data()) == pytest.approx(
-        specification_rms(spec, 0), rel=1e-3)
+        shown[0], rel=1e-3)
     # and back
     window.data_pane.rms_action.trigger()
     pump()
@@ -144,3 +147,42 @@ def test_a_target_holding_its_cross_terms_reads_one_level_per_channel(window,
     levels = [model.data(model.index(r, 1), Qt.ItemDataRole.DisplayRole)
               for r in range(model.rowCount())]
     assert all('nan' not in str(v) for v in levels)
+
+
+def test_the_levels_are_read_in_the_display_units(window, pump):
+    """A specification is stored in SI, and its levels were written in
+    SI under the display unit's heading: the workmanship profile (20 Hz
+    0.01, 80 to 500 Hz 0.04, 2000 Hz 0.01 g²/Hz, 6.78 grms) read 66.53
+    in a g system, its rms in m/s². The bars and the table read it in
+    the unit their heading names."""
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.units import SI, SYSTEMS
+
+    g = 9.80665
+    profile = np.array([0.01, 0.04, 0.04, 0.01]) * g**2
+    spec = Specification(abscissa=np.array([20.0, 80.0, 500.0, 2000.0]),
+                         ordinate=profile[np.newaxis].astype(complex),
+                         response_dof=['1Z+'],
+                         ordinate_dim=['acceleration**2/frequency'])
+    assert specification_rms(spec) == pytest.approx(6.784 * g, rel=1e-3), \
+        'stored in SI'
+    window.unit_system = SYSTEMS['in-slinch-lbf-s (g)']
+    window.add_object('Workmanship', spec)
+    window.data_pane.waterfall_action.setChecked(False)
+    window.show_object('Workmanship')
+    pump()
+    window.data_pane.rms_action.trigger()
+    pump()
+    assert window.bar_chart.values() == pytest.approx([6.784], rel=1e-3)
+    model = window.table.model()
+    heading = model.headerData(1, Qt.Orientation.Horizontal,
+                               Qt.ItemDataRole.DisplayRole)
+    assert heading == 'Specification RMS [g]'
+    assert model.data(model.index(0, 1),
+                      Qt.ItemDataRole.DisplayRole) == '6.784'
+    # and in SI, the stored value under m/s²
+    window._units_changed(SI.name)
+    pump()
+    assert window.bar_chart.values() == pytest.approx([6.784 * g], rel=1e-3)

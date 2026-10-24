@@ -115,7 +115,10 @@ def test_a_row_per_channel_with_its_level(levels):
     assert model.rowCount() == spec.num_records
     assert model.columnCount() == 2
     assert model.index(0, 0).data() == '101Z+'
-    assert float(model.index(0, 1).data()) == pytest.approx(1.4217, abs=1e-3)
+    assert model.headerData(1, Qt.Orientation.Horizontal) ==         'Specification RMS [g]'
+    # 1.4217 m/s**2 as stored, read in the g the heading names
+    assert float(model.index(0, 1).data()) == pytest.approx(
+        1.4217 / 9.80665, abs=1e-4)
 
 
 def test_the_level_is_the_specifications_own(levels):
@@ -126,8 +129,10 @@ def test_the_level_is_the_specifications_own(levels):
     window, spec = levels
     model = window.table.model()
     for row in range(model.rowCount()):
+        dim = spec.ordinate_dim[row].replace('**2/frequency', '')
         assert float(model.index(row, 1).data()) == pytest.approx(
-            specification_rms(spec, row), rel=1e-3)
+            float(window.unit_system.from_si(specification_rms(spec, row),
+                                             dim)), rel=1e-3)
 
 
 def test_the_row_being_drawn_is_selected(levels):

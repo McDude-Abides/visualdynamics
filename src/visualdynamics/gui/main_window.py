@@ -18154,10 +18154,16 @@ class MainWindow(QMainWindow):
         wanted = [i for i in wanted
                   if references is None
                   or str(references[i]) == str(spec.response_dof[i])]
+        # the rms is in the specification's stored unit, SI, and is read
+        # in the unit the heading names: the workmanship profile's
+        # 6.78 grms read 66.53 under a g heading (2026-10-24)
         rows = []
         for i in wanted:
+            level = specification_rms(spec, i)
+            shown = float(self.unit_system.from_si(
+                level, spec.ordinate_dim[i].replace('**2/frequency', '')))
             rows.append((pair_label(_pair_of(spec, i)),
-                         {'specification_rms': specification_rms(spec, i)}))
+                         {'specification_rms': shown}))
         if not rows:
             return None
         return rows, self.unit_system.label(
