@@ -240,6 +240,15 @@ what tests and notebooks need. Passing `path=` never creates a pane or
 a toolbar: a bare plot widget is laid out off screen just long enough
 to export the image.
 
+## A figure of your own
+
+When no one view draws the figure you need (two runs on one axis with
+one dashed, a mode marked and named, panels side by side on one
+scale), `visualdynamics.plot.compose` draws it in the same frame the
+standalone plots use, with `as_series`, `figure_plots`, `to_view` and
+`pin` to put the readings, marks and ranges where they belong. See
+[Composing a figure from a script](plot-composition.md).
+
 ## From a project
 
 ```python

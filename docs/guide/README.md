@@ -24,6 +24,8 @@ that is not an alpha.
 - [Units](units.md): SI inside, display units where values are shown
   or written out
 - [Plotting](plotting.md): every plot the app draws, from code
+- [Composing a figure from a script](plot-composition.md): several
+  readings, marks and panels on one figure, written to a file
 - [The modal workflow](workflows/modal-workflow.md): the app and a
   script, step by step
 - [How the mode fitting works](modal-fitting.md): the algorithm, and

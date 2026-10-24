@@ -1009,6 +1009,71 @@ def comparison_chance():
                 path=str(OUT / 'comparison-chance.png'))
 
 
+def plot_composition():
+    """A figure no single view draws: a record's two quantities on the
+    left, two runs' ASDs on the right on one pinned scale, with the
+    second run dashed and a mode marked and labeled in words."""
+    import numpy as np
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.core.data import Psd, TimeHistory
+    from visualdynamics.plot import (
+        as_series,
+        build_plots,
+        compose,
+        data_curves,
+        figure_plots,
+        pin,
+        to_view,
+    )
+
+    g = 9.80665
+    rate = 2048.0
+    t = np.arange(int(0.5 * rate)) / rate
+    acceleration = g * np.sin(2 * np.pi * 12 * t) * np.exp(-3 * t)
+    stroke = 0.002 * np.cos(2 * np.pi * 12 * t) * np.exp(-3 * t)
+    record = TimeHistory(t, np.vstack([acceleration, stroke]),
+                         response_dof=['1Z+', '1Z+'],
+                         ordinate_dim=['acceleration', 'length'],
+                         ordinate_unit=['m/s**2', 'm'])
+    f = np.geomspace(20.0, 2000.0, 400)
+
+    def run(peak, q):
+        r = f / peak
+        lift = np.sqrt((1 + (r / q) ** 2) / ((1 - r ** 2) ** 2 + (r / q) ** 2))
+        return Psd(f, (0.01 * g ** 2 * lift ** 2)[None], ['1Z+'],
+                   ordinate_dim=['acceleration**2/frequency'])
+
+    before, after = run(180.0, 8.0), run(165.0, 6.0)
+
+    def build(layout):
+        left = layout.addLayout(row=0, col=0)
+        right = layout.addLayout(row=0, col=1)
+        build_plots(left, as_series([record]), theme='light')
+        build_plots(right, as_series([('before', before), ('after', after)]),
+                    theme='light')
+        asd = figure_plots(right, 'acceleration**2/frequency')[0]
+        pin(asd, x=(20.0, 2000.0), y=(1e-4, 1.0))
+        _, dashed = data_curves(asd)
+        pen = pg.mkPen(dashed.opts['pen'])
+        pen.setStyle(Qt.PenStyle.DashLine)
+        dashed.setPen(pen)
+        x, y = to_view(asd, x=180.0, y=0.5)
+        asd.addItem(pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen(
+            '#555555', width=1, style=Qt.PenStyle.DotLine)))
+        label = pg.TextItem('first mode before, 180 Hz', color='#222222',
+                            anchor=(0, 1))
+        label.setPos(x, y)
+        asd.addItem(label)
+
+    compose(build, path=str(OUT / 'plot-composition.png'), theme='light',
+            size=(1000, 460), frequency_axis='log')
+    print(f'plot composition: before peaks at '
+          f'{f[np.argmax(before.ordinate[0])]:.0f} Hz, after at '
+          f'{f[np.argmax(after.ordinate[0])]:.0f} Hz')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1032,6 +1097,7 @@ def main():
     breakpoint_slopes()
     amplitude_spectrum()
     comparison_chance()
+    plot_composition()
     print('done')
 
 
