@@ -665,3 +665,190 @@ def test_the_editor_pane_offers_the_caption_and_reads_it_out(run, qt_app):
         editor.close()
         editor.deleteLater()
         qt_app.processEvents()
+
+
+# ---- dead, not finite, empty, another quantity ----------------------------
+
+
+def _one(x, dim='acceleration', dof='1Z+'):
+    """One channel of `x` averaged by AVERAGING, as its ASD."""
+    t = np.arange(int(6 * FS)) / FS
+    history = visualdynamics.TimeHistory(t, np.atleast_2d(x),
+                                         response_dof=[dof],
+                                         ordinate_dim=[dim])
+    history.averaging = AVERAGING
+    return history.compute_psds()
+
+
+@pytest.fixture(scope='module')
+def flat():
+    return visualdynamics.Specification(
+        abscissa=np.array([20.0, 400.0]), ordinate=np.full((1, 2), 1e-3),
+        response_dof=['1Z+'], ordinate_dim=['acceleration**2/frequency'])
+
+
+def test_a_drive_point_cross_term_is_a_cpsd():
+    """A force and an acceleration at one DOF: their cross term names
+    one DOF twice, and is a CPSD, not an ASD (`Psd.is_autospectrum`)."""
+    t = np.arange(int(6 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, np.random.default_rng(3).standard_normal((2, t.size)),
+        response_dof=['1Z+', '1Z+'], ordinate_dim=['acceleration', 'force'])
+    history.averaging = AVERAGING
+    cpsd = history.compute_cpsds()
+    cross = next(r for r in range(cpsd.num_records)
+                 if not cpsd.is_autospectrum(r))
+    caption = record_caption(cpsd, cross, averaging=AVERAGING)
+    assert caption.kind == 'CPSD'
+    assert ' against 1Z+ ' in _rows(caption)['Channel']
+    auto = next(r for r in range(cpsd.num_records) if cpsd.is_autospectrum(r))
+    assert record_caption(cpsd, [auto, cross]).kind == 'ASD and CPSD'
+
+
+def test_a_dead_channel_is_captioned_with_nothing_measured(flat):
+    caption = record_caption(_one(np.zeros(int(6 * FS))), 0,
+                             averaging=AVERAGING, specification=flat,
+                             unit_system=visualdynamics.SI)
+    assert caption.measured_rms == 0.0 and caption.not_compared is None
+    assert ' 0 m/s² rms measured against ' in _rows(caption)['Requirement']
+
+
+def test_a_record_with_no_finite_line_is_not_compared_and_says_why(flat):
+    x = np.random.default_rng(4).standard_normal(int(6 * FS))
+    x[1000] = np.nan                      # inside the stretch averaged
+    caption = record_caption(_one(x), 0, averaging=AVERAGING,
+                             specification=flat)
+    assert caption.measured_rms is None
+    assert _rows(caption)['Requirement'] == (
+        "specification, reference drawn; not compared: none of the "
+        "record's lines is a finite number")
+
+
+def test_a_record_of_another_quantity_is_not_compared_and_says_why(flat):
+    x = np.random.default_rng(5).standard_normal(int(6 * FS))
+    caption = record_caption(_one(x, dim='velocity'), 0,
+                             averaging=AVERAGING, specification=flat)
+    assert caption.measured_rms is None and caption.reference_rms is None
+    said = _rows(caption)['Requirement']
+    assert '; not compared: the specification is of acceleration' in said
+    assert 'velocity' in said
+
+
+def test_a_channel_the_specification_does_not_hold_says_so(flat):
+    x = np.random.default_rng(6).standard_normal(int(6 * FS))
+    caption = record_caption(_one(x, dof='2Z+'), 0, averaging=AVERAGING,
+                             specification=flat)
+    assert _rows(caption)['Requirement'].endswith(
+        'not compared: the specification holds no record for 2Z+ '
+        'acceleration')
+
+
+def test_an_empty_selection_is_refused(measured):
+    with pytest.raises(IndexError, match='at least one record'):
+        record_caption(measured, [])
+
+
+# ---- the survivors of tools/mutate.py, each pinned -------------------------
+
+
+def test_one_frame_is_said_in_the_singular():
+    t = np.arange(1024) / FS
+    history = visualdynamics.TimeHistory(
+        t, np.random.default_rng(12).standard_normal((1, t.size)),
+        response_dof=['1Z+'], ordinate_dim=['acceleration'])
+    one = Averaging(frame_length=1024, window='hann', frames=1)
+    history.averaging = one
+    rows = _rows(record_caption(history.compute_psds(), 0, averaging=one))
+    assert rows['Estimate'] == 'ASD, single channel, linear average of 1 frame'
+    two = Averaging(frame_length=512, window='hann', frames=2)
+    history.averaging = two
+    rows = _rows(record_caption(history.compute_psds(), 0, averaging=two))
+    assert rows['Estimate'].endswith('linear average of 2 frames')
+
+
+def test_the_band_the_rms_is_taken_over_is_said_low_to_high(measured):
+    spec = visualdynamics.Specification(
+        abscissa=np.array([20.0, 400.0]), ordinate=np.full((1, 2), 1e-3),
+        response_dof=['1Z+'], ordinate_dim=['acceleration**2/frequency'])
+    caption = record_caption(measured, 0, specification=spec, scale_db=0)
+    low, high = caption.rms_band
+    assert low < high
+    assert _rows(caption)['Requirement'].endswith(
+        f', {low:.4g} Hz to {high:.4g} Hz')
+    assert caption.scale_db == 0
+    scaled = record_caption(measured, 0, specification=spec, scale_db=6)
+    assert scaled.scale_db == 6
+    assert record_caption(measured, 0, scale_db=6).scale_db == 0, \
+        'no specification, nothing scaled'
+
+
+@pytest.mark.parametrize('centers, expected', [
+    (1000.0 * 2.0 ** (np.arange(6) / 3.0), 3),
+    (1000.0 * 2.0 ** (np.arange(6) / 6.0), 6),
+    (1000.0 * 2.0 ** np.arange(4.0), 1),
+    (np.array([1000.0]), None),
+    (np.array([0.0, 10.0]), None),
+    (np.array([20.0, 10.0]), None),
+    (np.array([10.0, 10.0]), None),
+])
+def test_bands_per_octave_are_read_from_the_centers(centers, expected):
+    from visualdynamics.core.report_caption import _per_octave
+
+    assert _per_octave(centers) == expected
+
+
+def test_a_banded_spectrum_with_no_count_given_reads_it_from_its_bands(
+        measured):
+    banded = measured.to_octave(3)
+    rows = _rows(record_caption(banded, 0))
+    assert rows['Resolution'] == '1/3-octave bands'
+    assert rows['Estimate'].endswith('banded to 1/3 octave')
+
+
+def test_a_geometry_gives_the_global_axis_nearest_the_channel(measured,
+                                                              table):
+    geometry = visualdynamics.Geometry(node_id=[1], node_xyz=[[0, 0, 0]])
+    channel = record_caption(measured, 0, channel_table=table,
+                             geometry=geometry).channels[0]
+    assert channel.nearest_axis == 'Z+'
+    assert channel.place() == 'node 1 (bracket), Z+ (nearest global Z+)'
+
+
+def test_a_row_with_a_blank_type_answers_when_none_matches_both():
+    untyped = ChannelTable({'channel': [7], 'node': [1], 'direction': ['Z+'],
+                            'unit': ['m/s^2'], 'channel_type': [''],
+                            'comment': ['bracket']})
+    t = np.arange(int(2 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, np.random.default_rng(13).standard_normal((1, t.size)),
+        response_dof=['1Z+'], ordinate_dim=['acceleration'])
+    channel = record_caption(history.compute_psds(), 0,
+                             channel_table=untyped).channels[0]
+    assert channel.channel == 7 and channel.description == 'bracket'
+
+
+def test_a_record_of_unknown_quantity_takes_the_one_row_at_its_dof(table):
+    t = np.arange(int(2 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, np.random.default_rng(14).standard_normal((1, t.size)),
+        response_dof=['2Z+'])
+    two = ChannelTable({'channel': [5, 6], 'node': [2, 3],
+                        'direction': ['Z+', 'Z+'], 'unit': ['m/s^2', 'm/s^2'],
+                        'channel_type': ['acceleration', 'acceleration'],
+                        'comment': ['arm', 'base']})
+    channel = record_caption(history.compute_psds(), 0,
+                             channel_table=two).channels[0]
+    assert channel.channel == 5 and channel.description == 'arm'
+    shared = ChannelTable({'channel': [5, 6], 'node': [2, 2],
+                           'direction': ['Z+', 'Z+'],
+                           'unit': ['m/s^2', 'N'],
+                           'channel_type': ['acceleration', 'force'],
+                           'comment': ['arm', 'cell']})
+    assert record_caption(history.compute_psds(), 0,
+                          channel_table=shared).channels[0].channel is None, \
+        'two rows at the DOF and no quantity to choose between them'
+
+
+def test_a_record_past_the_last_is_refused_by_its_number(measured):
+    with pytest.raises(IndexError, match='record 2 is not one of the 2'):
+        record_caption(measured, 2)

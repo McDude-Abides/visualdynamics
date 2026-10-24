@@ -33,7 +33,7 @@ The block has eight rows, always in this order:
 | Resolution | The line spacing, or the bands and the lines they were banded from |
 | Window | The averaging's own description (`Averaging.describe`): the window and its parameter, the overlap, the frame length, and the detrend when there is one |
 | DOF | The equivalent degrees of freedom, discounted for overlap, beside the nominal count |
-| Requirement | The specification drawn, which of its limits are drawn, and the overall rms measured (and as drawn, where the comparison scales it) beside the rms it specifies, over the band the comparison judged |
+| Requirement | The specification drawn, which of its limits are drawn, and the overall rms measured (and as drawn, where the comparison scales it) beside the rms it specifies, over the band the comparison judged; or why the record was not compared |
 
 A fact nothing records is written as "not recorded" rather than left
 out, so a reader sees the gap instead of assuming the row was never
@@ -50,7 +50,13 @@ ones the verdict table states), over the band it judged. Where the
 comparison scales the measurement to the specification, the row gives
 the measured rms both as measured, the number a reader holding the raw
 data would compute, and as drawn and judged; the scale itself is in
-the figure's legend and caption.
+the figure's legend and caption. A record the comparison cannot judge
+gets no rms, and the row says why after "not compared": a record of
+another quantity than the specification (an acceleration requirement
+against a velocity record), a record with no finite line, or a
+specification with no record for the channel. A cross term between a
+drive point's force and its acceleration names one DOF twice and is a
+CPSD.
 
 Where the channels of one figure pooled different numbers of records
 (two captures of one channel and one of another), the Estimate row

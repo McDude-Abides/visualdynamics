@@ -183,6 +183,12 @@ class RecordCaption:
     averaging : Averaging or None
         The averaging the spectrum was made with, whose `describe` is
         the window row.
+    not_compared : str or None
+        Why the one record captioned has no rms against the
+        specification drawn, in words (`compliance.compare`'s refusal of
+        another quantity, no finite line in the band, or no record of
+        the specification for its channel); None when it has them or
+        when no specification is drawn.
     """
 
     channels: tuple[CaptionChannel, ...]
@@ -207,6 +213,7 @@ class RecordCaption:
     scale_db: int = 0
     drawn_rms: float | None = None
     averaging: Any = None
+    not_compared: str | None = None
 
     def rows(self) -> list[tuple[str, str]]:
         """The caption as (label, text) rows, one per `ROWS` entry, in
@@ -288,16 +295,11 @@ class RecordCaption:
         return lines or 'lines not evenly spaced'
 
     def _window(self) -> str:
-        if self.averaging is not None:
-            return self.averaging.describe()
-        if self.window is None:
+        # the averaging's own statement, the one every caption, label
+        # and summary uses; no second wording of it here
+        if self.averaging is None:
             return NOT_RECORDED
-        said = self.window
-        if self.overlap is not None:
-            said += f', {self.overlap * 100.0:.3g}% overlap'
-        if self.frame_length is not None:
-            said += f', frames of {self.frame_length} samples'
-        return said
+        return self.averaging.describe()
 
     def _dof(self) -> str:
         if not self.dof:
@@ -330,6 +332,8 @@ class RecordCaption:
             if self.rms_band is not None:
                 said += (f', {self.rms_band[0]:.4g} Hz to '
                          f'{self.rms_band[1]:.4g} Hz')
+        elif self.not_compared is not None:
+            said += f'; not compared: {self.not_compared}'
         return said
 
 
@@ -342,13 +346,15 @@ def _span(values: Sequence[float]) -> str:
 
 
 def _spacing(abscissa: np.ndarray) -> float | None:
-    """The line spacing of an evenly spaced axis, else None."""
-    steps = np.diff(np.asarray(abscissa, dtype=np.float64))
-    if steps.size == 0 or not np.all(np.isfinite(steps)) or steps[0] <= 0.0:
+    """The line spacing of an evenly spaced axis
+    (`tone_readout.line_spacing`, the one test of even lines), else
+    None."""
+    from .tone_readout import line_spacing
+
+    try:
+        return line_spacing(abscissa)
+    except ValueError:
         return None
-    if not np.allclose(steps, steps[0], rtol=1e-6, atol=0.0):
-        return None
-    return float(steps[0])
 
 
 def _per_octave(abscissa: np.ndarray) -> int | None:
@@ -537,8 +543,9 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
 
     channels = tuple(caption_channel(spectrum, record, channel_table, geometry)
                      for record in wanted)
-    autos = [spectrum.record_pair(record)[0] == spectrum.record_pair(record)[1]
-             for record in wanted]
+    # one DOF named twice over two quantities, a drive point's force
+    # against its acceleration, is a cross term too
+    autos = [spectrum.is_autospectrum(record) for record in wanted]
     kind = 'ASD' if all(autos) else 'CPSD' if not any(autos) else 'ASD and CPSD'
 
     banded = getattr(spectrum, 'bandwidth', None) is not None
@@ -575,7 +582,7 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
                    averaging.stop(sample_rate, origin))
 
     limits: tuple[str, ...] = ()
-    measured_rms = reference_rms = drawn_rms = None
+    measured_rms = reference_rms = drawn_rms = not_compared = None
     band: tuple[float, float] | None = None
     unit = ''
     if specification is not None:
@@ -601,7 +608,14 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
                 # judged, the measurement scaled as it is drawn
                 _label, si, mi = pairs[0]
                 compared = compare(specification, spectrum, si, mi, scale_db)
-                if compared.get('lines'):
+                if not compared.get('lines'):
+                    finite = np.isfinite(np.real(spectrum.ordinate[mi]))
+                    not_compared = compared.get('refused') or (
+                        "none of the record's lines is a finite number"
+                        if not finite.any() else
+                        'no line of the record and the specification is '
+                        'finite in the band they share')
+                else:
                     band = tuple(float(edge) for edge in compared['band'])
                     dimension = str(spectrum.known_dim(mi))
                     reference_rms = float(compared['specification_rms'])
@@ -623,6 +637,9 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
                             drawn_rms = float(us.from_si(drawn_rms,
                                                          amplitude))
                         unit = us.label_text(amplitude)
+            else:
+                not_compared = ('the specification holds no record for '
+                                f'{channels[0].name()}')
     return RecordCaption(
         channels=channels, kind=kind, run=run, stretch=stretch,
         line_spacing=spacing, per_octave=per_octave,
@@ -636,4 +653,4 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
         limits=limits, measured_rms=measured_rms,
         reference_rms=reference_rms, rms_unit=unit, rms_band=band,
         scale_db=int(scale_db or 0) if specification is not None else 0,
-        drawn_rms=drawn_rms, averaging=averaging)
+        drawn_rms=drawn_rms, averaging=averaging, not_compared=not_compared)
