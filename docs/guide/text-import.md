@@ -68,8 +68,10 @@ left undeclared, the channel holding the file's numbers, and the import
 says why: `counts` and `bananas` are not units this package reads, and
 `Gs` reads as gigaseconds, a time, which no channel of a time history
 measures. Values are never scaled by a guess. `units=` states a unit
-for every channel, one per channel, or `{name: unit}`, and a stated unit
-that cannot be declared is refused rather than noted. `quantities=`
+for every channel, one per channel, or `{name: unit}`, where the header
+gives none or one that cannot be read; a stated unit that cannot be
+declared, or one that contradicts a header unit that can, is refused
+rather than noted. `quantities=`
 says what a channel measures without giving its unit
 (`'acceleration'`, `'displacement'`): it labels the channel and narrows
 the units offered later, and scales nothing. A unit that contradicts a
@@ -81,7 +83,8 @@ An empty cell, `NaN` or `N/A` is a missing sample. It is kept as NaN,
 and the import names the channel, how many samples are missing and
 where the first falls; `missing='refuse'` refuses the file at the first
 one instead. A row shorter than the header is read with its missing
-cells and noted. A channel whose every sample is one value is noted as
+cells and noted (except in a file split by spaces, where it is
+refused). A channel whose every sample is one value is noted as
 dead, with that value in the unit the file wrote it in. Nothing is
 dropped: what the file holds is imported, and the notes say what is
 wrong with it. `visualdynamics.core.channel_health` makes the same
@@ -93,7 +96,15 @@ Each refusal says what was found and where:
 
 - a cell that is not a number, by line and column name (a date or a
   clock time is named as one, with the way round it);
-- a row with more fields than the data above it;
+- a row with more fields than the data above it, and, in a file split
+  by spaces, a row with fewer, since a missing value there leaves no gap
+  to say which column it was;
+- a preamble rate whose unit is not a frequency (or a step whose unit is
+  not a time), unless the sample rate is stated;
+- two columns named for time, until one is chosen, and a name given in
+  `columns=`, `units=` or `time_column=` that two columns share (name
+  that column by its index);
+- a stated unit that contradicts the unit the header gives the column;
 - a file with neither a time column nor a sample rate, naming its
   columns;
 - a time column out of order, or uneven beyond its digits;

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from test_delimited_import import FS, _csv, _read, _signal, _text, _write
+from test_delimited_import import FS, G, _csv, _read, _signal, _text, _write
 
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.io import delimited
@@ -303,7 +303,7 @@ def test_a_numeric_line_above_the_header_is_not_where_the_data_start(tmp_path):
 
 @pytest.mark.parametrize('line, rate', [
     ('Sample Rate (kHz): 5.12', 5120.0),
-    ('Sample Rate: 5120 samples', 5120.0),
+    ('Sample Rate: 5120 S/s', 5120.0),
     ('Sample Interval: 1.953125e-4 sec/sample', 5120.0)])
 def test_a_word_after_the_rate_is_a_unit_only_when_it_reads_as_one(
         tmp_path, line, rate):
@@ -413,3 +413,79 @@ def test_rows_missing_everything_at_the_end_are_not_samples(tmp_path):
     assert ('run.csv: 1 row shorter than the header (the first on line 4): the '
             'cells missing from the end of a short row read as missing '
             'samples') in notes
+
+
+# ---- what cannot be read one way is refused --------------------------------------
+
+@pytest.mark.parametrize('line, said', [
+    ('Sample Rate: 5120 samples', ("line 1 states a sample rate in "
+                                   "'samples', which is not a frequency")),
+    ('Sample Rate: 5120 ms', ("line 1 states a sample rate in 'ms', which "
+                              'is not a frequency')),
+    ('dt = 0.2 Hz', "line 1 states a sample step in 'Hz', which is not a time")])
+def test_a_preamble_rate_in_a_unit_of_something_else_is_refused(
+        tmp_path, line, said):
+    path, _ = _csv(tmp_path, header='A,B,C', preamble=line + '\n')
+    layout = text_layout(path)
+    assert layout.sample_rate is None and layout.rate_problem == said
+    with pytest.raises(ValueError, match=f'^run.csv: {said}; state the '
+                                         'sample_rate$'):
+        read_delimited(path)
+    history, _notes = _read(path, sample_rate=100.0)
+    assert history.sample_rate == 100.0
+
+
+def test_a_short_row_split_by_spaces_is_refused_by_line(tmp_path):
+    """Split by spaces, a missing value leaves no gap to place it by."""
+    path = _write(tmp_path, '% dt = 0.5 ms\n1 2 3\n4 5 6\n7 8\n9 10 11\n',
+                  name='run.txt')
+    with pytest.raises(ValueError, match='run.txt, line 4: 2 fields where the '
+                                         'data above it have 3, and in a file '
+                                         'split by spaces the missing ones '
+                                         'cannot be placed'):
+        read_delimited(path)
+
+
+def test_a_name_that_matches_two_columns_is_refused(tmp_path):
+    t, a, f = _signal(16)
+    path = _write(tmp_path, 'Time (s),A (g),A (g)\n' + '\n'.join(_rows(t, a, f)))
+    for kwargs in ({'columns': ['A']}, {'units': {'A': 'g'}},
+                   {'time_column': 'A'}):
+        with pytest.raises(ValueError, match="'A' names column 2 and column 3; "
+                                             'name it by its index'):
+            read_delimited(path, **kwargs)
+    history, _notes = _read(path, columns=[2])
+    assert np.allclose(history.ordinate[0], f * G)
+
+
+def test_two_columns_named_for_time_are_refused_until_one_is_chosen(tmp_path):
+    t, a, _f = _signal(16)
+    rows = [f'{x:.17g},{1000 * x:.17g},{y:.17g}' for x, y in zip(t, a, strict=True)]
+    path = _write(tmp_path, 'Time (s),Time (ms),A (g)\n' + '\n'.join(rows))
+    layout = text_layout(path)
+    assert layout.time_column is None and layout.time_candidates == (0, 1)
+    with pytest.raises(ValueError, match='Time and Time are each named for '
+                                         'time; say which is the clock'):
+        read_delimited(path)
+    history, _notes = _read(path, time_column=1, columns=[2])
+    assert history.sample_rate == pytest.approx(FS)
+
+
+def test_a_stated_unit_that_contradicts_the_header_is_refused(tmp_path):
+    path, (_t, a, _f) = _csv(tmp_path, header='Time (s),Accel (g),Force [lbf]')
+    with pytest.raises(ValueError, match="units: Accel is stated in 'm/s\\*\\*2' "
+                                         "and headed in 'g'"):
+        read_delimited(path, units={'Accel': 'm/s**2'})
+    with pytest.raises(ValueError, match="Force is stated in 'N' and headed in "
+                                         "'lbf'"):
+        read_delimited(path, units={'Force': 'N'})
+    with pytest.raises(ValueError, match="Accel is stated in 'N' and headed "
+                                         "in 'g'"):
+        read_delimited(path, units={'Accel': 'N'})
+    # the header's own unit, however spelled, says nothing new
+    history, _notes = _read(path, units={'Accel': 'g', 'Force': 'lbf'})
+    assert np.allclose(history.ordinate[0], a * G)
+    spelled, (_t, a, _f) = _csv(tmp_path, header='Time (s),Accel (m/s^2),F',
+                                name='spelled.csv')
+    history, _notes = _read(spelled, units={'Accel': 'm/s**2'})
+    assert np.allclose(history.ordinate[0], a)

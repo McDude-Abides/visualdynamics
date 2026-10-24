@@ -255,3 +255,18 @@ def test_the_import_notes_reach_the_window(window, pump, tmp_path, monkeypatch):
     assert told == [('Imported, with a note',
                      ('run.csv: B is constant at 0 g over every present '
                       'sample: a dead or unconnected channel'))]
+
+
+def test_two_time_columns_open_on_none_until_one_is_chosen(window, tmp_path):
+    t, a, _f = _signal(64)
+    rows = [f'{x:.17g},{1000 * x:.17g},{y:.17g}' for x, y in zip(t, a, strict=True)]
+    path = _write(tmp_path, 'Time (s),Time (ms),A (g)\n' + '\n'.join(rows))
+    dialog = _dialog(window, path)
+    assert dialog.time_column() is None
+    assert not dialog.import_button.isEnabled()
+    assert 'each named for time' in dialog.message.text()
+    dialog.time_box.setCurrentIndex(1)
+    # 'Time' names both columns, so the choice is passed by its index
+    assert dialog.options() == {'time_column': 0}
+    assert dialog.import_button.isEnabled()
+    assert dialog.history.sample_rate == pytest.approx(5120.0)

@@ -278,9 +278,16 @@ class TextImportDialog(QDialog):
         what was found: 'delimiter' and 'decimal', 'time_column' (a name,
         or False for none), 'sample_rate', 'columns' when some are left
         out, 'names' when one was changed and 'units' by column name
-        where one differs from the header's."""
+        where one differs from the header's. A column whose name another
+        column shares is given by its index, which the reader would
+        otherwise refuse as naming two."""
         out: dict[str, Any] = {}
         layout = self.layout
+
+        def key(k: int) -> str | int:
+            name = layout.columns[k]
+            return name if layout.columns.count(name) == 1 else k
+
         if layout.delimiter != self.found.delimiter:
             out['delimiter'] = layout.delimiter
         if layout.decimal != self.found.decimal:
@@ -289,17 +296,17 @@ class TextImportDialog(QDialog):
         # same way from the delimiter and decimal stated
         time = self.time_column()
         if time != layout.time_column:
-            out['time_column'] = False if time is None else layout.columns[time]
+            out['time_column'] = False if time is None else key(time)
         rate = float(self.rate_box.value())
         if rate > 0 and rate != (layout.sample_rate or 0.0):
             out['sample_rate'] = rate
         rows = self._rows()
         kept = [(k, name, unit) for k, keep, name, unit in rows if keep]
         if len(kept) < len(rows):
-            out['columns'] = [layout.columns[k] for k, _n, _u in kept]
+            out['columns'] = [key(k) for k, _n, _u in kept]
         if any(name != layout.columns[k] for k, name, _u in kept):
             out['names'] = [name or layout.columns[k] for k, name, _u in kept]
-        units = {layout.columns[k]: unit for k, _n, unit in kept
+        units = {key(k): unit for k, _n, unit in kept
                  if unit and unit != (layout.units[k] or '')}
         if units:
             out['units'] = units

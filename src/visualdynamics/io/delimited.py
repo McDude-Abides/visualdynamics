@@ -57,7 +57,8 @@ quantity is refused. Values are never scaled by a guess.
 ``N/A`` is a missing sample, kept as NaN, and the import names each
 channel that has one and where the first falls; with
 ``missing='refuse'`` the first one refuses the file. A row shorter than
-the header is padded as missing and noted. A channel whose every
+the header is padded as missing and noted, where a delimiter marks each
+cell; split by spaces, a short row cannot be placed and is refused. A channel whose every
 sample is one value is noted as dead (`core.channel_health`). Neither
 drops the channel: what the file holds is imported, and the notes say
 what is wrong with it.
@@ -65,8 +66,10 @@ what is wrong with it.
 **Refusals** say what was found and where: a cell that is not a number
 (by line, as an editor numbers it, and column name), a row longer than
 the header, a file with neither a time column nor a sample rate, two
-sample rates that disagree, a time column that is not even, a column
-named that is not there.
+sample rates that disagree, a preamble rate in a unit that is not a
+frequency, a time column that is not even, two columns named for time
+with neither chosen, a column named that is not there or a name two
+columns share, and a stated unit that contradicts the header's.
 
 Every note is an `ImportNote` warning, which the window shows after the
 import and a script sees as a warning. `save` writes a time history
@@ -112,6 +115,15 @@ MISSING = frozenset({'', 'nan', '+nan', '-nan', 'na', 'n/a', '#n/a', 'null'})
 TIME_NAMES = frozenset({'time', 't', 'times', 'sec', 'secs', 'second',
                         'seconds', 'elapsed', 'elapsed time', 'x_value',
                         'time stamp', 'relative time'})
+
+#: words after a preamble's rate that mean samples per second, compared
+#: lower-cased; any other word must read as a frequency
+PER_SECOND = frozenset({'s/s', 'sa/s', 'sps', 'samples/s', 'samples/sec',
+                        'samples/second', 'samp/s'})
+
+#: words after a preamble's step that mean seconds per sample
+PER_SAMPLE = frozenset({'s/sample', 'sec/sample', 'seconds/sample',
+                        's/sa', 's/pt'})
 
 #: how far a time column's rate may sit from a stated one, relative,
 #: and still be the same rate: a step printed to six significant
@@ -170,6 +182,13 @@ class TextLayout:
         A sample rate the preamble states, per second.
     rate_line : int
         The line it was stated on.
+    rate_problem : str
+        Why a rate the preamble states cannot be used (its unit is not a
+        frequency, or a step's not a time), or ''; the read refuses it
+        unless a sample rate is stated.
+    time_candidates : tuple of int
+        Every column named for time. With more than one, `time_column`
+        is None and the read refuses until one is stated.
     """
 
     delimiter: str
@@ -182,6 +201,8 @@ class TextLayout:
     time_column: int | None
     sample_rate: float | None = None
     rate_line: int = 0
+    rate_problem: str = ''
+    time_candidates: tuple[int, ...] = ()
 
     def describe(self, path: str | os.PathLike | None = None) -> str:
         """The layout in one line, for a dialog's header."""
@@ -346,12 +367,17 @@ def _name_and_unit(header: str) -> tuple[str, str | None]:
     return header.strip(), None
 
 
-def _preamble_rate(lines: Sequence[str], end: int) -> tuple[float | None, int]:
-    """(samples per second, line number) a preamble states, or (None, 0).
+def _preamble_rate(lines: Sequence[str], end: int
+                   ) -> tuple[float | None, int, str]:
+    """(samples per second, line number, problem) a preamble states, or
+    (None, 0, '').
 
     A line whose key names a sample rate (``Sample Rate: 5120``) gives it
     directly; one naming a step (``dt = 1.953125e-4 s``) gives its
-    inverse. A unit after the value is honored (``kHz``, ``ms``).
+    inverse. A unit after the value is honored (``kHz``, ``ms``), and a
+    unit that is not a frequency (for a rate) or a time (for a step) is
+    not guessed at: the rate is None and `problem` says why, naming the
+    line.
     """
     from ..units import dimension_of, si_factor
 
@@ -365,14 +391,20 @@ def _preamble_rate(lines: Sequence[str], end: int) -> tuple[float | None, int]:
         if not value > 0:
             continue
         if key in _RATE_KEYS:
-            if unit and dimension_of(unit) == 'frequency':
-                value *= si_factor(unit, 'frequency')
-            return value, i + 1
+            if not unit or unit.lower() in PER_SECOND:
+                return value, i + 1, ''
+            if dimension_of(unit) == 'frequency':
+                return value * si_factor(unit, 'frequency'), i + 1, ''
+            return None, 0, (f'line {i + 1} states a sample rate in '
+                                 f'{unit!r}, which is not a frequency')
         if key in _STEP_KEYS:
-            if unit and dimension_of(unit) == 'time':
-                value *= si_factor(unit, 'time')
-            return 1.0 / value, i + 1
-    return None, 0
+            if not unit or unit.lower() in PER_SAMPLE:
+                return 1.0 / value, i + 1, ''
+            if dimension_of(unit) == 'time':
+                return 1.0 / (value * si_factor(unit, 'time')), i + 1, ''
+            return None, 0, (f'line {i + 1} states a sample step in '
+                                 f'{unit!r}, which is not a time')
+    return None, 0, ''
 
 
 def text_layout(path: str | os.PathLike, *, delimiter: str | None = None,
@@ -507,20 +539,23 @@ def text_layout(path: str | os.PathLike, *, delimiter: str | None = None,
         row = (_split(lines[units_at], delimiter) + [''] * fields)[:fields]
         units = [cell.strip().strip('()[]') or units[k]
                  for k, cell in enumerate(row)]
-    rate, rate_line = _preamble_rate(
+    rate, rate_line, rate_problem = _preamble_rate(
         lines, min(i for i in (names_at, units_at, start) if i is not None))
 
-    time_column = None
+    time_column, candidates = None, ()
     if names_at is not None:
-        time_column = next((k for k, column in enumerate(columns)
-                            if column.strip().lower() in TIME_NAMES), None)
+        # two columns named for time ('Time (s)' and 'Time (ms)') do not
+        # say which is the clock: neither is taken, and the read asks
+        candidates = tuple(k for k, column in enumerate(columns)
+                           if column.strip().lower() in TIME_NAMES)
+        time_column = candidates[0] if len(candidates) == 1 else None
     else:
         time_column = _rising_first_column(lines[start:], delimiter, decimal)
     return TextLayout(delimiter, decimal,
                       0 if names_at is None else names_at + 1,
                       0 if units_at is None else units_at + 1,
                       start + 1, tuple(columns), tuple(units),
-                      time_column, rate, rate_line)
+                      time_column, rate, rate_line, rate_problem, candidates)
 
 
 def _rising_first_column(lines: Sequence[str], delimiter: str, decimal: str
@@ -579,7 +614,7 @@ def _per_channel(value: Any, channels: Sequence[str], indices: Sequence[int],
             if isinstance(key, (int, np.integer)) and int(key) in indices:
                 out[list(indices).index(int(key))] = entry
             elif key in channels:
-                out[list(channels).index(key)] = entry
+                out[_by_name(key, channels, what, indices)] = entry
             else:
                 raise ValueError(f'{what} names {key!r}, which is not a '
                                  f'channel read: {list(channels)}')
@@ -597,9 +632,23 @@ def _column_index(key: Any, columns: Sequence[str], what: str) -> int:
             raise ValueError(f'{what} {key} is not a column: the file has '
                              f'{len(columns)}, indexed from 0')
         return int(key)
-    if key in columns:
-        return list(columns).index(key)
-    raise ValueError(f'{what} {key!r} is not a column: {list(columns)}')
+    return _by_name(key, columns, what)
+
+
+def _by_name(key: Any, names: Sequence[str], what: str,
+             indices: Sequence[int] | None = None) -> int:
+    """The one position `key` names in `names`; refused when it names
+    none, or two, which a name cannot tell apart. `indices` are the
+    file's columns `names` stand for, when they are not all of them."""
+    found = [k for k, name in enumerate(names) if name == key]
+    if not found:
+        raise ValueError(f'{what} {key!r} is not a column: {list(names)}')
+    if len(found) > 1:
+        at = found if indices is None else [indices[k] for k in found]
+        said = ' and '.join(f'column {k + 1}' for k in at)
+        raise ValueError(f'{what} {key!r} names {said}; name it by its '
+                         'index (from 0)')
+    return found[0]
 
 
 def _parse(rows: Sequence[tuple[int, str]], layout: TextLayout, name: str
@@ -644,6 +693,13 @@ def _parse(rows: Sequence[tuple[int, str]], layout: TextLayout, name: str
                              f'the data above it have {fields}')
         parts = parts[:fields]
         if len(parts) < fields:
+            if layout.delimiter == ' ':
+                # split by spaces, a missing value leaves no gap to say
+                # which column it was: the row cannot be read one way
+                raise ValueError(
+                    f'{name}, line {line}: {len(parts)} fields where the '
+                    f'data above it have {fields}, and in a file split by '
+                    'spaces the missing ones cannot be placed')
             short.append(line)
         for j, part in enumerate(parts):
             value = _number(part, layout.decimal)
@@ -776,7 +832,8 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
         record's response DOF.
     units : str, sequence or mapping, optional
         The unit of every channel, one per channel, or {name or index:
-        unit}; taken over the header's.
+        unit}; taken where the header gives none or one that cannot be
+        read, and refused where it contradicts one that can.
     quantities : str, sequence or mapping, optional
         What each channel measures ('acceleration', 'force',
         'displacement'), in the same forms.
@@ -849,6 +906,13 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
         raise ValueError('time_column takes an index, a name or False, not True')
     else:
         time_index = _column_index(time_column, layout.columns, 'time_column')
+    if time_column is None and len(layout.time_candidates) > 1:
+        said = ' and '.join(layout.columns[k] for k in layout.time_candidates)
+        raise ValueError(f'{name}: {said} are each named for time; say which '
+                         'is the clock with time_column, or time_column=False')
+    if sample_rate is None and layout.rate_problem:
+        raise ValueError(f'{name}: {layout.rate_problem}; state the '
+                         'sample_rate')
     stated_rate = sample_rate
     rate_source = 'the stated sample rate'
     if stated_rate is None and layout.sample_rate is not None:
@@ -942,6 +1006,16 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
                 raise ValueError(f'units: {labels[k]} is stated in {unit!r}, '
                                  f'which {reason}')
     header_units = [layout.units[k] for k in indices]
+    for k, (stated, header) in enumerate(zip(stated_units, header_units,
+                                             strict=True)):
+        # a header that states a unit the reader can use, and a stated
+        # unit that says otherwise, are two claims about one column;
+        # neither is preferred
+        if (stated and header and unit_problem(str(header)) is None
+                and not _same_unit(str(stated), str(header))):
+            raise ValueError(f'units: {labels[k]} is stated in {stated!r} and '
+                             f'headed in {header!r}; leave it out of units to '
+                             'take the header, or correct the header')
     chosen = [stated or header for stated, header in zip(stated_units, header_units,
                                                          strict=True)]
 
@@ -989,6 +1063,20 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
     for note in notes:
         warnings.warn(ImportNote(f'{name}: {note}'), stacklevel=2)
     return history
+
+
+def _same_unit(a: str, b: str) -> bool:
+    """Whether two unit strings are one unit: the same quantity and the
+    same factor to SI ('m/s**2' and 'm/s^2'; not 'g' and 'm/s**2')."""
+    from ..units import dimension_of, si_factor
+
+    if a.strip() == b.strip():
+        return True
+    dimension = dimension_of(a)
+    if dimension is None or dimension != dimension_of(b):
+        return False
+    return bool(np.isclose(si_factor(a, dimension), si_factor(b, dimension),
+                           rtol=1e-12, atol=0.0))
 
 
 def load(path: str | os.PathLike, **kwargs: Any) -> Any:
