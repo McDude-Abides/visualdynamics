@@ -199,3 +199,35 @@ def test_the_check_is_journaled_as_its_plot_call(window, pump):
     pump()
     assert len(lines()) == 1 and 'threshold_db=0.1,' in lines()[0], \
         'settled in place, not added to'
+
+
+def test_two_undeclared_channels_are_each_checked_against_their_own(window,
+                                                                    pump):
+    """An acceleration and a force at 1Z+, neither declared, told apart
+    by their hints: the check is offered on each record of their PSD and
+    reads each against its own channel, not refused as two channels."""
+    accel = _record(seconds=4.0, seed=7).ordinate[0] / G
+    force = 1e-6 * _record(seconds=4.0, seed=8).ordinate[0] / G
+    n = accel.size
+    pair = TimeHistory(np.arange(n) / FS, np.vstack([accel, force]),
+                       response_dof=['1Z+', '1Z+'],
+                       dimension_hint=['acceleration', 'force'])
+    pair.averaging = Averaging(frame_length=1024, overlap=0.0,
+                               window='boxcar').filled(n, FS)
+    window.add_object('Pair', pair)
+    name = window.project.compute_psds('Pair')
+    pane = _show(window, pump, name)
+    for record, samples in ((0, accel), (1, force)):
+        window._select_records(name, [record])
+        window.render_current()
+        pump()
+        assert pane.rms_check_action.isVisible(), f'record {record}'
+        if not pane.rms_check_action.isChecked():
+            pane.rms_check_action.trigger()
+            pump()
+        state = window._rms_check
+        assert state['record'] == record and state['history'] == 'Pair'
+        check = state['check']
+        assert check.time_rms == pytest.approx(np.sqrt(np.mean(samples ** 2)))
+        assert check.gap_db == pytest.approx(0.0, abs=1e-9)
+        assert check.passed

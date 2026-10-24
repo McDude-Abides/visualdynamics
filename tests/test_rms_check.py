@@ -16,6 +16,7 @@ spectrum came from, and the label and plot that write the check.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -26,6 +27,7 @@ from visualdynamics.core.data import Psd, TimeHistory
 from visualdynamics.core.rms_check import (
     GAP_DB,
     RmsCheck,
+    _coverage,
     matching_records,
     refusal,
     rms_check,
@@ -64,6 +66,11 @@ def _scaled(psd, factor):
     out = copy.deepcopy(psd)
     out.ordinate = psd.ordinate * factor
     return out
+
+
+def replace_check(check, **changes):
+    """The check with `changes` made: a case set up on its numbers."""
+    return replace(check, **changes)
 
 
 @pytest.fixture(scope='module')
@@ -312,6 +319,12 @@ def test_what_cannot_be_checked_is_refused(hann, record):
                              'acceleration*acceleration/frequency'])
     assert refusal(cpsd, 0) is None
     assert 'cross spectrum' in refusal(cpsd, 1)
+    # force against acceleration at a drive point names 1Z+ twice and
+    # has no phase when real, and is still not an autospectrum
+    drive = Psd(f, np.ones((1, 64)), response_dof=['1Z+'],
+                reference_dof=['1Z+'],
+                ordinate_dim=['acceleration*force/frequency'])
+    assert 'cross spectrum' in refusal(drive, 0)
     elsewhere = Psd(psd.abscissa, psd.ordinate, response_dof=['2X+'],
                     ordinate_dim=['acceleration**2/frequency'])
     with pytest.raises(ValueError, match='no 2X\\+ channel'):
@@ -481,8 +494,6 @@ def test_the_result_is_a_plain_record_of_numbers(hann, record):
         check.time_rms = 1.0
 
 
-# ---- review, 2026-10-23 ---------------------------------------------------
-
 def _undeclared_pair(seconds=4.0):
     """Two channels at 1Z+ with no declared units, told apart only by
     their hints: an acceleration of 2 (raw) rms and a force a million
@@ -525,6 +536,17 @@ def test_an_unhinted_spectrum_against_two_channels_is_ambiguous():
         bare.rms_check(history)
 
 
+def test_a_hint_that_matches_no_channel_is_named_in_the_refusal():
+    history = _undeclared_pair()
+    f = np.arange(0.0, 1025.0) * 2.0
+    velocity = Psd(f, np.ones((1, f.size)), response_dof=['1Z+'],
+                   dimension_hint=['velocity**2/frequency'])
+    with pytest.raises(ValueError,
+                       match=r'what velocity\*\*2/frequency is the') as err:
+        velocity.rms_check(history)
+    assert 'unknown' not in str(err.value)
+
+
 def test_a_band_limited_spectrum_is_not_read_as_a_scaling_error(hann,
                                                                  record):
     """A controller's spectrum on 10 to 1000 Hz of a record sampled at
@@ -560,6 +582,18 @@ def test_a_band_limited_spectrum_is_not_read_as_a_scaling_error(hann,
     assert replace_check(halved, coverage=None).cause is not None
 
 
+@pytest.mark.parametrize('block, cut, short', [
+    (1024, slice(None), False), (1024, slice(1, None), True),
+    (1024, slice(None, -1), True), (1023, slice(None), False),
+    (1023, slice(None, -1), True)])
+def test_the_coverage_is_said_a_line_short_at_either_end(block, cut, short):
+    """Lines from 0 to half the rate cover it all, and so does an odd
+    frame's, whose top line sits half a line under it; without the DC
+    line or the top line they are a line short and say so."""
+    f = np.fft.rfftfreq(block, 1.0 / FS)[cut]
+    assert (_coverage(f, FS) is not None) is short
+
+
 def test_lines_left_out_of_the_area_are_said(hann, record):
     psd, averaging = hann
     holed = copy.deepcopy(psd)
@@ -569,6 +603,12 @@ def test_lines_left_out_of_the_area_are_said(hann, record):
     check = holed.rms_check(record, averaging=averaging)
     assert any('2 lines' in note and 'left out' in note
                for note in check.notes)
+    # a line of exactly nothing is a line of the area, not one left out
+    quiet = copy.deepcopy(psd)
+    quiet.ordinate = psd.ordinate.copy()
+    quiet.ordinate[0, 100] = 0.0
+    check = quiet.rms_check(record, averaging=averaging)
+    assert not any('left out' in note for note in check.notes)
 
 
 def test_samples_not_finite_are_left_out_and_counted():
@@ -578,10 +618,7 @@ def test_samples_not_finite_are_left_out_and_counted():
 
     x = np.array([1.0, np.nan, -1.0, 1.0, np.inf])
     assert time_rms(x) == pytest.approx(1.0)
-    stats = time_statistics(x, np.arange(x.size) / 4.0) \
-        if 'time' in time_statistics.__code__.co_varnames else None
-    if stats is not None:
-        assert stats.rms == pytest.approx(time_rms(x))
+    assert time_statistics(x, 4.0).rms == pytest.approx(time_rms(x))
     check = rms_check(np.arange(0.0, 11.0), np.ones(11), x)
     assert any('2 samples' in note and 'not finite' in note
                for note in check.notes)
@@ -596,9 +633,15 @@ def test_the_window_s_gap_does_not_promise_a_longer_record_helps(hann,
     assert 'longer record' not in check.verdict
 
 
-def replace_check(check, **changes):
-    from dataclasses import replace
-    return replace(check, **changes)
+def test_a_band_limited_gap_is_not_said_to_be_the_window_s(hann, record):
+    """The frames' own mean square agrees, but lines that do not cover
+    the record cannot say the window is the whole of a gap."""
+    psd, averaging = hann
+    check = replace_check(psd.rms_check(record, averaging=averaging),
+                          threshold_db=0.0)
+    assert check.explained
+    limited = replace_check(check, coverage='its lines run 10 to 1000 Hz')
+    assert not limited.explained
 
 
 @pytest.mark.parametrize('off, named', [(0.09, True), (0.11, False),
@@ -618,3 +661,4 @@ def test_a_negative_record_is_refused(hann, record):
     with pytest.raises(ValueError, match='record -1'):
         psd.rms_check(record, -1, averaging=averaging)
     assert 'record 5' in refusal(psd, 5)
+    assert f'record {psd.num_records}' in refusal(psd, psd.num_records)

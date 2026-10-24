@@ -477,8 +477,12 @@ def _channel(history: TimeHistory, dof: str, dimension: str,
             found = {key: rows for key, rows in undeclared.items()
                      if said is not None and key[2] == said}
     if not found:
+        # an undeclared spectrum is matched by its hint, so the hint is
+        # what names the channel it looked for, not 'unknown'
+        named = (hint if dimension == UNKNOWN and hint is not None
+                 else dimension)
         raise ValueError(f'the time history holds no {dof} channel '
-                         f'measuring what {dimension} is the density of')
+                         f'measuring what {named} is the density of')
     if len(found) > 1:
         count = len(found)
         said = ', '.join(str(key[2] or 'no hint') for key in found)
@@ -524,10 +528,13 @@ def refusal(spectrum: Psd, record: int = 0) -> str | None:
     if spectrum.bandwidth is not None or spectrum.interpolation != 'bin':
         return ('the rms check sums the evenly spaced lines of an averaged '
                 'spectrum; this one is banded or written at breakpoints')
-    response = spectrum.response_dof[record]
-    reference = (response if spectrum.reference_dof is None
-                 else spectrum.reference_dof[record])
-    if reference != response or has_phase(spectrum.ordinate[record]):
+    response, reference = spectrum.record_pair(record)
+    # one DOF named twice over two quantities, force against
+    # acceleration at a drive point, is a cross term too
+    # (`Psd.is_autospectrum`), and a record with phase is one whatever
+    # it is named, as `Psd.tone_refusal` reads them
+    if (not spectrum.is_autospectrum(record)
+            or has_phase(spectrum.ordinate[record])):
         return (f'record {record} ({response}/{reference}) is a cross '
                 'spectrum; the rms check reads an autospectrum')
     if len(spectrum.abscissa) < 2:
@@ -545,8 +552,11 @@ def _coverage(frequencies: np.ndarray, rate: float) -> str | None:
     odd frame); None when they do."""
     spacing = float(frequencies[1] - frequencies[0])
     top = rate / 2.0
+    # half a line, not a whole one: an even frame's top line sits on
+    # half the rate and an odd frame's half a line under it, so a
+    # spectrum missing its top line is a line short of either
     if (frequencies[0] <= 0.5 * spacing
-            and frequencies[-1] >= top - spacing * (1.0 + 1e-9)):
+            and frequencies[-1] >= top - 0.5 * spacing * (1.0 + 1e-9)):
         return None
     return (f'its lines run {frequencies[0]:g} to {frequencies[-1]:g} Hz '
             f'of the 0 to {top:g} Hz the record holds')
