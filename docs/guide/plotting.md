@@ -185,6 +185,11 @@ delimited text](text-import.md)).
 sheet beside the spectrum it was read from, the reading the sine view's
 Mixed Mode readout shows ([A mixed-mode test as one
 specification](mixed-mode.md)).
+`plot_matrix_comparison(specification, cpsd)` draws a run's
+cross-spectral matrix against its specification as a grid, the levels
+on the diagonal, the coherence above and the phase below, each cell
+with its verdict, the reading the Matrix toggle shows ([Judging a
+cross-spectral matrix](matrix-comparison.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

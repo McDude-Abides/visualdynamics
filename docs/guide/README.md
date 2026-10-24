@@ -113,6 +113,9 @@ that is not an alpha.
 - [A mixed-mode test as one specification](mixed-mode.md): the floor,
   the tones and the narrowbands, and a data sheet that judges each by
   its own rule
+- [Judging a cross-spectral matrix against its
+  specification](matrix-comparison.md): the levels on the diagonal and
+  each cross term's coherence and phase, as a grid
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):
