@@ -717,13 +717,24 @@ def _tone_score(records: Any, dt: float, tone: SineTone) -> np.ndarray:
     `records` is a sequence of one-dimensional records (views onto the
     history, never copies). Overlap-add convolution rather than one
     FFT of the whole record, so the memory is a block's, not the
-    record's (2026-10-01: a 23 GB run)."""
+    record's (2026-10-01: a 23 GB run).
+
+    The correlation is taken in quadrature, against the tone's cosine
+    and its sine together (one complex template), and the power is the
+    sum of both, so a tone is placed by where it starts and not by the
+    phase it starts at. Against the cosine alone the power is zero
+    where the template is in quadrature with the record; on a held
+    tone, whose start and phase one frequency cannot tell apart, that
+    took the crest nearest the start, and a tone starting at a zero
+    crossing, as a drive from rest does, was placed a quarter of a
+    cycle late (the dwell readout's ring-down read 28.1 cycles where
+    28.6 is right, 2026-10-24)."""
     from scipy.fft import set_workers
     from scipy.signal import oaconvolve
 
     records = [np.asarray(record) for record in records]
     length = len(records[0])
-    template = np.cos(tone.argument(dt))
+    template = np.exp(1j * tone.argument(dt))
     if length <= len(template):
         # a recording that stopped mid-sweep still holds the sweep's
         # opening, and the opening aligns it: correlate on the half
@@ -740,8 +751,8 @@ def _tone_score(records: Any, dt: float, tone: SineTone) -> np.ndarray:
     # the FFTs inside run on every core; nothing is copied for it
     with set_workers(_workers()):
         for record in records:
-            score += oaconvolve(np.asarray(record, dtype=float), flipped,
-                                mode='valid') ** 2
+            score += np.abs(oaconvolve(np.asarray(record, dtype=float),
+                                       flipped, mode='valid')) ** 2
     return score
 
 

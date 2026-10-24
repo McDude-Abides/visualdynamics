@@ -218,15 +218,35 @@ def test_the_ring_down_reads_as_long_as_the_build_up(setting):
 
 
 def test_the_tone_is_found_in_the_record():
-    """Placed by matched filter on the control: within a quarter of a
-    cycle of where it starts (a held tone's phase, not its start, sets
-    the last quarter), which moves a share after Q cycles by a few
-    tenths of a percent."""
+    """Placed by matched filter on the control, within a sample of where
+    it starts."""
     history, spec = _dwell_record(30.0, lead=0.37)
     reading = read_dwell(history, spec)
-    assert abs(reading.onset - 0.37) <= 0.25 / FN + 1.0 / RATE
+    assert abs(reading.onset - 0.37) <= 1.5 / RATE
     assert reading.dof == RESPONSE, 'a response by default, not the control'
     assert reading.share_at(30.0) == pytest.approx(0.957, abs=0.003)
+
+
+@pytest.mark.parametrize('lead', [0.0, 0.37])
+def test_a_held_tone_is_found_where_it_starts_whatever_its_phase(lead):
+    """A held tone's start, not its phase. The matched filter correlated
+    the record with the tone's cosine and squared it, which is zero
+    where the template is in quadrature with the record, so on one
+    frequency it took the nearest crest for the start: a tone that
+    starts at a zero crossing, as a drive from rest does, was placed a
+    quarter of a cycle late, and the readout (which sets no onset) read
+    the ring-down to 5 % in 28.1 cycles where the onset given reads
+    28.6. Correlated in quadrature it is found within a sample, and
+    the two readings agree."""
+    history, spec = _dwell_record(30.0, lead=lead)
+    given = read_dwell(history, spec, onset=lead)
+    found = read_dwell(history, spec)
+    assert found.onset == pytest.approx(lead, abs=1.5 / RATE), \
+        'within a sample'
+    assert found.built == pytest.approx(given.built, abs=0.05)
+    assert found.rung == pytest.approx(given.rung, abs=0.05)
+    assert given.rung == pytest.approx(30.0 * np.log(20.0) / np.pi, abs=0.1), \
+        'Q ln 20 / pi cycles, by hand'
 
 
 def test_a_band_reads_the_same_steady_level_and_lags_the_build_up():
@@ -440,6 +460,8 @@ def test_the_readout_reads_a_held_tone_in_the_sine_view(window, pump):
     assert panel.channel_box.currentText() == RESPONSE
     assert panel.derived['frequency'].text() == '20 Hz'
     assert panel.derived['built'].text() == '28.6 cycles, 1.43 s'
+    assert panel.derived['rung'].text() == '28.6 cycles, 1.43 s', \
+        'as read_dwell with the onset given reads it'
     assert panel.derived_names['built'].text() == 'To 95 %'
     assert panel.derived['settled'].text() == 'yes'
     assert panel.preview.items, 'the level against time is drawn'
