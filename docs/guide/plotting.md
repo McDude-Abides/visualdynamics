@@ -162,6 +162,10 @@ draws a sine profile, or a specification's tone read as one, three
 ways with its crossovers marked, the reading the Sine Profile toggle on
 a sine specification's bar shows ([Writing a sine profile in
 segments](sine-profile.md)).
+`plot_import_preview('run.csv')` draws each channel of a delimited text
+import as read, its missing samples crossed and a dead channel named,
+the preview the import dialog shows ([Importing a time history from
+delimited text](text-import.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and
