@@ -321,6 +321,9 @@ def test_a_term_and_a_mirror_that_disagree_are_refused_on_either_side():
     run.ordinate[2] = run.ordinate[2] * 1.01
     pair = compare_matrix(SPEC, run, scale_db=0).pair(0, 1)
     assert pair.reason.startswith('the measurement holds the cross term')
+    pair = compare_matrix(spec, run, scale_db=0).pair(0, 1)
+    assert pair.reason.startswith('the specification and the measurement '
+                                  'hold the cross term')
 
 
 def test_two_records_for_one_entry_are_refused():
