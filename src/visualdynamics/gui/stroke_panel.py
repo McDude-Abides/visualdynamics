@@ -166,7 +166,8 @@ class StrokePanel(QWidget):
     def show_reading(self, reading: StrokeReading | None) -> None:
         """Write what `reading` came to under the ratings, in the units
         shown; None clears it."""
-        from ..core.stroke import _amount, _number
+        from ..core.stroke import _number
+        from ..core.stroke import amount as _amount
 
         if reading is None:
             for value in self.derived.values():

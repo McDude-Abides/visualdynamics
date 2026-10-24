@@ -20335,7 +20335,16 @@ class MainWindow(QMainWindow):
                 slope_tolerance=settings['slope_tolerance'])
         except ValueError as refusal:
             if level is None:
-                level = interpolated(spec, tone, channel)
+                # The level drawn alone shares the profile's refusals
+                # (undeclared units, a quantity that is no displacement,
+                # velocity or acceleration); with "Tone's own level"
+                # unticked it has not been read yet, and its refusal must
+                # not reach Qt.
+                try:
+                    level = interpolated(spec, tone, channel)
+                except ValueError:
+                    panel.show_profile(None, str(refusal))
+                    return f'{tone}: {refusal}'
             build_profile(pane.graphics, None, interpolated=level,
                           unit_system=self.unit_system,
                           theme=self.theme_name)

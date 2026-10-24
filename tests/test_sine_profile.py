@@ -118,13 +118,17 @@ def test_a_segment_is_converted_from_the_document_unit_and_convention():
     (lambda: displacement(0.2, 'g', 'peak'),
      "'g' is acceleration, not a length"),
     (lambda: velocity(10.0, 'in'), "'in' is length, not a velocity"),
-    (lambda: acceleration(2.0, 'in/s'), 'not a acceleration'),
+    (lambda: acceleration(2.0, 'in/s'),
+     "'in/s' is velocity, not an acceleration: an acceleration segment"),
     (lambda: acceleration(2.0, 'blorbs'), 'no quantity it can read'),
     (lambda: acceleration(np.nan, 'g'), 'finite number more than zero'),
-    (lambda: acceleration(-2.0, 'g'), 'finite number more than zero'),
+    (lambda: acceleration(-2.0, 'g'),
+     'an acceleration of -2.0 g: a level is a finite number more than zero'),
     (lambda: acceleration(2.0, 'g', start=np.nan), 'finite number'),
     (lambda: acceleration(2.0, 'g', start=20.0, end=10.0),
-     'starts below where it ends'),
+     'an acceleration segment from 20 to 10 Hz: it starts below'),
+    (lambda: ProfileSegment(quantity='velocity', level=1.0, start=0.0),
+     'a velocity segment starting at 0.0 Hz'),
     (lambda: ProfileSegment(quantity='jerk', level=1.0), 'not a quantity'),
 ])
 def test_a_segment_that_cannot_be_read_is_refused_by_name(build, match):
@@ -213,6 +217,34 @@ def test_a_looser_tolerance_lets_a_rounded_breakpoint_check():
     assert SineProfile(rounded).tolerance == CROSSOVER_TOLERANCE
     with pytest.raises(ValueError, match='zero or more'):
         SineProfile(rounded, tolerance=np.nan)
+    with pytest.raises(ValueError, match='a crossover tolerance of -0.01: '
+                                         'it is a share of the crossover, '
+                                         'zero or more'):
+        SineProfile(rounded, tolerance=-0.01)
+
+
+def test_a_breakpoint_written_on_its_crossover_checks_with_no_tolerance():
+    solved = crossover(('displacement', 0.10 * INCH), ('acceleration', 2.0 * G))
+    exact = SineProfile([displacement(0.20, 'in', 'peak to peak', start=5.0,
+                                      end=solved),
+                         acceleration(2.0, 'g', start=solved, end=100.0)],
+                        tolerance=0.0)
+    assert exact.tolerance == 0.0
+    assert exact.crossings[0].off == 0.0
+    assert exact.checks
+    assert exact.band == (5.0, 100.0)
+
+
+def test_a_segment_squeezed_to_nothing_is_refused():
+    # a velocity at exactly the level where the displacement meets the
+    # acceleration crosses both at that one frequency: the segment
+    # between them would run from it to itself
+    meeting = np.sqrt(0.10 * INCH * 2.0 * G)
+    with pytest.raises(ValueError, match=r'segment 2 \(.* velocity\) would '
+                                         'run from 13.99 to 13.99 Hz'):
+        SineProfile([displacement(0.20, 'in', 'peak to peak', start=5.0),
+                     velocity(meeting, 'm/s'),
+                     acceleration(2.0, 'g', end=500.0)])
 
 
 def test_crossovers_left_unwritten_are_solved():
@@ -548,7 +580,8 @@ def test_a_slope_tolerance_edit_reads_again(window, pump):
                        (5.0, 14.5, 33.0, 52.1, 500.0))
     _pane, panel = _shown(window, pump, spec)
     assert panel.derived['segments'].text() == '—'
-    assert 'from 5 to 14.5 Hz the level rises at 11.5 dB per octave' in         panel.readout.text()
+    assert 'from 5 to 14.5 Hz the level rises at 11.5 dB per octave' in \
+        panel.readout.text()
     panel.slope_box.setValue(1.0)
     pump()
     assert panel.derived['segments'].text() == '4'
@@ -564,6 +597,32 @@ def test_a_tone_of_no_segments_is_refused_in_the_panel_and_still_drawn(
     plots = [item for item in pane.graphics.ci.items
              if hasattr(item, 'listDataItems')]
     assert len(plots) == 3 and all(plot.listDataItems() for plot in plots)
+
+
+def test_undeclared_units_are_refused_with_the_tones_own_level_unticked(
+        window, pump):
+    # with the level unticked it is read only once the profile is refused,
+    # and undeclared units refuse it too: that refusal must reach the
+    # panel, not Qt (the window fixture fails a test Qt swallowed one in)
+    spec = _controller([0.26, 2.0, 2.0, 5.0, 5.0], unit=None)
+    window.add_object('Sweep', spec)
+    select_objects(window, pump, 'Sweep')
+    window.render_current()
+    pump()
+    pane = window.data_pane
+    panel = pane.sine_profile_panel
+    panel.set_settings(interpolated=False)
+    pane.sine_profile_action.trigger()
+    pump()
+    window.render_current()
+    pump()
+    assert panel.isVisible()
+    assert panel.derived['segments'].text() == '—'
+    assert "the specification's units are not declared" in \
+        panel.readout.text()
+    plots = [item for item in pane.graphics.ci.items
+             if hasattr(item, 'listDataItems')]
+    assert not any(plot.listDataItems() for plot in plots)
 
 
 def test_the_two_readings_of_a_specification_take_turns(window, pump):

@@ -411,8 +411,8 @@ class StrokeReading:
             return None
         us = DEFAULT_SYSTEM if unit_system is None else unit_system
         larger = max(self.travel_down, self.travel_up)
-        return (f'{self._travel_name()} {_amount(larger, "length", us)} '
-                f'against {_amount(self.rating.room, "length", us)} to the '
+        return (f'{self._travel_name()} {amount(larger, "length", us)} '
+                f'against {amount(self.rating.room, "length", us)} to the '
                 'stop')
 
     def describe(self, unit_system: UnitSystem | None = None) -> list[str]:
@@ -433,22 +433,22 @@ class StrokeReading:
             return f'{line}: {word}, {100.0 * shares[key]:.0f} %'
 
         def against(name, demand, rating, key, dimension):
-            line = f'{name} {_amount(demand, dimension, us)}'
+            line = f'{name} {amount(demand, dimension, us)}'
             if shares[key] is not None:
-                line += f' against {_amount(rating, dimension, us)}'
+                line += f' against {amount(rating, dimension, us)}'
             return verdict(line, key)
 
         rating = self.rating
         if rating.room is None:
             travel = (f'{sentence(self._travel_name())} '
-                      f'{_amount(max(self.travel_down, self.travel_up), "length", us)}')
+                      f'{amount(max(self.travel_down, self.travel_up), "length", us)}')
         else:
             travel = verdict(sentence(self.to_the_stop(us)), 'stroke')
         lines = [travel]
         if self.fits_stroke is False and self.travel <= rating.stroke:
             lines.append(f'Centered, the travel would fit: '
-                         f'{_amount(self.travel, "length", us)} peak to peak '
-                         f'against {_amount(rating.stroke, "length", us)}. '
+                         f'{amount(self.travel, "length", us)} peak to peak '
+                         f'against {amount(rating.stroke, "length", us)}. '
                          'Centering the travel is the controller\'s '
                          'compensation, an asymmetric pre- and post-pulse')
         lines.append(against('Peak velocity'
@@ -459,10 +459,10 @@ class StrokeReading:
             lines.append(against('Force', self.force, rating.force,
                                  'force', 'force'))
         lines.append(f'Each way from center: '
-                     f'{_amount(self.travel_down, "length", us)} down, '
-                     f'{_amount(self.travel_up, "length", us)} up')
-        lines.append(f'Peak to peak {_amount(self.peak_to_peak, "length", us)} '
-                     f'integrated, {_amount(self.rule, "length", us)} by the '
+                     f'{amount(self.travel_down, "length", us)} down, '
+                     f'{amount(self.travel_up, "length", us)} up')
+        lines.append(f'Peak to peak {amount(self.peak_to_peak, "length", us)} '
+                     f'integrated, {amount(self.rule, "length", us)} by the '
                      'half-sine rule')
         return lines
 
@@ -555,9 +555,12 @@ def _number(value: float) -> str:
     return f'{value:.3g}'
 
 
-def _amount(value: float, dimension: str, unit_system: UnitSystem) -> str:
-    """`value`, in SI, as a number and a unit in `unit_system`, as the
-    panel and the plot write it."""
+def amount(value: float, dimension: str, unit_system: UnitSystem) -> str:
+    """`value`, in SI, as a number and a unit in `unit_system`: three
+    significant figures, whole numbers from a thousand up with a
+    thousands separator, then the system's label for `dimension`. The
+    stroke check and the sine profile both write amounts this way, so a
+    value reads the same in each."""
     return (f'{_number(float(unit_system.from_si(value, dimension)))} '
             f'{unit_system.label_text(dimension)}')
 

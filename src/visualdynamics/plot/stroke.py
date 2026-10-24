@@ -34,7 +34,7 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
 
-    from ..core.stroke import _amount
+    from ..core.stroke import amount as _amount
     from ..theme import theme as resolve_theme
     from ..units import DEFAULT_SYSTEM
     from . import axis_label, curve_color, legend_below

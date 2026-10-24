@@ -97,8 +97,9 @@ CONVENTIONS = ('peak', 'peak to peak')
 
 #: how far, as a share of the solved crossover, a written breakpoint may
 #: stand from it and still check: one percent, room for a document's
-#: rounding to three figures (52.1 Hz written for 52.13), and a fortieth
-#: of the 29 % a double amplitude entered as peak moves a crossover
+#: rounding to three figures (52.1 Hz written for 52.13), and about a
+#: twenty-ninth of the 29 % a double amplitude entered as peak moves a
+#: crossover
 CROSSOVER_TOLERANCE = 0.01
 
 #: the most the interpolated level of a built tone may stand from the
@@ -122,6 +123,11 @@ MOST_PIECES = 1000
 #: the sweep laws a built tone can follow, by the name `SineProfile.tone`
 #: takes, with the segment type each writes
 LAWS = {'log': LOG, 'linear': LINEAR}
+
+
+def _a(word: str) -> str:
+    """`word` with its article: 'an acceleration', 'a velocity'."""
+    return f'{"an" if word[:1] in "aeiou" else "a"} {word}'
 
 
 def _power(quantity: str) -> int:
@@ -223,17 +229,17 @@ class ProfileSegment:
     def __post_init__(self) -> None:
         _power(self.quantity)
         if not (np.isfinite(self.level) and self.level > 0.0):
-            raise ValueError(f'a {self.quantity} of {self.level!r}: a level '
+            raise ValueError(f'{_a(self.quantity)} of {self.level!r}: a level '
                              'is a finite number more than zero')
         for name in ('start', 'end'):
             value = getattr(self, name)
             if value is not None and not (np.isfinite(value) and value > 0.0):
-                raise ValueError(f'a {self.quantity} segment {name}ing at '
+                raise ValueError(f'{_a(self.quantity)} segment {name}ing at '
                                  f'{value!r} Hz: a frequency is a finite '
                                  'number more than zero')
         if (self.start is not None and self.end is not None
                 and not self.start < self.end):
-            raise ValueError(f'a {self.quantity} segment from {self.start:g} '
+            raise ValueError(f'{_a(self.quantity)} segment from {self.start:g} '
                              f'to {self.end:g} Hz: it starts below where it '
                              'ends')
 
@@ -254,11 +260,11 @@ def _si_level(value: Any, unit: str, quantity: str) -> float:
     found = dimension_of(str(unit))
     if found != wanted:
         said = 'no quantity it can read' if found is None else found
-        raise ValueError(f'{unit!r} is {said}, not a {wanted}: a {quantity} '
+        raise ValueError(f'{unit!r} is {said}, not {_a(wanted)}: {_a(quantity)} '
                          f'segment is written in a unit of {wanted}')
     value = float(value)
     if not (np.isfinite(value) and value > 0.0):
-        raise ValueError(f'a {quantity} of {value!r} {unit}: a level is a '
+        raise ValueError(f'{_a(quantity)} of {value!r} {unit}: a level is a '
                          'finite number more than zero')
     return value * si_factor(str(unit), wanted)
 
@@ -407,9 +413,9 @@ class Crossing:
         return off is None or abs(off) <= self.tolerance
 
     def describe(self) -> str:
-        """The crossing in one line, such as 'crossover at 14.0 Hz,
-        written 14 Hz: checks' or 'crossover at 9.9 Hz, written 14 Hz
-        (+41.4 %): does not check, a step of 0.50 there'."""
+        """The crossing in one line, such as 'crossover at 13.93 Hz,
+        written 14 Hz: checks' or 'crossover at 9.889 Hz, written 14 Hz
+        (+41.6 %): does not check, a step of 0.499 there'."""
         if self.solved is None:
             if abs(self.step - 1.0) <= 1e-9:
                 return f'joined at {self.used:.4g} Hz'

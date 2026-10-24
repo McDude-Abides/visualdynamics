@@ -19,6 +19,7 @@ from conftest import select_objects
 
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.sine import (
+    LOG,
     SineLevel,
     SineLevelSet,
     SineSweepSpecification,
@@ -277,6 +278,82 @@ def test_a_channel_is_found_by_its_quantity_as_well_as_its_dof():
     check = check_frequency(both, spec, levels)
     assert check.relative[0] == pytest.approx(0.015, abs=2e-5), \
         'the acceleration record, not the force gauge at the same DOF'
+
+
+def test_the_verdict_says_the_share_in_percent():
+    check, *_rest = _checked(scale=1.015, tolerance=0.0125)
+    assert check.describe().startswith('Up: worst +1.5 % (+'), \
+        check.describe()
+
+
+def test_each_channel_is_read_and_judged_on_its_own():
+    # 101Z+ on its frequency, 102Z+ 1.5 % above it
+    tone = SineTone('Up', ONSET, [100.0, 500.0],
+                    [[AMPLITUDE, AMPLITUDE]] * 2, [0], [100.0])
+    spec = SineSweepSpecification([tone], [CONTROL, '102Z+'],
+                                  ordinate_unit='m/s**2')
+    n = int(6.0 * FS)
+    x = np.zeros((2, n))
+    argument = tone.argument(1.0 / FS)
+    start = int(ONSET * FS)
+    m = min(len(argument), n - start)
+    x[0, start:start + m] = AMPLITUDE * np.cos(argument[:m])
+    x[1, start:start + m] = AMPLITUDE * np.cos(1.015 * argument[:m])
+    history = _record(x, dofs=(CONTROL, '102Z+'),
+                      dims=('acceleration', 'acceleration'))
+    check = check_frequency(history, spec, _levels(history, spec),
+                            tolerance=0.0125)
+    assert check.dofs == [CONTROL, '102Z+']
+    assert (check.row(), check.row(CONTROL), check.row('102Z+')) == (0, 0, 1)
+    with pytest.raises(ValueError, match="103Z\\+ was not read; the check "
+                                         "holds \\['101Z\\+', '102Z\\+'\\]"):
+        check.row('103Z+')
+    assert check.relative[0] == pytest.approx(0.0, abs=2e-5)
+    assert check.relative[1] == pytest.approx(0.015, abs=2e-5)
+    assert check.worst(CONTROL)[2] == pytest.approx(0.0, abs=2e-5)
+    assert check.worst('102Z+')[2] == pytest.approx(0.015, abs=2e-5)
+    assert check.worst()[2] == pytest.approx(0.015, abs=2e-5), \
+        'with no channel named, the worst of any'
+    assert not check.over[0].any() and check.over[1].all()
+    assert check.describe(CONTROL).endswith('within ±1.25 %')
+    assert check.describe('102Z+').startswith('Up at 102Z+: worst +1.5 %')
+
+
+def test_a_record_off_zero_reads_the_same_frequency():
+    history, spec = _sweep(dwell=True, frequency=20.0, scale=1.015)
+    levels = _levels(history, spec)
+    clean = check_frequency(history, spec, levels)
+    x = np.array(history.ordinate[0]) + 50.0
+    offset = check_frequency(_record(x), spec, levels)
+    assert offset.judged.all()
+    assert offset.error[0] == pytest.approx(clean.error[0], abs=1e-4)
+
+
+def test_a_log_sweep_off_its_schedule_reads_its_own_share():
+    # 1.5 % ahead of a 20 to 200 Hz sweep at 8 octaves a minute. Before
+    # the phase is read, each envelope's turning is fitted as a quadratic
+    # in time, which a log sweep's departure is not, and the first second
+    # reads short (1.35, 1.46, 1.45 and 1.49 % here), as the module
+    # docstring says; those lines are left out of this pin. Fitting the
+    # turning in the sweep's own argument and frequency instead (a rate
+    # error and a clock error, exactly, for any law) read every line of
+    # this sweep within 0.002 %, but alone it failed four dwell tests; the
+    # fit is shared with the distortion check, so the change is left to
+    # be designed (2026-10-24).
+    tone = SineTone('Log', ONSET, [20.0, 200.0], [[AMPLITUDE]] * 2, [LOG],
+                    [8.0])
+    spec = SineSweepSpecification([tone], [CONTROL], ordinate_unit='m/s**2')
+    n = int((ONSET + tone.duration() + 0.5) * FS)
+    x = np.zeros(n)
+    argument = tone.argument(1.0 / FS)
+    start = int(ONSET * FS)
+    m = min(len(argument), n - start)
+    x[start:start + m] = AMPLITUDE * np.cos(1.015 * argument[:m])
+    history = _record(x)
+    check = check_frequency(history, spec, _levels(history, spec))
+    settled = check.seconds - ONSET > 1.0
+    assert (~settled).sum() == 4
+    assert check.relative[0][settled] == pytest.approx(0.015, abs=1e-4)
 
 
 def test_what_cannot_be_checked_is_refused():

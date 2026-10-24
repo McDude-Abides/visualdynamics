@@ -64,13 +64,13 @@ def crossing_words(crossing: Any) -> str:
 def maximum_words(profile: Any, quantity: str, unit_system: Any = None) -> str:
     """The most the profile asks for in `quantity` and where, in words:
     'most 0.2 in peak to peak at 5 Hz'."""
-    from ..core.stroke import _amount
+    from ..core.stroke import amount
     from ..units import DEFAULT_SYSTEM
 
     us = DEFAULT_SYSTEM if unit_system is None else unit_system
     frequency, value = profile.maxima()[quantity]
     dimension = 'length' if quantity == 'displacement' else quantity
-    words = f'most {_amount(value, dimension, us)}'
+    words = f'most {amount(value, dimension, us)}'
     if quantity == 'displacement':
         words += ' peak to peak'
     return f'{words} at {frequency:.4g} Hz'
