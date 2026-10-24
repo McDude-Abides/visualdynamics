@@ -144,14 +144,16 @@ def test_a_windowed_average_is_an_estimate_within_hundredths(record,
     averaging = _frames(record, overlap=overlap)
     check = record.compute_psds(averaging).rms_check(record,
                                                      averaging=averaging)
-    assert 0.0 < abs(check.gap_db) < 0.1,         'an estimate rather than an identity, and a close one'
+    assert 0.0 < abs(check.gap_db) < 0.1, \
+        'an estimate rather than an identity, and a close one'
     assert check.passed or check.explained
     if overlap >= 0.5:
         assert check.passed and abs(check.gap_db) < 0.02
     # and the spectrum carries the frames' own mean square exactly
     assert check.framed_gap_db == pytest.approx(0.0, abs=1e-9)
     assert check.window_gap_db == pytest.approx(check.gap_db, abs=1e-9)
-    assert check.window == 'hann' and check.noise_bandwidth ==         pytest.approx(1.5, rel=1e-3)
+    assert check.window == 'hann' and check.noise_bandwidth == \
+        pytest.approx(1.5, rel=1e-3)
 
 
 def test_a_gap_that_is_all_the_window_s_is_said_to_be(hann, record):
@@ -334,7 +336,8 @@ def test_what_cannot_be_checked_is_refused(hann, record):
         psd.rms_check(record, averaging=long)
     with pytest.raises(ValueError, match='zero or more'):
         rms_check(f, np.ones(64), np.ones(8), threshold_db=-0.1)
-    assert np.isnan(time_rms(np.array([np.nan, np.inf]))),         'no finite sample, no rms'
+    assert np.isnan(time_rms(np.array([np.nan, np.inf]))), \
+        'no finite sample, no rms'
     with pytest.raises(ValueError, match='two lines'):
         rms_check([1.0], [1.0], np.ones(8))
 
