@@ -82,6 +82,9 @@ that is not an alpha.
 - [Checking a sine record for distortion](sine-distortion.md): the
   record less the tracked tones against the tones, along the sweep,
   against a limit
+- [Writing a sine profile in segments](sine-profile.md): constant
+  displacement, velocity and acceleration, every crossover solved and
+  checked, and the tone a controller runs
 - [Checking a sine tone's frequency](sine-frequency.md): the tone's own
   frequency on the record against the specification's, along the
   sweep, against a band

@@ -153,7 +153,11 @@ distortion](sine-distortion.md)).
 `plot_sine_frequency(history, specification, levels)` draws a tone's
 frequency error against frequency with the band either side of zero,
 the reading the sine view's Frequency readout shows ([Checking a sine
-tone's frequency](sine-frequency.md)).
+tone's frequency](sine-frequency.md)). `plot_sine_profile(profile)`
+draws a sine profile, or a specification's tone read as one, three
+ways with its crossovers marked, the reading the Sine Profile toggle on
+a sine specification's bar shows ([Writing a sine profile in
+segments](sine-profile.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

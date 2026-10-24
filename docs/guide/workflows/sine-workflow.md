@@ -250,6 +250,12 @@ project.save('sine.vdyn')
   of the frequency with a floor in hertz ([Checking a sine tone's
   frequency](../sine-frequency.md)); the sine view's Frequency readout
   shows it under the Distortion readout.
+- A specification written as displacement and acceleration segments is
+  written here the same way, its crossovers solved and checked, and
+  turned into the tone a controller runs; a specification already in
+  breakpoints is read back as segments, three ways, by the Sine Profile
+  toggle on its bar ([Writing a sine profile in
+  segments](../sine-profile.md)).
 - Where the levels wobble, look at the wavelet first. A ripple in an
   extracted level can come from the article (a resonance swept
   through), from the test (two tones beating in one band), or from the

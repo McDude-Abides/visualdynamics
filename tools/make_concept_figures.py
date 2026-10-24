@@ -1114,6 +1114,30 @@ def rms_check():
         print(f'rms check: {check.describe("g", 1.0 / g)}')
 
 
+def sine_profile():
+    """A minimum-integrity profile of the kind test documents give,
+    written in four segments (0.20 in double amplitude, 2 g, 0.036 in
+    double amplitude, 5 g, 5 to 500 Hz) and drawn three ways with its
+    crossovers checked."""
+    from visualdynamics.core.sine_profile import (
+        SineProfile,
+        acceleration,
+        displacement,
+    )
+    from visualdynamics.plot import plot_sine_profile
+
+    profile = SineProfile([
+        displacement(0.20, 'in', 'peak to peak', start=5.0, end=14.0),
+        acceleration(2.0, 'g', start=14.0, end=33.0),
+        displacement(0.036, 'in', 'peak to peak', start=33.0, end=52.1),
+        acceleration(5.0, 'g', start=52.1, end=500.0)])
+    plot_sine_profile(profile, show=False, size=(1000, 900),
+                      path=str(OUT / 'sine-profile.png'))
+    frequency, peak = profile.maxima()['velocity']
+    print(f'sine profile: {"; ".join(profile.describe())}; most velocity '
+          f'{peak / 0.0254:.2f} in/s at {frequency:.4g} Hz')
+
+
 def sine_frequency():
     """A 1 g sweep from 20 to 500 Hz at 100 Hz/s whose tone drifts
     high along it, on frequency at the start and 2.5 % high at the end,
@@ -1178,6 +1202,7 @@ def main():
     comparison_chance()
     plot_composition()
     rms_check()
+    sine_profile()
     sine_frequency()
     print('done')
 
