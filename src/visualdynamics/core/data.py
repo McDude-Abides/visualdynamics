@@ -2862,7 +2862,8 @@ class TimeHistory(DataArray):
         ------
         ValueError
             If there is not exactly one reference, the response is not
-            a response channel of this history, there are fewer than
+            a response channel of this history, a DOF given alone holds
+            more than one quantity, there are fewer than
             two averages, or either channel holds a sample that is not a
             finite number in the frames read.
         """
@@ -2877,7 +2878,8 @@ class TimeHistory(DataArray):
             raise ValueError(
                 'a transmissibility is one response over one reference; '
                 f'{wanted}. Name the reference.')
-        frequencies, keys, drive, responses, cross, frames =             self._cross_spectral_frame('a transmissibility', drives,
+        frequencies, keys, drive, responses, cross, frames = \
+            self._cross_spectral_frame('a transmissibility', drives,
                                        averaging)
         if isinstance(response, str):
             found = [i for i in responses if keys[i][0] == response]
@@ -2885,6 +2887,14 @@ class TimeHistory(DataArray):
             dof, quantity = response
             found = [i for i in responses
                      if keys[i][:2] == (str(dof), str(quantity))]
+        if len({keys[i][1] for i in found}) > 1:
+            # two quantities at one DOF (an accelerometer and a velocity
+            # probe): which one a bare DOF meant depends on the row order,
+            # so say so rather than read whichever came first
+            raise ValueError(
+                f'{response} holds more than one quantity ('
+                + ', '.join(sorted({str(keys[i][1]) for i in found}))
+                + '); name the response as a (DOF, quantity) pair')
         if not found:
             raise ValueError(
                 f'{response!r} is not a response of this history against '

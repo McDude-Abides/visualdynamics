@@ -136,7 +136,7 @@ def frf_random_error(coherence: Any, averages: float) -> np.ndarray:
     """
     n = float(averages)
     if not n > 0.0:
-        raise ValueError('a random error needs at least one average')
+        raise ValueError('a random error needs a positive number of averages')
     gamma2 = np.asarray(coherence, dtype=np.float64)
     finite = gamma2[np.isfinite(gamma2)]
     if finite.size and (finite.min() < 0.0 or finite.max() > 1.0):

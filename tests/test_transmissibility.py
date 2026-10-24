@@ -106,8 +106,10 @@ def test_the_error_s_two_ends_are_zero_and_unbounded():
 def test_the_error_refuses_what_is_not_a_coherence_or_an_average():
     with pytest.raises(ValueError, match='between 0 and 1'):
         frf_random_error(1.2, 10)
-    with pytest.raises(ValueError, match='at least one average'):
+    with pytest.raises(ValueError, match='positive number of averages'):
         frf_random_error(0.5, 0)
+    # an equivalent count discounted for overlap may fall below one
+    assert np.isfinite(frf_random_error(0.5, 0.5))
 
 
 # ---- the two estimates, tied by the coherence ----------------------------
@@ -280,6 +282,26 @@ def test_a_reading_is_one_response_over_one_reference(history):
         history.read_transmissibility('1Z+', '1Z+')
     with pytest.raises(ValueError, match='no channel matches'):
         history.read_transmissibility('101Z+', '7Z+')
+
+
+def test_a_dof_holding_two_quantities_is_named_with_its_quantity():
+    """An accelerometer and a velocity probe at one DOF: a bare DOF is
+    refused whichever row comes first, and the pair picks the one."""
+    n, fs = 8192, 2048.0
+    x = np.random.default_rng(0).standard_normal(n)
+    a, v = np.convolve(x, [0.5, 0.3], 'same'), np.convolve(x, [2.0, 1.0], 'same')
+    for rows, dims, units in (((x, a, v), ['acceleration', 'velocity'], ['m/s**2', 'm/s']),
+                              ((x, v, a), ['velocity', 'acceleration'], ['m/s', 'm/s**2'])):
+        history = TimeHistory(np.arange(n) / fs, np.vstack(rows),
+                              response_dof=['1Z+', '2Z+', '2Z+'],
+                              ordinate_dim=['acceleration', *dims],
+                              ordinate_unit=['m/s**2', *units])
+        history.averaging = Averaging(frame_length=512, overlap=0.5,
+                                      window='hann').filled(n, fs)
+        with pytest.raises(ValueError, match='more than one quantity'):
+            history.read_transmissibility('2Z+', '1Z+')
+        reading = history.read_transmissibility(('2Z+', 'velocity'), '1Z+')
+        assert reading.dimension == 'velocity/acceleration'
 
 
 def test_a_force_reference_gives_a_ratio_in_acceleration_over_force():
