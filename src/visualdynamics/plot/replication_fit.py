@@ -191,8 +191,10 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
         if case.cutoff is not None:
             plot.addItem(pg.InfiniteLine(pos=case.cutoff, angle=90,
                                          pen=chosen), ignoreBounds=True)
-    layout.ci.layout.setRowStretchFactor(0, 3)
-    layout.ci.layout.setRowStretchFactor(1, 2)
+    # a nested panel (`compose`) is a GraphicsLayout with no `ci`
+    grid = getattr(layout, 'ci', layout).layout
+    grid.setRowStretchFactor(0, 3)
+    grid.setRowStretchFactor(1, 2)
     return case
 
 

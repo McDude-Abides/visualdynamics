@@ -668,6 +668,27 @@ def test_the_view_draws_to_a_file(qt_app, tmp_path):
     assert path.stat().st_size > 2000
 
 
+def test_the_view_draws_into_a_panel_of_a_composed_figure(qt_app,
+                                                          tmp_path):
+    """A nested panel is a GraphicsLayout with no `ci`; the rows'
+    shares of the height are set on the panel's own grid."""
+    from visualdynamics.plot import compose
+    from visualdynamics.plot.replication_fit import build_replication_fit
+
+    fit = replication_fit(tone(), rating(), cutoffs=(2.0,))
+    seen = []
+
+    def build(layout):
+        panel = layout.addLayout(row=0, col=1)
+        build_replication_fit(panel, fit, 2.0)
+        seen.append((panel.layout.rowStretchFactor(0),
+                     panel.layout.rowStretchFactor(1),
+                     len(panel.items)))
+
+    compose(build, path=tmp_path / 'panel.png', size=(600, 400))
+    assert seen == [(3, 2, 4)]
+
+
 def test_the_view_refuses_a_cutoff_it_was_not_given(qt_app):
     from visualdynamics.plot import plot_replication_fit
 

@@ -1,7 +1,7 @@
 """Composing a figure of one's own from a script.
 
-`compose`, `as_series`, `figure_plots`, `to_view` and `pin` are the
-public way to draw what the package has no single view for: several
+`compose`, `as_series`, `figure_plots`, `to_view` and `pin_range` are
+the public way to draw what the package has no single view for: several
 readings on one axis, marks and words over them, panels side by side,
 written to a file with no window. Each test pins the thing a figure
 script depends on: the size written, the theme's ground, the plot found
@@ -24,7 +24,7 @@ from visualdynamics.plot import (
     build_plots,
     compose,
     figure_plots,
-    pin,
+    pin_range,
     plot_series,
     to_view,
 )
@@ -170,6 +170,28 @@ def test_the_frequency_axis_is_put_back_when_the_build_fails(qt_app,
     with pytest.raises(RuntimeError, match='the script broke'):
         compose(build, path=tmp_path / 'a.png', frequency_axis='log')
     assert frequency_axis() == before
+
+
+def test_a_build_that_fails_closes_the_figure_it_drew_in(qt_app,
+                                                        tmp_path):
+    """The widget is closed whatever the build does, which empties its
+    scene: while the traceback is held (by a REPL, or here by
+    `pytest.raises`) it holds the widget, and without the close every
+    plot drawn before the failure stayed alive with it."""
+    seen = []
+
+    def build(layout):
+        build_plots(layout, as_series([psd()]))
+        seen.append((layout, len(layout.scene().items())))
+        raise RuntimeError('the script broke')
+
+    with pytest.raises(RuntimeError, match='the script broke'):
+        compose(build, path=tmp_path / 'a.png', size=(300, 200))
+    (widget, drawn_items), = seen
+    assert drawn_items > 0
+    assert widget.items() == []
+    assert widget.closed
+    assert not any(tmp_path.iterdir())
 
 
 def test_a_frequency_axis_that_cannot_hold_is_refused(qt_app, tmp_path):
@@ -375,14 +397,14 @@ def test_a_point_with_no_place_on_the_plot_is_refused(qt_app):
     drawn(build)
 
 
-# ---- pin: one scale for panels meant to be compared ---------------------
+# ---- pin_range: one scale for panels meant to be compared ---------------
 
 
 def test_a_pinned_range_opens_where_it_is_told(qt_app):
     def build(layout):
         build_plots(layout, as_series([psd()]))
         plot = figure_plots(layout)[0]
-        pin(plot, x=(50.0, 1000.0), y=(1e-4, 1.0))
+        pin_range(plot, x=(50.0, 1000.0), y=(1e-4, 1.0))
         view = plot.getViewBox()
         return (view.viewRange(), view.state['limits'],
                 view.state['autoRange'])
@@ -402,7 +424,7 @@ def test_a_range_wider_than_the_data_is_not_clamped_back(qt_app):
     def build(layout):
         build_plots(layout, as_series([psd(0.01)]))
         plot = figure_plots(layout)[0]
-        pin(plot, y=(1e-6, 10.0))
+        pin_range(plot, y=(1e-6, 10.0))
         return plot.getViewBox().viewRange()[1]
 
     np.testing.assert_allclose(drawn(build), [-6.0, 1.0])
@@ -413,7 +435,7 @@ def test_one_axis_pinned_leaves_the_other_alone(qt_app):
         build_plots(layout, as_series([psd()]))
         plot = figure_plots(layout)[0]
         before = plot.getViewBox().state['limits']['yLimits']
-        pin(plot, x=(100.0, 200.0))
+        pin_range(plot, x=(100.0, 200.0))
         return before, plot.getViewBox().state
 
     before, state = drawn(build)
@@ -435,10 +457,10 @@ def test_a_range_that_cannot_be_pinned_is_refused(qt_app, span, words):
         plot = figure_plots(layout)[0]
         before = plot.getViewBox().viewRange()
         if span is None:
-            pin(plot)     # nothing asked, nothing changed
+            pin_range(plot)   # nothing asked, nothing changed
         else:
             with pytest.raises(ValueError, match=words):
-                pin(plot, y=span)
+                pin_range(plot, y=span)
         assert plot.getViewBox().viewRange() == before
 
     drawn(build)

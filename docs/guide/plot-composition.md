@@ -22,19 +22,20 @@ legends and theme, and is written to a file with no window.
   records)`; names prefix the legend entries when more than one object
   is named.
 - **`figure_plots(layout, dimension=None)`** lists the plots in a
-  figure, top to bottom and left to right, or only those drawing one
-  quantity: `figure_plots(layout, 'length')` is the displacement plot of
-  a stack, wherever it landed.
+  figure, row by row and left to right within a row (a nested panel's
+  plots where the panel sits), or only those drawing one quantity:
+  `figure_plots(layout, 'length')` is the displacement plot of a
+  stack, wherever it landed.
 - **`to_view(plot, x=..., y=...)`** converts values in display units to
   the coordinates the plot's view holds. On a log axis the view works in
   decades, so a line, a label or a marker placed without the conversion
   lands at the logarithm of where it was meant to go. A curve added with
   `plot.plot` needs no conversion; pyqtgraph converts it.
-- **`pin(plot, x=(low, high), y=(low, high))`** fixes the range a plot
-  opens at, in display units. A plot drawn by `build_plots` limits zoom
-  and pan to its own data, and a range set straight on the plot is
-  clamped back inside that frame; `pin` makes the pinned range the
-  plot's limit instead.
+- **`pin_range(plot, x=(low, high), y=(low, high))`** fixes the range
+  a plot opens at, in display units. A plot drawn by `build_plots`
+  limits zoom and pan to its own data, and a range set straight on the
+  plot is clamped back inside that frame; `pin_range` makes the pinned
+  range the plot's limit instead.
 
 Panels side by side are nested layouts: `layout.addLayout(row=0,
 col=1)` makes a panel, and `build_plots` draws into it as into a whole
@@ -49,7 +50,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt
 
 from visualdynamics.plot import (as_series, build_plots, compose,
-                                 data_curves, figure_plots, pin, to_view)
+                                 data_curves, figure_plots, pin_range,
+                                 to_view)
 
 def build(layout):
     left = layout.addLayout(row=0, col=0)
@@ -59,7 +61,7 @@ def build(layout):
                 theme='light')
 
     asd = figure_plots(right, 'acceleration**2/frequency')[0]
-    pin(asd, x=(20.0, 2000.0), y=(1e-4, 1.0))
+    pin_range(asd, x=(20.0, 2000.0), y=(1e-4, 1.0))
 
     # the second run is told apart by its line, not only its color
     _, dashed = data_curves(asd)
@@ -112,9 +114,9 @@ drawn where it can:
 - `figure_plots`: a dimension the units do not track (`'displacment'`),
   and a quantity no plot in the figure draws; the message lists the
   quantities it does draw.
-- `to_view` and `pin`: a value that is not finite, a zero or negative
-  value on a log axis, and a range whose low end is not below its high
-  end.
+- `to_view` and `pin_range`: a value that is not finite, a zero or
+  negative value on a log axis, and a range whose low end is not below
+  its high end.
 
 `plot_series` reads its items through `as_series`, so it refuses the
 same items.

@@ -2803,7 +2803,7 @@ def compose(build: Callable[[Any], Any], *, theme: Any = None,
         def build(layout):
             build_plots(layout, as_series([psd, specification]))
             plot = figure_plots(layout, 'acceleration**2/frequency')[0]
-            pin(plot, x=(20.0, 2000.0))
+            pin_range(plot, x=(20.0, 2000.0))
 
         compose(build, path='figure.png', theme='light', size=(900, 460))
 
@@ -2825,8 +2825,7 @@ def compose(build: Callable[[Any], Any], *, theme: Any = None,
     build : callable
         Called once with the layout to draw into.
     theme : str or dict, optional
-        'light' or 'dark', or a resolved theme; the application's when
-        omitted.
+        'light' or 'dark', or a resolved theme; light when omitted.
     path : str or path-like, optional
         Where to write the figure. The extension picks the format: .svg,
         or .png (at `EXPORT_DPI` when that is set) or another image
@@ -2887,9 +2886,9 @@ def compose(build: Callable[[Any], Any], *, theme: Any = None,
 def figure_plots(layout: Any, dimension: str | None = None) -> list[Any]:
     """The plots in a figure, in reading order; or those of one quantity.
 
-    Reading order is top to bottom, then left to right, and a nested
-    panel's plots are read where the panel sits. A legend is not a plot
-    and is left out.
+    Reading order is row by row, left to right within a row, and a
+    nested panel's plots are read where the panel sits. A legend is not
+    a plot and is left out.
 
     `build_plots` stacks one plot per quantity, so the plot to draw a
     mark on is found by what it draws, not by its row. With `dimension`
@@ -3005,8 +3004,8 @@ def _view_axis(values: ArrayLike | None, log: bool, name: str) -> Any:
     return float(array) if array.ndim == 0 else array
 
 
-def pin(plot: Any, x: tuple[float, float] | None = None,
-        y: tuple[float, float] | None = None) -> None:
+def pin_range(plot: Any, x: tuple[float, float] | None = None,
+              y: tuple[float, float] | None = None) -> None:
     """Fix a plot's range, in data units, so it opens where it is told.
 
     Panels meant to be compared need one scale. `build_plots` frames
@@ -3045,7 +3044,6 @@ def pin(plot: Any, x: tuple[float, float] | None = None,
                              f'not below {high:g}')
         lo, hi = float(ends[0]), float(ends[1])
         view.setLimits(**{f'{axis}Min': lo, f'{axis}Max': hi})
-        view.disableAutoRange(axis=axis)
         if axis == 'x':
             plot.setXRange(lo, hi, padding=0)
         else:
@@ -5274,8 +5272,8 @@ def plot_replication_segments(measured: Any, specification: Any,
 
 
 __all__ = ['MAX_RECORDS', 'as_series', 'axis_label', 'build_photos',
-           'build_plot', 'build_plots', 'compose', 'figure_plots', 'pin',
-           'plot_bars', 'plot_cmif', 'plot_coherence_map', 'plot_comparison',
-           'plot_data', 'plot_mac', 'plot_photos', 'plot_replication',
-           'plot_replication_segments',
+           'build_plot', 'build_plots', 'compose', 'figure_plots',
+           'pin_range', 'plot_bars', 'plot_cmif', 'plot_coherence_map',
+           'plot_comparison', 'plot_data', 'plot_mac', 'plot_photos',
+           'plot_replication', 'plot_replication_segments',
            'plot_series', 'save_plot', 'to_view']

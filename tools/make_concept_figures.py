@@ -1024,7 +1024,7 @@ def plot_composition():
         compose,
         data_curves,
         figure_plots,
-        pin,
+        pin_range,
         to_view,
     )
 
@@ -1054,7 +1054,7 @@ def plot_composition():
         build_plots(right, as_series([('before', before), ('after', after)]),
                     theme='light')
         asd = figure_plots(right, 'acceleration**2/frequency')[0]
-        pin(asd, x=(20.0, 2000.0), y=(1e-4, 1.0))
+        pin_range(asd, x=(20.0, 2000.0), y=(1e-4, 1.0))
         _, dashed = data_curves(asd)
         pen = pg.mkPen(dashed.opts['pen'])
         pen.setStyle(Qt.PenStyle.DashLine)

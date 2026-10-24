@@ -245,8 +245,9 @@ to export the image.
 When no one view draws the figure you need (two runs on one axis with
 one dashed, a mode marked and named, panels side by side on one
 scale), `visualdynamics.plot.compose` draws it in the same frame the
-standalone plots use, with `as_series`, `figure_plots`, `to_view` and
-`pin` to put the readings, marks and ranges where they belong. See
+standalone plots use, with `as_series`, `figure_plots`, `to_view`
+and `pin_range` to put the readings, marks and ranges where they
+belong. See
 [Composing a figure from a script](plot-composition.md).
 
 ## From a project
