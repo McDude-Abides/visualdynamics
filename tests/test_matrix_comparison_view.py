@@ -109,7 +109,10 @@ def test_the_matrix_is_a_reading_of_a_specification_and_a_cpsd(window, pump):
     lines = panel.readout.text().splitlines()
     assert lines[2:] == [
         '1X+/2X+ coherence in: 0 of 40 lines past ±0.10',
-        '1X+/2X+ phase out: 100.0 % of 40 lines past ±10°']
+        '1X+/2X+ phase out: 100.0 % of 40 lines past ±10°',
+        ('the measurement does not say how many averages it holds, so no '
+        'line is set aside for the scatter of its coherence and phase '
+        'estimates')]
     assert window._status_text == (
         'Run against Spec: fails: levels pass on 2 channels; 1 of 1 cross '
         'term out (coherence 0, phase 1)')
@@ -202,3 +205,51 @@ def test_a_tolerance_moved_judges_again_without_reading_again(window, pump,
     select_objects(window, pump, 'Spec', 'Run 2')
     assert reads == [1]
     assert panel.derived['verdict'].text() == 'fails'
+
+
+def test_the_comparison_is_made_off_the_window_thread(window, pump,
+                                                      monkeypatch):
+    import threading
+
+    from visualdynamics.core import matrix_comparison as module
+
+    threads = []
+    real = module.compare_matrix
+
+    def recorded(*args, **kwargs):
+        threads.append(threading.current_thread())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, 'compare_matrix', recorded)
+    panel = _matrix(window, pump, measured(phase=45.0))
+    assert len(threads) == 1
+    assert threads[0] is not threading.main_thread()
+    assert panel.derived['verdict'].text() == 'fails'
+
+
+def test_the_grid_is_drawn_a_few_cells_at_a_time(window, pump, monkeypatch):
+    """Sixty-four small plots are a second or more of drawing, which
+    cannot leave the window's thread: the grid is drawn in slices
+    between turns of the event loop, and a drawing made meanwhile stops
+    the one before it."""
+    from visualdynamics.gui import main_window
+
+    monkeypatch.setattr(main_window, 'MATRIX_SLICE', 0.0)
+    _matrix(window, pump, measured(phase=45.0))
+    layout = window.data_pane.graphics
+    for _ in range(50):
+        if window._matrix_drawing is None:
+            break
+        pump(1)
+    assert window._matrix_drawing is None
+    assert layout.getItem(1, 0).cell_state == 'out'
+    assert getattr(layout.getItem(2, 0), 'is_level_summary', False)
+    # drawn again and put away before it finishes: nothing of it is
+    # left to land on what is drawn instead
+    window.render_current()
+    assert window._matrix_drawing is not None
+    window.data_pane.matrix_action.trigger()
+    pump()
+    assert window._matrix_drawing is None
+    assert not any(getattr(item, 'matrix_cell', None) is not None
+                   for item in layout.ci.items)

@@ -224,6 +224,11 @@ SHAPE_VALUES_CELL_LIMIT = 1_000_000
 #: this it runs on the worker with the bar up (`_run_long`), as a long
 #: verb does
 OVERLOAD_INLINE_SAMPLES = 300_000
+
+#: the seconds of the matrix comparison's grid drawn in one turn of the
+#: event loop before the rest waits for the next: under the tenth of a
+#: second past which the window is felt to stop
+MATRIX_SLICE = 0.08
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
@@ -1430,6 +1435,10 @@ class MainWindow(QMainWindow):
         #: twice, where reading the levels again was most of a second on
         #: an eight-channel matrix
         self._held_matrix: tuple | None = None
+        #: the grid being drawn a few cells at a time between turns of
+        #: the event loop (`_draw_matrix_steps`); None when it is done
+        #: or a drawing since has replaced it
+        self._matrix_drawing: Any = None
         #: and the drive prediction last made, as (FRF, its ordinate,
         #: specification, its ordinate, the arguments, the prediction):
         #: made on the worker, and drawn again from here when nothing it
@@ -9829,6 +9838,8 @@ class MainWindow(QMainWindow):
         self._clear_confidence()
         self._clear_rms_check()
         self._clear_matrix_check()
+        # a grid still being drawn belongs to the drawing it began in
+        self._matrix_drawing = None
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
         # selection never inherits the last selection's 3-D view. Here
@@ -20930,8 +20941,6 @@ class MainWindow(QMainWindow):
         measured) when the two selected are a specification and a
         cross-spectral matrix, one with cross terms, else None. Picks
         within either are not read: the matrix is judged whole."""
-        from ..core.data import autospectrum
-
         if len(series) != 2:
             return None
         specs = [(name, data) for name, data, _records in series
@@ -20940,8 +20949,7 @@ class MainWindow(QMainWindow):
                     if isinstance(data, Psd)
                     and not isinstance(data, Specification)
                     and data.reference_dof is not None
-                    and not all(autospectrum(data, i)
-                                for i in range(data.num_records))]
+                    and not data.is_autospectrum()]
         if len(specs) != 1 or len(measured) != 1:
             return None
         return (*specs[0], *measured[0])
@@ -20953,35 +20961,58 @@ class MainWindow(QMainWindow):
 
         The tolerances are the panel's, the scale the project's for
         the pair (`Project.comparison_scale`), and every number
-        `core.matrix_comparison.compare_matrix`'s.
+        `core.matrix_comparison.compare_matrix`'s. The comparison is
+        made on the worker with the strip's bar and Cancel
+        (`_run_long`): the levels, their limits and the scale detected
+        for an eight-channel matrix are seconds.
         """
         from ..core.matrix_comparison import compare_matrix
-        from ..plot.matrix_comparison import build_matrix_comparison
+        from ..core.progress import Cancelled
+        from ..plot.matrix_comparison import matrix_comparison_steps
 
         pane = self.data_pane
         panel = pane.matrix_panel
         panel.show()
         settings = panel.settings()
         pane.graphics.clear()
-        scale = self.project.comparison_scale(specification, name)
+        # what the scale is read from: a scale held on any member of the
+        # measurement's family, which a change of it changes
+        family = self.project.scale_family(name)
+        scales = tuple(self.project[n].scale_db for n in family)
         key = (specification, specification.ordinate, measured,
-               measured.ordinate, scale)
+               measured.ordinate, scales)
         held = self._held_matrix
+
+        def compared(progress=None):
+            scale = self.project.comparison_scale(specification, name)
+            return scale, compare_matrix(specification, measured,
+                                         scale_db=scale, progress=progress,
+                                         **settings)
+
         try:
-            # the same two objects holding the same arrays, at the same
-            # scale: only a tolerance has moved
-            same = held is not None and held[0][4] == scale and all(
+            # the same two objects holding the same arrays, with the
+            # same scale held: only a tolerance has moved
+            same = held is not None and held[0][4] == scales and all(
                 a is b for a, b in zip(held[0][:4], key[:4], strict=True))
             if same:
-                comparison = held[1].with_tolerances(**settings)
+                scale, comparison = held[2], held[1].with_tolerances(
+                    **settings)
             else:
-                comparison = compare_matrix(specification, measured,
-                                            scale_db=scale, **settings)
-            self._held_matrix = (key, comparison)
-            build_matrix_comparison(
+                self._held_matrix = None
+                scale, comparison = self._run_long(
+                    f'Comparing {name} with {spec_name}…', compared)
+            self._held_matrix = (key, comparison, scale)
+            # drawn a few cells at a time: sixty-four small plots are a
+            # second or more of drawing that cannot leave this thread
+            self._matrix_drawing = matrix_comparison_steps(
                 pane.graphics, specification, measured,
                 comparison=comparison, table=False,
                 unit_system=self.unit_system, theme=self.theme_name)
+            self._draw_matrix_steps(self._matrix_drawing)
+        except Cancelled:
+            pane.graphics.clear()
+            panel.show_result(None)
+            return 'Matrix: cancelled'
         except ValueError as error:
             # the pair cannot be judged as a matrix: the reason, and no
             # numbers that would read as a verdict
@@ -20991,6 +21022,23 @@ class MainWindow(QMainWindow):
         panel.show_result(comparison)
         self._journal_matrix(specification, measured, settings, scale)
         return f'{name} against {spec_name}: {comparison.describe()}'
+
+    def _draw_matrix_steps(self, steps):
+        """Draw the grid's next cells, for up to `MATRIX_SLICE` seconds,
+        and come back on the next turn of the event loop for the rest,
+        unless another drawing has replaced this one meanwhile."""
+        import time
+
+        from PySide6.QtCore import QTimer
+
+        if self._matrix_drawing is not steps:
+            return
+        start = time.perf_counter()
+        for _ in steps:
+            if time.perf_counter() - start > MATRIX_SLICE:
+                QTimer.singleShot(0, lambda: self._draw_matrix_steps(steps))
+                return
+        self._matrix_drawing = None
 
     def _journal_matrix(self, specification, measured, settings, scale):
         """The matrix reading, journaled as the headless call that

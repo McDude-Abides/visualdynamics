@@ -122,13 +122,19 @@ def _shown(values: Any, dimension: str, unit_system: Any) -> np.ndarray:
 def _curve(plot: Any, x: np.ndarray, y: np.ndarray, pen: Any,
            log_y: bool = False, log_x: bool = False) -> Any:
     """A curve broken where it is not a number (or, on a log axis, not
-    above zero: the 0 Hz line is off a log frequency axis)."""
+    above zero: the 0 Hz line is off a log frequency axis).
+
+    Drawn at the cell's width, decimated to its peaks: a cell is a few
+    hundred pixels across, and a grid of them repainted every line of
+    every curve, most of a second on an eight-channel matrix."""
     y = np.asarray(y, dtype=float).copy()
     if log_y:
         y[~(y > 0.0)] = np.nan
     if log_x:
         y[~(np.asarray(x, dtype=float) > 0.0)] = np.nan
-    return plot.plot(x, y, pen=pen, connect='finite')
+    curve = plot.plot(x, y, pen=pen, connect='finite')
+    curve.setDownsampling(auto=True, method='peak')
+    return curve
 
 
 def _span(lines: np.ndarray, log_x: bool) -> tuple[float, float]:
@@ -155,6 +161,22 @@ def _marks(plot: Any, x: np.ndarray, y: np.ndarray, out: np.ndarray,
 
 
 def build_matrix_comparison(layout: Any, specification: Any, measured: Any,
+                            **kwargs: Any) -> Any:
+    """Draw the grid, the two summary strips under it and (with `table`)
+    the summary table beside it, and return the comparison
+    (`core.matrix_comparison.compare_matrix`): every step of
+    `matrix_comparison_steps` taken at once. The keywords are its.
+    """
+    steps = matrix_comparison_steps(layout, specification, measured,
+                                    **kwargs)
+    while True:
+        try:
+            next(steps)
+        except StopIteration as done:
+            return done.value
+
+
+def matrix_comparison_steps(layout: Any, specification: Any, measured: Any,
                             *, coherence_tolerance: float = COHERENCE_TOLERANCE,
                             phase_tolerance: float = PHASE_TOLERANCE,
                             coherence_floor: float = COHERENCE_FLOOR,
@@ -163,8 +185,14 @@ def build_matrix_comparison(layout: Any, specification: Any, measured: Any,
                             table: bool = True, unit_system: Any = None,
                             theme: Any = None) -> Any:
     """Draw the grid, the two summary strips under it and (with `table`)
-    the summary table beside it, and return the comparison
-    (`core.matrix_comparison.compare_matrix`).
+    the summary table beside it a step at a time: a generator that
+    pauses before each cell and before the strips, and whose return
+    value is the comparison (`core.matrix_comparison.compare_matrix`).
+
+    The application takes the steps a few at a time between turns of
+    its event loop, so a grid of sixty-four cells, a second or two of
+    drawing, never holds the window for long; `build_matrix_comparison`
+    takes them all at once.
 
     A `comparison` already made of the two is drawn as it is, and the
     settings are not read; the application holds the last one and
@@ -204,6 +232,7 @@ def build_matrix_comparison(layout: Any, specification: Any, measured: Any,
     plots: dict[tuple[int, int], Any] = {}
     for r in range(n):
         for c in range(n):
+            yield
             cell = comparison.cell(r, c)
             plot = _reading_plot(layout, r, c)
             plot.setLogMode(x=log_x, y=(r == c))
@@ -230,10 +259,10 @@ def build_matrix_comparison(layout: Any, specification: Any, measured: Any,
                                   measured.ordinate_dim[level.measured_record],
                                   us) * scale
                     _curve(plot, lines, held, response, True, log_x)
-                    _marks(plot, lines, held,
-                           comparison_lines_out(specification, measured,
-                                                level, comparison.scale_db),
-                           out_color)
+                    # the lines out come with the comparison, made where
+                    # it was made: reading them here was a second pass of
+                    # every channel's limits on the window's thread
+                    _marks(plot, lines, held, level.lines_out, out_color)
                 if r == 0:
                     plot.setLabel('left', axis_label(dim, us))
                 continue
@@ -277,6 +306,7 @@ def build_matrix_comparison(layout: Any, specification: Any, measured: Any,
             _marks(plot, lines, held, out, out_color)
 
     # the per-line summary, the whole matrix at each line
+    yield
     half = max(n // 2, 1)
     rms = _reading_plot(layout, n, 0, colspan=half)
     rms.setLogMode(x=log_x, y=False)
@@ -301,16 +331,3 @@ def build_matrix_comparison(layout: Any, specification: Any, measured: Any,
         layout.addItem(text, row=0, col=n, rowspan=n + 1)
     return comparison
 
-
-def comparison_lines_out(specification: Any, measured: Any, level: Any,
-                         scale_db: float) -> np.ndarray | None:
-    """The measured lines of one channel outside its abort limits, as
-    the comparison marks them (`compliance.exceedances`); None for a
-    channel that was not compared."""
-    from ..core.compliance import exceedances
-
-    if level.state not in ('in', 'out') or level.measured_record is None:
-        return None
-    over, under = exceedances(specification, measured, level.spec_record,
-                              level.measured_record, 'abort', scale_db)
-    return over | under
