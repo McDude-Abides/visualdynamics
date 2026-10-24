@@ -921,3 +921,129 @@ def test_a_run_that_is_its_specification_is_seldom_failed_by_chance():
         "inside twice the estimate's scatter at 60 averages")
     assert short.passed is True
     assert short.pair(0, 2).coherence_state == 'in'
+
+
+# ---- what a mutation run found untested ----------------------------------------
+
+
+def test_the_scatter_set_aside_line_by_line_by_hand():
+    """At 60 averages and a specified coherence of 0.5 the coherence
+    estimate scatters by sqrt(2) 0.5 sqrt(0.5) / sqrt(60) = 0.0646 and
+    the phase by sqrt(0.5) / (sqrt(0.5) sqrt(120)) rad = 5.23 degrees:
+    tolerances of 0.13 and 10.4 are just inside twice that, 0.13 and
+    10.5 just outside."""
+    s_coh = np.array([0.5, 0.5])
+    phase = np.zeros(2)
+
+    def judged(coherence_tolerance, phase_tolerance):
+        lines = cross_term_lines(s_coh, phase, s_coh, phase,
+                                 coherence_tolerance=coherence_tolerance,
+                                 phase_tolerance=phase_tolerance,
+                                 averages=60.0)
+        return (bool(lines['coherence_judged'][0]),
+                bool(lines['phase_judged'][0]),
+                bool(lines['coherence_scattered'][0]),
+                bool(lines['phase_scattered'][0]))
+
+    assert judged(0.129, 10.4) == (False, False, True, True)
+    assert judged(0.130, 10.5) == (True, True, False, False)
+    with pytest.raises(ValueError, match='positive number, not 0'):
+        cross_term_lines(s_coh, phase, s_coh, phase, averages=0.0)
+
+
+def _counted(run, averages):
+    """`run` with every record worth `averages` averages."""
+    run.statistical_dof = np.full(run.num_records, 2.0 * averages)
+    return run
+
+
+def test_one_line_set_aside_is_counted_and_said():
+    coherence = np.full(F.shape, 0.99)
+    coherence[5] = 0.5
+    spec = matrix([1.0, 4.0], {(0, 1): term(coherence, 30.0, 1.0, 4.0)},
+                  Specification)
+    run = _counted(matrix([1.0, 4.0],
+                          {(0, 1): term(coherence, 30.0, 1.0, 4.0)}), 60.0)
+    result = compare_matrix(spec, run, scale_db=0)
+    pair = result.pair(0, 1)
+    assert pair.words('coherence') == (
+        'coherence in: 0 of 39 lines past ±0.10; 1 line set aside: the '
+        "tolerance is inside twice the estimate's scatter at 60 averages")
+    assert not any(note.startswith('the measurement does not say')
+                   for note in result.notes)
+
+
+def test_a_phase_set_aside_says_so_and_not_the_floor():
+    """Coherence judged and phase set aside: at 40 averages and a
+    coherence of 0.8 the phase scatters by 3.2 degrees, so a tolerance
+    of 5 is inside twice that, while the coherence's 0.04 is well
+    inside a tolerance of 0.3."""
+    run = _counted(measured(coherence=0.8, phase=30.0), 40.0)
+    spec = matrix([1.0, 4.0], {(0, 1): term(0.8, 30.0, 1.0, 4.0)},
+                  Specification)
+    pair = compare_matrix(spec, run, scale_db=0, coherence_tolerance=0.3,
+                          phase_tolerance=5.0).pair(0, 1)
+    assert pair.coherence_state == 'in'
+    assert pair.words('phase') == (
+        'phase not judged: 40 lines set aside: the tolerance is inside '
+        "twice the estimate's scatter at 40 averages")
+
+
+def test_progress_counts_every_level_and_every_pair():
+    told = []
+    spec = matrix([1.0, 1.0, 1.0], {(0, 1): term(0.5, 0.0, 1.0, 1.0),
+                                    (0, 2): term(0.5, 0.0, 1.0, 1.0),
+                                    (1, 2): term(0.5, 0.0, 1.0, 1.0)},
+                  Specification)
+    run = matrix([1.0, 1.0, 1.0], {(0, 1): term(0.5, 0.0, 1.0, 1.0),
+                                   (0, 2): term(0.5, 0.0, 1.0, 1.0),
+                                   (1, 2): term(0.5, 0.0, 1.0, 1.0)})
+    compare_matrix(spec, run, scale_db=0,
+                   progress=lambda done, total: told.append((done, total)))
+    assert told[-1] == (6, 6), 'three levels and three cross terms'
+
+
+def test_a_note_shared_by_levels_or_by_cross_terms_is_said_once():
+    from visualdynamics.core.compliance import RAW_NOTE
+
+    # two levels undeclared and no cross term specified: the levels'
+    # note, once
+    undeclared = {(i, j): 'unknown' for i in range(2) for j in range(2)}
+    spec = matrix([1.0, 4.0], {}, Specification, dims=undeclared)
+    run = matrix([1.0, 4.0], {(0, 1): term(0.64, 30.0, 1.0, 4.0)},
+                 dims=undeclared)
+    result = compare_matrix(spec, run, scale_db=0)
+    assert result.pair(0, 1).state == 'not specified'
+    assert result.notes.count(RAW_NOTE) == 1
+    # three channels undeclared throughout: the cross terms' note, once
+    everything = {(i, j): 'unknown' for i in range(3) for j in range(3)}
+    terms = {(0, 1): term(0.5, 0.0, 1.0, 1.0),
+             (0, 2): term(0.5, 0.0, 1.0, 1.0),
+             (1, 2): term(0.5, 0.0, 1.0, 1.0)}
+    spec = matrix([1.0, 1.0, 1.0], terms, Specification, dims=everything)
+    run = matrix([1.0, 1.0, 1.0], terms, dims=everything)
+    assert compare_matrix(spec, run, scale_db=0).notes.count(RAW_NOTE) == 1
+
+
+def test_a_cross_term_declared_unlike_its_autospectra_is_refused():
+    """The autospectra declared and the cross term not, on both sides,
+    its quantity known from a hint: the measured terms compare (both
+    undeclared), and the coherence of an undeclared term over declared
+    autospectra is refused."""
+    mixed = {(i, j): 'acceleration**2/frequency' if i == j else 'unknown'
+             for i in range(2) for j in range(2)}
+    spec = matrix([1.0, 4.0], {(0, 1): term(0.64, 30.0, 1.0, 4.0)},
+                  Specification, dims=mixed)
+    run = matrix([1.0, 4.0], {(0, 1): term(0.64, 30.0, 1.0, 4.0)},
+                 dims=mixed)
+    for data in (spec, run):
+        data.dimension_hint = [None if dim != 'unknown'
+                               else 'acceleration**2/frequency'
+                               for dim in data.ordinate_dim]
+    result = compare_matrix(spec, run, scale_db=0)
+    assert [level.state for level in result.levels] == ['in', 'in']
+    pair = result.pair(0, 1)
+    assert pair.state == 'refused'
+    assert pair.reason == ('the specified cross term and its autospectra '
+                           'are not all declared in units: a coherence of '
+                           'numbers in different scales is not one')

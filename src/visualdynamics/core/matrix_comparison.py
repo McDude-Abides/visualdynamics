@@ -107,6 +107,7 @@ from typing import Any
 
 import numpy as np
 
+from ..units import UNKNOWN
 from .progress import Ticker
 
 #: how far the measured coherence may be from the specified one, either
@@ -1141,6 +1142,19 @@ def compare_matrix(specification: Any, measured: Any, *,
                                         measured.ordinate_dim[theirs],
                                         wanted_name='the specified cross term',
                                         held_name='the measured one')
+            # a coherence is the cross term over its two autospectra, so
+            # the three are declared alike or the ratio is of numbers in
+            # different scales
+            for side, data, held in (
+                    ('specified', specification,
+                     (spec_index, diagonal[r], diagonal[c])),
+                    ('measured', measured, (theirs, p, q))):
+                declared = {str(data.ordinate_dim[i]) != UNKNOWN
+                            for i in held}
+                if refusal is None and len(declared) > 1:
+                    refusal = (f'the {side} cross term and its autospectra '
+                               'are not all declared in units: a coherence '
+                               'of numbers in different scales is not one')
             if refusal is not None:
                 checks.append(CrossCheck(r, c, label, spec_index, theirs,
                                          'refused', 'refused', refusal))
