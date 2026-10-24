@@ -99,7 +99,8 @@ Each refusal says what was found and where:
 - a time column out of order, or uneven beyond its digits;
 - two sample rates that disagree;
 - a stated unit or quantity that cannot be used, a header unit that
-  contradicts a stated quantity, and a column named that is not there.
+  contradicts a stated quantity, a column named that is not there, and
+  an empty `columns=`.
 
 ## The preview
 
@@ -124,9 +125,11 @@ Importing a delimited text file (File → Import, or a drop) opens a
 dialog on what was found: the delimiter, the decimal point, the time
 column and the sample rate, and a table of the channels with a box to
 keep each, its name and its unit. The same preview is drawn under it,
-read from the head of the file by the same call the import makes, with
-the notes below it; a refusal is shown in their place and Import is not
-offered until it is put right. Import then reads the whole file with
+read from the head of the file by the same call the import makes (with
+the progress bar up for a file over a megabyte, whose head takes a
+moment to read), with the notes below it; a refusal is shown in their
+place and Import is not offered until it is put right. Unchecking every
+column is the empty `columns=` the reader refuses. Import then reads the whole file with
 what was set, and the journal records the call a script would make,
 holding only what differs from what was found:
 `project.import_file('run.csv', sample_rate=5120.0)`.

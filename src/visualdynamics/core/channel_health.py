@@ -28,10 +28,6 @@ from typing import Any
 
 import numpy as np
 
-# Written for the delimited-text import (2026-10-23), where a reviewer
-# asked for missing samples and dead channels to be handled with notes
-# rather than silently imported or silently dropped.
-
 
 @dataclass(frozen=True)
 class ChannelHealth:

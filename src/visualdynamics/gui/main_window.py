@@ -8452,7 +8452,8 @@ class MainWindow(QMainWindow):
             return {}
         from .text_import import ask_text_import
 
-        return ask_text_import(self, path, resolve_theme(self.theme_name))
+        return ask_text_import(self, path, resolve_theme(self.theme_name),
+                               runner=self._run_long)
 
     def _exodus_import_choices(self, path):
         """How an exodus file's results should be read, asked as needed.

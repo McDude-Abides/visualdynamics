@@ -288,6 +288,13 @@ def test_a_missing_sample_is_kept_as_nan_and_named(tmp_path):
     [note] = [n for n in notes if 'missing sample' in n]
     assert note == ('run.csv: Force has 3 missing samples of 16 (the first at '
                     'sample 6, 0.000976562 s), kept as NaN')
+    one = list(lines)
+    clean = _text(_csv(tmp_path, samples=16, name='one.csv')[0]).splitlines()
+    one[6], one[9] = clean[6], clean[9]
+    _history, notes = _read(_write(tmp_path, '\n'.join(one), name='one.csv'))
+    assert [n for n in notes if 'missing sample' in n] == [
+        ('one.csv: Force has 1 missing sample of 16 (the first at sample 11, '
+         '0.00195312 s), kept as NaN')]
     with pytest.raises(ValueError, match='line 7: Force has a missing sample'):
         read_delimited(path, missing='refuse')
 
@@ -432,6 +439,13 @@ def test_columns_choose_the_channels_in_the_order_asked(tmp_path):
         read_delimited(path, columns=['Speed'])
     with pytest.raises(ValueError, match='columns names 9 is not a column'):
         read_delimited(path, columns=[9])
+    with pytest.raises(ValueError, match='^columns names no channel: choose at '
+                                         'least one to read$'):
+        read_delimited(path, columns=[])
+    only_time = _write(tmp_path, 'Time\n0\n0.5\n1\n', name='time.csv')
+    with pytest.raises(ValueError, match='time.csv holds no channel beside its '
+                                         'time column'):
+        read_delimited(only_time, columns=None, time_column=0)
 
 
 def test_the_arguments_are_checked_before_the_file_is_read(tmp_path):

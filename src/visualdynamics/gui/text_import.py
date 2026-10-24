@@ -14,6 +14,9 @@ it is read again from the file's head (`PREVIEW_ROWS` rows) by the same
 missing samples crossed, a dead channel named. The notes that read
 gives are listed under the preview, and a refusal is shown in their
 place with Import disabled, since the import would refuse the same way.
+A file larger than `PREVIEW_INLINE_BYTES` is read for its preview on
+the window's worker (`MainWindow._run_long`), so the dialog keeps
+painting while the head of a wide file is parsed.
 
 Import then reads the whole file with exactly those arguments, holding
 only what differs from what was found, so the journal replays the
@@ -24,7 +27,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -47,12 +50,15 @@ from ..io.notes import ImportNote
 from ..plot import background_brush
 from ..plot.text_import import build_import_preview
 
-# Asked for by the course audit (2026-10-23): a reader brings their own
-# recorded data as text, and the import is where a wrong rate or unit
-# is cheapest to catch.
-
 #: how many data rows the preview reads from the head of the file
 PREVIEW_ROWS = 20000
+
+#: the largest file whose preview is read on the GUI thread. Reading
+#: costs about a tenth of a microsecond a byte, so a file of a megabyte
+#: is read in about a tenth of a second; past that the head that the
+#: preview reads (up to `PREVIEW_ROWS` rows of every column) takes
+#: longer, and is read on the window's worker instead
+PREVIEW_INLINE_BYTES = 1 << 20
 
 #: the delimiters offered, in the reader's order
 DELIMITER_CHOICES = [(delimited.DELIMITER_NAMES[d].capitalize(), d)
@@ -67,7 +73,10 @@ class TextImportDialog(QDialog):
     channels.
 
     `path` is the file and `colors` the theme's colors. The dialog opens
-    on `io.delimited.text_layout`'s reading of the file.
+    on `io.delimited.text_layout`'s reading of the file. `runner` runs
+    a slow read off the GUI thread, called as the window's `_run_long`
+    is (a status line, then the work, which takes `progress=`); without
+    one every preview is read in place.
 
     `options()` is the answer in `read_delimited`'s own keywords, holding
     only what differs from what was found: an untouched dialog answers
@@ -75,12 +84,14 @@ class TextImportDialog(QDialog):
     """
 
     def __init__(self, path: str | os.PathLike, colors: Mapping[str, str],
-                 parent: QWidget | None = None) -> None:
+                 parent: QWidget | None = None,
+                 runner: Callable[..., Any] | None = None) -> None:
         super().__init__(parent)
         import pyqtgraph as pg
 
         self.path: str = str(path)
         self.colors: dict[str, str] = dict(colors)
+        self.runner: Callable[..., Any] | None = runner
         #: what the file was found to be, which `options` is measured from
         self.found: delimited.TextLayout = delimited.text_layout(self.path)
         #: the layout as the delimiter and decimal now chosen read it
@@ -312,21 +323,20 @@ class TextImportDialog(QDialog):
         self.header.setText(self.layout.describe(self.path)
                             + '. Set what is wrong; the preview is the head of '
                               f'the file, up to {PREVIEW_ROWS:,} rows.')
+        # every column unchecked asks for columns=[], which the reader
+        # itself refuses, so the message is the one a script would get
         options = self.options()
-        if not any(keep for _k, keep, _n, _u in self._rows()):
-            self._refuse('no column is checked')
-            return
         try:
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter('always')
-                history = delimited.read_delimited(self.path, max_rows=PREVIEW_ROWS,
-                                                   **options)
+            if self.runner is not None and self._large():
+                history, notes = self.runner(
+                    f'Reading the head of {os.path.basename(self.path)}…',
+                    _read_preview, self.path, options)
+            else:
+                history, notes = _read_preview(self.path, options)
         except ValueError as refusal:
             self._refuse(str(refusal))
             return
-        self.history, self.refusal = history, None
-        self.notes = [str(w.message) for w in caught
-                      if issubclass(w.category, ImportNote)]
+        self.history, self.refusal, self.notes = history, None, notes
         self.plot.clear()
         build_import_preview(self.plot, history, theme=self.colors)
         rate = f'{history.sample_rate:.6g}'
@@ -337,12 +347,38 @@ class TextImportDialog(QDialog):
             f'color: {self.colors["limit_abort"]}' if self.notes else '')
         self.import_button.setEnabled(True)
 
+    def _large(self) -> bool:
+        """Whether the file is past `PREVIEW_INLINE_BYTES`."""
+        try:
+            return os.path.getsize(self.path) > PREVIEW_INLINE_BYTES
+        except OSError:
+            return False
+
+
+def _read_preview(path: str, options: Mapping[str, Any], progress: Any = None
+                  ) -> tuple[Any, list[str]]:
+    """(history, notes): the head of `path` read with `options`, and the
+    import notes that read gave. Callable on a worker thread; `progress`
+    is the runner's, given a moving bar since the read cannot count."""
+    from ..core.progress import BUSY
+
+    if progress is not None:
+        progress(0, BUSY)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        history = delimited.read_delimited(path, max_rows=PREVIEW_ROWS, **options)
+    return history, [str(w.message) for w in caught
+                     if issubclass(w.category, ImportNote)]
+
 
 def ask_text_import(parent: QWidget | None, path: str | os.PathLike,
-                    colors: Mapping[str, str]) -> dict[str, Any] | None:
+                    colors: Mapping[str, str],
+                    runner: Callable[..., Any] | None = None
+                    ) -> dict[str, Any] | None:
     """Show the dialog and return the import options chosen, or None when
-    it is cancelled and the file is skipped."""
-    dialog = TextImportDialog(path, colors, parent)
+    it is canceled and the file is skipped. `runner` is as the dialog
+    takes it."""
+    dialog = TextImportDialog(path, colors, parent, runner)
     if dialog.exec() == QDialog.DialogCode.Accepted:
         return dialog.options()
     return None

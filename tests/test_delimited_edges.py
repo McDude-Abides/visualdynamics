@@ -164,8 +164,10 @@ def test_a_repeated_time_is_out_of_order(tmp_path):
     t, a, _f = _signal(16)
     t[6] = t[5]
     path = _write(tmp_path, 'Time (s),A\n' + '\n'.join(_rows(t, a)))
-    with pytest.raises(ValueError, match='in order; sample 6'):
+    with pytest.raises(ValueError, match='in order; sample 6') as refused:
         read_delimited(path)
+    # refused as out of order, not as a rounding its digits cannot explain
+    assert 'digits' not in str(refused.value)
 
 
 def test_rounding_is_forgiven_to_a_unit_of_the_last_digit_and_no_further(tmp_path):
@@ -255,3 +257,159 @@ def test_a_record_with_no_label_is_written_by_its_number(tmp_path):
     back, _notes = _read(target)
     assert back.block == ['record 1']
     assert np.array_equal(back.ordinate, history.ordinate)
+
+
+# ---- the second mutation run: each boundary it found, pinned ----------------------
+
+def test_a_head_read_ending_on_a_chunk_boundary_does_not_cut_its_last_line(
+        tmp_path):
+    """The head is read a megabyte at a time. When the first chunk holds
+    exactly the lines asked for, it ends partway into the next line, so
+    the next chunk is read before the head is cut at a newline."""
+    path = tmp_path / 'long.txt'
+    path.write_bytes((b'x' * 99 + b'\n') * 20000)
+    asked = (1 << 20) // 100                   # the newlines in the first chunk
+    head = delimited._read_lines(path, lines=asked)
+    assert len(head) == asked and head[-1] == 'x' * 99
+
+
+def test_a_head_read_counts_an_empty_line_as_a_line(tmp_path):
+    path = tmp_path / 'blank.txt'
+    path.write_bytes(b'a\n\nb\nc\nd\n')
+    assert delimited._read_lines(path, lines=3) == ['a', '', 'b']
+
+
+def test_a_cut_four_byte_character_is_utf8_and_a_foreign_byte_is_not(tmp_path):
+    """A character of four bytes cut after three is the cut, not a
+    foreign encoding; a byte that is not UTF-8 four bytes before the cut
+    cannot be part of a cut character, so the text is Windows-1252."""
+    cut = tmp_path / 'cut.txt'
+    face = '\N{GRINNING FACE}'.encode()
+    cut.write_bytes('\N{MICRO SIGN}\ncd'.encode() + face[:3] + b'\n')
+    assert delimited._read_lines(
+        cut, limit=len('\N{MICRO SIGN}\ncd'.encode()) + 3) == ['\N{MICRO SIGN}']
+    legacy = tmp_path / 'legacy.txt'
+    legacy.write_bytes(b'\xe9a\nbcd\n')
+    assert delimited._read_lines(legacy, limit=4) == [
+        '\N{LATIN SMALL LETTER E WITH ACUTE}a']
+
+
+def test_a_numeric_line_above_the_header_is_not_where_the_data_start(tmp_path):
+    t, a, f = _signal(32)
+    path = _write(tmp_path, '1,2,3\nTime (s),A,B\n' + '\n'.join(_rows(t, a, f)))
+    layout = text_layout(path)
+    assert (layout.names_line, layout.data_line) == (2, 3)
+
+
+@pytest.mark.parametrize('line, rate', [
+    ('Sample Rate (kHz): 5.12', 5120.0),
+    ('Sample Rate: 5120 samples', 5120.0),
+    ('Sample Interval: 1.953125e-4 sec/sample', 5120.0)])
+def test_a_word_after_the_rate_is_a_unit_only_when_it_reads_as_one(
+        tmp_path, line, rate):
+    path, _ = _csv(tmp_path, header='A,B,C', preamble=line + '\n')
+    assert text_layout(path).sample_rate == pytest.approx(rate)
+
+
+def test_a_headerless_file_of_two_columns_and_three_rows(tmp_path):
+    """The smallest file whose first column is taken as time: two
+    columns, three rows; and a stated data line may be the first line
+    or the last."""
+    path = _write(tmp_path, '0,1\n0.5,2\n1.0,3\n')
+    layout = text_layout(path)
+    assert layout.time_column == 0 and layout.columns == ('column 1', 'column 2')
+    assert text_layout(path, data_line=1).data_line == 1
+    assert text_layout(path, data_line=3).data_line == 3
+
+
+def test_a_stated_data_line_takes_two_fields_or_one_split_by_spaces(tmp_path):
+    two = _write(tmp_path, 'Time,A\n0,1\n0.5,2\n', name='two.csv')
+    assert text_layout(two, data_line=2).delimiter == ','
+    one = _write(tmp_path, 'A\n1\n2\n3\n', name='one.txt')
+    assert text_layout(one, data_line=2).delimiter == ' '
+
+
+def test_a_headerless_file_keeps_every_column(tmp_path):
+    path = _write(tmp_path, '0,1,2\n0.5,2,3\n1.0,3,4\n')
+    assert text_layout(path).columns == ('column 1', 'column 2', 'column 3')
+
+
+def test_one_column_written_with_a_trailing_delimiter(tmp_path):
+    path = _write(tmp_path, 'a\n0.1,\n0.2,\n0.3,\n')
+    history, _notes = _read(path, sample_rate=10.0)
+    assert history.num_records == 1 and history.block == ['a']
+
+
+def test_a_title_line_is_not_the_header_of_a_trailing_delimiter_file(tmp_path):
+    path = _write(tmp_path, 'Run 12\n0,1,\n0.5,2,\n1.0,3,\n')
+    layout = text_layout(path)
+    assert layout.names_line == 0
+    assert layout.columns == ('column 1', 'column 2')
+
+
+def test_a_word_in_an_unnamed_first_column_is_refused_by_line(tmp_path):
+    path = _write(tmp_path, '0,1\n0.5,2\nabc,3\n1.5,4\n2.0,5\n2.5,6\n')
+    with pytest.raises(ValueError, match="line 3: column 1 holds 'abc'"):
+        read_delimited(path, sample_rate=10.0)
+
+
+def test_a_constant_unnamed_first_column_is_a_channel(tmp_path):
+    path = _write(tmp_path, '1,1\n1,2\n1,3\n1,4\n')
+    assert text_layout(path).time_column is None
+
+
+def test_a_row_ending_in_empty_fields_is_read_cell_by_cell_too(tmp_path):
+    """The cell-by-cell read (forced here by an empty cell) takes a row
+    that ends in empty fields past the header's count, as the fast read
+    does."""
+    path = _write(tmp_path, 'Time,A,B\n0,1,2\n0.5,,3\n1.0,3,4,,\n1.5,4,5\n')
+    history, _notes = _read(path)
+    assert history.ordinate.shape == (2, 4)
+    assert np.isnan(history.ordinate[0, 1])
+
+
+def test_a_decimal_comma_time_column_uneven_beyond_its_digits_is_refused(tmp_path):
+    t, a, _f = _signal(400)
+    late = np.round(t, 6)
+    late[200] += 5e-6
+    rows = [f'{x:.6f};{y:.6f}'.replace('.', ',') for x, y in zip(late, a, strict=True)]
+    path = _write(tmp_path, 'Time (s);A\n' + '\n'.join(rows))
+    with pytest.raises(ValueError, match='more than the digits it is written to'):
+        read_delimited(path)
+
+
+def test_a_millisecond_time_column_is_forgiven_its_own_digits_only(tmp_path):
+    t, a, _f = _signal(400)
+    ms = np.round(t * 1000.0, 3)
+    path = _write(tmp_path, 'Time (ms),A\n' + '\n'.join(_rows(ms, a, fmt='.3f')))
+    assert _read(path)[0].sample_rate == pytest.approx(FS, rel=1e-5)
+    ms[200] += 0.005                            # five units of the last digit
+    late = _write(tmp_path, 'Time (ms),A\n' + '\n'.join(_rows(ms, a, fmt='.3f')),
+                  name='late.csv')
+    with pytest.raises(ValueError, match='more than the digits it is written to'):
+        read_delimited(late)
+
+
+def test_an_even_time_column_starting_late_keeps_its_start(tmp_path):
+    path = _write(tmp_path, 'Time,A\n3.25,1\n3.5,2\n3.75,3\n4.0,4\n')
+    history, _notes = _read(path)
+    assert history.sample_rate == 4.0
+    assert history.abscissa[0] == 3.25 and history.abscissa[-1] == 4.0
+
+
+def test_a_sample_rate_below_one_per_second_is_a_rate(tmp_path):
+    path = _write(tmp_path, 'A,B\n1,2\n3,4\n5,6\n')
+    history, _notes = _read(path, time_column=False, sample_rate=0.5)
+    assert history.abscissa.tolist() == [0.0, 2.0, 4.0]
+
+
+def test_rows_missing_everything_at_the_end_are_not_samples(tmp_path):
+    """Rows that hold no value at all (written as NaN, so not blank) end
+    the data; a short row just before them is still a sample and still
+    noted."""
+    path = _write(tmp_path, 'Time,A,B\n0,1,2\n0.5,2,3\n1.0,3\nNaN,NaN,NaN\nNaN,,\n')
+    history, notes = _read(path)
+    assert history.ordinate.shape == (2, 3)
+    assert ('run.csv: 1 row shorter than the header (the first on line 4): the '
+            'cells missing from the end of a short row read as missing '
+            'samples') in notes

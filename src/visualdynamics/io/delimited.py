@@ -90,12 +90,6 @@ from .notes import ImportNote
 from .sniffing import text_head
 from .stated_units import CHANNEL_QUANTITIES, declare_stated_units, unit_problem
 
-# Asked for by the course audit (2026-10-23, P11): a reader's own
-# recorded data most often arrives as text, and every workflow it walks
-# starts with an import. Built on review guidance from the previous
-# tranche: refusals in the API, notes for NaN and dead channels, unit and
-# quantity checks, and one shared helper for stated units.
-
 #: the suffixes `sniff` looks inside; any other file is not delimited
 #: text to this reader, whatever it holds (`format='delimited'` reads it)
 SUFFIXES = ('.csv', '.tsv', '.txt', '.tab', '.asc', '.prn')
@@ -915,7 +909,12 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
             if k not in indices:
                 indices.append(k)
     if not indices:
-        raise ValueError(f'{name} holds no channel beside its time column')
+        # an empty selection is the caller's, not the file's, and is
+        # said as such: the window's channel table shows it as the
+        # reason Import is off
+        raise ValueError('columns names no channel: choose at least one to read'
+                         if columns is not None else
+                         f'{name} holds no channel beside its time column')
     channels = [layout.columns[k] for k in indices]
     if names is not None:
         names = [str(n) for n in names]

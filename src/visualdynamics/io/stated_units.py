@@ -25,10 +25,6 @@ from typing import Any
 from ..core.unit_choices import ORDINATE_UNITS, shown_dimension
 from ..units import dimension_of
 
-# One helper for every reader that declares units a source stated: the
-# SEP 005 converter had its own loop, and the delimited-text reader
-# would have been a second copy of it (review, 2026-10-23).
-
 #: the quantities a channel of a time history can measure, as stored
 #: dimension tags: the unit shortlists' own groups
 CHANNEL_QUANTITIES = frozenset(ORDINATE_UNITS)

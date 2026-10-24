@@ -119,7 +119,11 @@ def test_columns_names_and_units_set_in_the_table(window, tmp_path):
     assert dialog.options()['names'] == ['101Z']
     dialog.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
     assert not dialog.import_button.isEnabled()
-    assert 'no column is checked' in dialog.message.text()
+    assert dialog.options()['columns'] == []
+    # the reader's own refusal, not one the dialog keeps for itself
+    assert dialog.message.text() == ('Cannot import: columns names no channel: '
+                                     'choose at least one to read')
+    assert dialog.history is None
 
 
 def test_a_wrong_delimiter_is_refused_and_the_right_one_restores(window, tmp_path):
@@ -156,6 +160,34 @@ def test_the_preview_reads_the_head_of_the_file(window, tmp_path, monkeypatch):
     assert 'up to 100 rows' in dialog.header.text()
 
 
+def test_a_large_file_is_previewed_on_the_worker(window, tmp_path, monkeypatch):
+    from visualdynamics.gui import text_import
+    from visualdynamics.gui.text_import import TextImportDialog
+    from visualdynamics.theme import theme as resolve_theme
+
+    path, _ = _csv(tmp_path, samples=400)
+    ran = []
+
+    def runner(status, verb, *args, **kwargs):
+        ran.append(status)
+        return window._run_long(status, verb, *args, **kwargs)
+
+    colors = resolve_theme(window.theme_name)
+    dialog = TextImportDialog(path, colors, runner=runner)
+    assert ran == [], 'a small file is read in place'
+    assert dialog.history.ordinate.shape == (2, 400)
+    monkeypatch.setattr(text_import, 'PREVIEW_INLINE_BYTES', 1000)
+    dialog = TextImportDialog(path, colors, runner=runner)
+    assert ran == ['Reading the head of run.csv…']
+    assert dialog.history.ordinate.shape == (2, 400)
+    assert dialog.message.text() == '2 channels at 5120 samples per second.'
+    dialog.rate_box.setValue(5000.0)
+    assert len(ran) == 2, 'each change is read on the worker again'
+    assert 'one of them is wrong' in dialog.message.text(), \
+        "the worker's refusal reaches the dialog"
+    assert not dialog.import_button.isEnabled()
+
+
 # ---- the window ------------------------------------------------------------------
 
 def _histories(window):
@@ -169,7 +201,8 @@ def test_the_window_imports_what_the_dialog_chose(window, pump, tmp_path,
     path, (_t, a, _f) = _csv(tmp_path)
     asked = []
 
-    def choose(parent, asked_path, colors):
+    def choose(parent, asked_path, colors, runner=None):
+        assert runner == window._run_long, 'the preview reads on the worker'
         asked.append(asked_path)
         return {'columns': ['Accel'], 'names': ['101Z+']}
 
@@ -184,7 +217,7 @@ def test_the_window_imports_what_the_dialog_chose(window, pump, tmp_path,
             "names=['101Z+'])") in window.project.journal
 
 
-def test_cancelling_the_dialog_skips_the_file(window, pump, tmp_path, monkeypatch):
+def test_canceling_the_dialog_skips_the_file(window, pump, tmp_path, monkeypatch):
     from visualdynamics.gui import text_import
 
     path, _ = _csv(tmp_path)
