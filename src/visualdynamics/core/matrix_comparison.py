@@ -57,7 +57,11 @@ is exactly its specification puts a few percent of its lines past a
 tolerance of 0.1 by chance. A cross term is therefore out when either
 reading is out on more than `compliance.LINES_PERCENT` of the lines it
 judged, the share a level is allowed outside its abort limits, and not
-on its worst line.
+on its worst line. And where the tolerance is inside twice the
+estimate's scatter at the measurement's averages (`SCATTER_SIGMAS`),
+the line is not judged at all: with too few averages for the tolerance
+asked, a run that is its specification fails by chance, and the test
+needs more averages, not a verdict.
 
 The defaults (`COHERENCE_TOLERANCE` of 0.1 either way, `PHASE_TOLERANCE`
 of 10 degrees either way, judged at a specified coherence of at least
@@ -80,7 +84,7 @@ how many cross terms are out on either reading at that line.
 
 `compare_matrix` reads a specification and a CPSD (`compute_cpsds`)
 and returns a `MatrixComparison`; `cross_term_lines` is the per-line
-judgement of one cross term on plain arrays.
+judgment of one cross term on plain arrays.
 
 References
 ----------
@@ -97,11 +101,13 @@ errors of coherence and phase estimates are Bendat and Piersol's.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+from .progress import Ticker
 
 #: how far the measured coherence may be from the specified one, either
 #: way, as an absolute difference; an example of what test documents ask
@@ -122,6 +128,16 @@ COHERENCE_FLOOR = 0.5
 #: a coherence or a phase exactly on its tolerance is inside, and the
 #: arithmetic of reading it must not move it out
 EDGE = 1e-9
+
+#: a line is judged only where its tolerance is at least this many
+#: standard deviations of the estimate's scatter at the measurement's
+#: averages. Inside it, a run that is exactly its specification puts
+#: more than 5 percent of its lines past the tolerance by chance, half
+#: the share a cross term is allowed, and the rule would fail a correct
+#: test: at a coherence of 0.5 and about sixty averages the coherence
+#: estimate scatters by 0.065, and a tolerance of 0.1 failed ten runs in
+#: ten that were exactly their specification
+SCATTER_SIGMAS = 2.0
 
 
 def _tolerances(coherence_tolerance: float, phase_tolerance: float,
@@ -172,10 +188,11 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
                      measured_coherence: Any, measured_phase: Any, *,
                      coherence_tolerance: float = COHERENCE_TOLERANCE,
                      phase_tolerance: float = PHASE_TOLERANCE,
-                     coherence_floor: float = COHERENCE_FLOOR
+                     coherence_floor: float = COHERENCE_FLOOR,
+                     averages: float | None = None
                      ) -> dict[str, np.ndarray]:
     """One cross term judged line by line, on plain arrays: the array
-    form of the judgement `compare_matrix` makes of each pair.
+    form of the judgment `compare_matrix` makes of each pair.
 
     A line's coherence is judged where both coherences are numbers, and
     is out when they differ by more than `coherence_tolerance`. Its
@@ -184,6 +201,13 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
     phases are, and is out when the two differ by more than
     `phase_tolerance` the short way round (`wrapped_degrees`). A
     reading exactly on its tolerance is inside.
+
+    With `averages`, the number of averages the measured estimate holds
+    (half its statistical degrees of freedom), a line is judged only
+    where each tolerance is at least `SCATTER_SIGMAS` times the
+    estimate's random error at the specified coherence: sqrt(2)
+    (1 - gamma^2) |gamma| / sqrt(n) for the coherence and sqrt(1 -
+    gamma^2) / (|gamma| sqrt(2 n)) radians for the phase.
 
     Parameters
     ----------
@@ -198,6 +222,9 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
         How far the phase may be off, in degrees either way.
     coherence_floor : float, default `COHERENCE_FLOOR`
         The specified coherence the phase is judged from.
+    averages : float, optional
+        The averages the measurement holds; when omitted no line is set
+        aside for the scatter of its estimates.
 
     Returns
     -------
@@ -205,13 +232,15 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
         'coherence_error' (measured less specified) and 'phase_error'
         (measured less specified, wrapped), each not a number where it
         cannot be read; and the booleans 'coherence_judged',
-        'coherence_out', 'phase_judged' and 'phase_out'.
+        'coherence_out', 'phase_judged' and 'phase_out', and
+        'coherence_scattered' and 'phase_scattered', the lines set aside
+        because the tolerance is inside the estimate's scatter.
 
     Raises
     ------
     ValueError
-        If a tolerance or the floor is out of range, or the four arrays
-        are not one shape.
+        If a tolerance or the floor is out of range, the averages are
+        not a positive number, or the four arrays are not one shape.
     """
     coherence_tolerance, phase_tolerance, coherence_floor = _tolerances(
         coherence_tolerance, phase_tolerance, coherence_floor)
@@ -229,6 +258,25 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
         coherence_judged = np.isfinite(coherence_error)
         phase_judged = (np.isfinite(phase_error) & np.isfinite(m_coh)
                         & (s_coh >= coherence_floor - EDGE))
+        coherence_scattered = np.zeros(coherence_judged.shape, dtype=bool)
+        phase_scattered = np.zeros(phase_judged.shape, dtype=bool)
+        if averages is not None:
+            averages = float(averages)
+            if not averages > 0.0:
+                raise ValueError('the averages a measurement holds are a '
+                                 f'positive number, not {averages:g}')
+            gamma = np.sqrt(np.clip(s_coh, 0.0, 1.0))
+            with np.errstate(divide='ignore'):
+                coherence_scatter = (np.sqrt(2.0) * (1.0 - gamma ** 2)
+                                     * gamma / np.sqrt(averages))
+                phase_scatter = np.degrees(np.sqrt(1.0 - gamma ** 2)
+                                           / (gamma * np.sqrt(2.0 * averages)))
+            coherence_scattered = coherence_judged & (
+                coherence_tolerance + EDGE < SCATTER_SIGMAS * coherence_scatter)
+            phase_scattered = phase_judged & (
+                phase_tolerance + EDGE < SCATTER_SIGMAS * phase_scatter)
+            coherence_judged &= ~coherence_scattered
+            phase_judged &= ~phase_scattered
         coherence_out = coherence_judged & (
             np.abs(coherence_error) > coherence_tolerance + EDGE)
         phase_out = phase_judged & (
@@ -239,7 +287,9 @@ def cross_term_lines(specified_coherence: Any, specified_phase: Any,
                                     np.nan),
             'coherence_judged': coherence_judged,
             'coherence_out': coherence_out,
-            'phase_judged': phase_judged, 'phase_out': phase_out}
+            'phase_judged': phase_judged, 'phase_out': phase_out,
+            'coherence_scattered': coherence_scattered,
+            'phase_scattered': phase_scattered}
 
 
 # ---- the records, laid out as a matrix ---------------------------------------
@@ -257,6 +307,11 @@ def _channel_of(data: Any, record: int) -> tuple[tuple[str, str],
     return (str(response), out), (str(reference), into)
 
 
+# `channel_labels` and `record_grid` lay a matrix out the way the
+# matrix checks' `_labels` and `spectral_matrix` do. They stay here
+# until those land: this comparison needs which record holds each
+# entry (to read the specification at the measured lines and to name
+# the records in its results), where `spectral_matrix` returns values.
 def channel_labels(channels: Sequence[tuple[str, str]]) -> list[str]:
     """A label per (DOF, quantity) channel: the DOF, with the quantity
     added only where one DOF carries two channels.
@@ -298,13 +353,11 @@ def record_grid(data: Any, records: Sequence[int] | None = None
     tuple of (list of (str, str), list of list of int or None)
         The channels, and the record at each entry, row by row.
     """
-    from .data import autospectrum
-
     wanted = (range(data.num_records) if records is None
               else [int(i) for i in records])
     channels: list[tuple[str, str]] = []
     for i in wanted:
-        if autospectrum(data, i):
+        if data.is_autospectrum(i):
             row, _column = _channel_of(data, i)
             if row not in channels:
                 channels.append(row)
@@ -402,7 +455,10 @@ class LevelCheck:
     'not measured' when the measurement holds no autospectrum for the
     channel, or 'refused' with the reason in `reason`. `error_db` is the
     channel's level error at every measured line, measured over
-    specified in dB, not a number where it was not judged.
+    specified in dB, not a number where it was not judged. `lines_out`
+    marks the measured lines outside the abort limits, as the channel's
+    own comparison marks them (`compliance.exceedances`), None where the
+    channel was not compared.
     """
 
     channel: str
@@ -413,6 +469,8 @@ class LevelCheck:
     reason: str = ''
     error_db: np.ndarray = field(default_factory=lambda: np.zeros(0),
                                  repr=False, compare=False)
+    lines_out: np.ndarray | None = field(default=None, repr=False,
+                                         compare=False)
 
     def words(self) -> str:
         """The verdict in words, as the panel lists it: 'in: 2.1 % of
@@ -456,7 +514,9 @@ class CrossCheck:
     'not judged' when no line was (the reason in `reason`), 'not
     specified' when the specification writes no cross term for the
     pair, 'not measured' when the measurement holds none, or 'refused'.
-    `notes` say what was not judged on lines that were.
+    `notes` say what was not judged on lines that were. `averages` is
+    the number of averages the measured cross term holds, None when the
+    measurement does not say.
     """
 
     row: int
@@ -478,6 +538,17 @@ class CrossCheck:
     lines: dict[str, np.ndarray] = field(default_factory=dict, repr=False,
                                          compare=False)
     notes: tuple[str, ...] = ()
+    averages: float | None = None
+
+    def _scattered(self, reading: str) -> int:
+        return int(np.count_nonzero(self.lines.get(f'{reading}_scattered',
+                                                   False)))
+
+    def _scatter_words(self, reading: str) -> str:
+        count = self._scattered(reading)
+        return (f'{count} line{"s" * (count != 1)} set aside: the tolerance '
+                "is inside twice the estimate's scatter at "
+                f'{self.averages:.0f} averages')
 
     def _count(self, reading: str) -> tuple[int, int]:
         judged = self.lines.get(f'{reading}_judged')
@@ -536,9 +607,14 @@ class CrossCheck:
                      else f'±{phase_tolerance:g}°')
             share = (f'{out} of {judged}' if state == 'in'
                      else f'{100.0 * out / judged:.1f} % of {judged}')
-            return f'{reading} {state}: {share} lines past {limit}'
+            words = f'{reading} {state}: {share} lines past {limit}'
+            if self._scattered(reading):
+                words += f'; {self._scatter_words(reading)}'
+            return words
         reason = self.reason
-        if reading == 'phase' and state == 'not judged' \
+        if state == 'not judged' and self._scattered(reading):
+            reason = self._scatter_words(reading)
+        elif reading == 'phase' and state == 'not judged' \
                 and self.coherence_state in ('in', 'out'):
             reason = f'specified coherence under {coherence_floor:.2f}'
         return f'{reading} {state}: {reason}' if reason \
@@ -599,7 +675,7 @@ class MatrixComparison:
         Returns
         -------
         CrossCheck
-            The pair's judgement.
+            The pair's judgment.
         """
         a, b = sorted((int(row), int(column)))
         if a == b:
@@ -692,7 +768,7 @@ class MatrixComparison:
         tolerances.
 
         Nothing is read again: the levels and every coherence and phase
-        are kept, and only the judgement moves, so a tolerance changed
+        are kept, and only the judgment moves, so a tolerance changed
         in the app redraws without comparing the levels a second time.
 
         Parameters
@@ -800,7 +876,8 @@ def _judged(check: CrossCheck, coherence_tolerance: float,
         check.specified_coherence, check.specified_phase,
         check.measured_coherence, check.measured_phase,
         coherence_tolerance=coherence_tolerance,
-        phase_tolerance=phase_tolerance, coherence_floor=coherence_floor)
+        phase_tolerance=phase_tolerance, coherence_floor=coherence_floor,
+        averages=check.averages)
     states = []
     for reading in ('coherence', 'phase'):
         count = int(np.count_nonzero(judged[f'{reading}_judged']))
@@ -810,13 +887,15 @@ def _judged(check: CrossCheck, coherence_tolerance: float,
         share = 100.0 * np.count_nonzero(judged[f'{reading}_out']) / count
         states.append('out' if lines_state(share) == 'over' else 'in')
     reason = ''
+    checked = dataclasses.replace(check, lines=judged)
     if states[0] == 'not judged':
-        reason = (check.notes[-1] if check.notes
+        reason = (checked._scatter_words('coherence')
+                  if checked._scattered('coherence')
+                  else check.notes[-1] if check.notes
                   else 'no measured line lies where the cross term is '
                   'written')
-    return dataclasses.replace(check, coherence_state=states[0],
-                               phase_state=states[1], reason=reason,
-                               lines=judged)
+    return dataclasses.replace(checked, coherence_state=states[0],
+                               phase_state=states[1], reason=reason)
 
 
 def _non_finite_note(label: str, count: int) -> str:
@@ -830,7 +909,9 @@ def compare_matrix(specification: Any, measured: Any, *,
                    coherence_floor: float = COHERENCE_FLOOR,
                    spec_records: Sequence[int] | None = None,
                    measured_records: Sequence[int] | None = None,
-                   scale_db: float | None = None) -> MatrixComparison:
+                   scale_db: float | None = None,
+                   progress: Callable[[int, int], None] | None = None
+                   ) -> MatrixComparison:
     """A measured cross-spectral matrix judged against its
     specification: the levels on the diagonal, the coherence and phase
     of every cross term the specification writes.
@@ -864,21 +945,26 @@ def compare_matrix(specification: Any, measured: Any, *,
         The comparison's scale in dB, added to the measured levels
         (coherence and phase do not change with it); resolved as
         `compare_all` resolves it when omitted.
+    progress : callable, optional
+        Told ``(done, total)`` as the levels and the cross terms are
+        judged, one count each; what it raises stops the comparison.
+        The app's progress bar uses it.
 
     Returns
     -------
     MatrixComparison
-        Every cell's judgement, the per-line summary and the verdict.
+        Every cell's judgment, the per-line summary and the verdict.
 
     Raises
     ------
     ValueError
-        If the measurement holds no cross terms, the two cannot be
-        compared (`compliance.comparable`), they share fewer than two
-        control channels, or a tolerance is out of range.
+        If the measurement holds no cross terms, either selection of
+        records is empty, the two cannot be compared
+        (`compliance.comparable`), they share fewer than two control
+        channels, or a tolerance is out of range.
     """
     # The cross terms were read by their real part through `compare`
-    # until 2026-10-24 (M5 in the course audit); they are judged here in
+    # until 2026-10-24; they are judged here in
     # the quantities a specification writes them in, and `compare` now
     # refuses them.
     from .compliance import (
@@ -886,6 +972,7 @@ def compare_matrix(specification: Any, measured: Any, *,
         comparable,
         compare_all,
         coverage,
+        exceedances,
         judge,
         lines_state,
         matched_records,
@@ -893,10 +980,15 @@ def compare_matrix(specification: Any, measured: Any, *,
         rms_state,
         units_check,
     )
-    from .data import autospectrum, ordinary_coherence
+    from .data import ordinary_coherence
 
     coherence_tolerance, phase_tolerance, coherence_floor = _tolerances(
         coherence_tolerance, phase_tolerance, coherence_floor)
+    for records, which in ((spec_records, 'specification'),
+                           (measured_records, 'measurement')):
+        if records is not None and not len(records):
+            raise ValueError(f'no records of the {which} are selected; '
+                             'there is no matrix to judge')
     if getattr(measured, 'reference_dof', None) is None:
         raise ValueError('a matrix comparison needs a cross-spectral matrix: '
                          'records with a reference as well as a response '
@@ -921,6 +1013,8 @@ def compare_matrix(specification: Any, measured: Any, *,
     left, right = measured.bin_bounds()
     ordinate = np.asarray(measured.ordinate)
     notes: list[str] = []
+    ticker = Ticker(progress)
+    ticker.add(n + n * (n - 1) // 2)
 
     # ---- the diagonal: the existing comparison, at one scale
     diagonal = [grid[k][k] for k in range(n)]
@@ -933,9 +1027,10 @@ def compare_matrix(specification: Any, measured: Any, *,
         scale_db=scale)), strict=True))
     levels = []
     for k, spec_index in enumerate(diagonal):
+        ticker.tick()
         theirs = pairs.get(spec_index)
         error = np.full(lines.shape, np.nan)
-        if theirs is None or not autospectrum(measured, theirs):
+        if theirs is None or not measured.is_autospectrum(theirs):
             levels.append(LevelCheck(
                 labels[k], spec_index, None, {}, 'not measured',
                 'the measurement holds no autospectrum for this channel',
@@ -978,8 +1073,11 @@ def compare_matrix(specification: Any, measured: Any, *,
             reach = cell_lines(cell, left, right)
             if reach is not None and counted and np.isfinite(db):
                 error[reach] = db
+        over, under = exceedances(specification, measured, spec_index,
+                                  theirs, 'abort', scale)
         levels.append(LevelCheck(labels[k], spec_index, theirs, result,
-                                 'out' if out else 'in', '', error))
+                                 'out' if out else 'in', '', error,
+                                 over | under))
         if result.get('note') and result['note'] not in notes:
             notes.append(result['note'])
 
@@ -1004,9 +1102,17 @@ def compare_matrix(specification: Any, measured: Any, *,
             return measured_grid[b][a], -1.0
         return None, 1.0
 
+    # what each measured term is worth: half its statistical degrees of
+    # freedom, the averages its scatter is read at
+    counts = getattr(measured, 'statistical_dof', None)
+    if counts is None:
+        notes.append('the measurement does not say how many averages it '
+                     'holds, so no line is set aside for the scatter of '
+                     'its coherence and phase estimates')
     checks = []
     for r in range(n):
         for c in range(r + 1, n):
+            ticker.tick()
             label = f'{labels[r]}/{labels[c]}'
             spec_index, flip = grid[r][c], 1.0
             if spec_index is None and grid[c][r] is not None:
@@ -1066,14 +1172,18 @@ def compare_matrix(specification: Any, measured: Any, *,
                     pair_notes.append(_non_finite_note(name, bad))
             for name, record in ((labels[r], p), (labels[c], q)):
                 values = np.real(ordinate[record])[asked]
-                if values.size and np.all(np.isfinite(values))                         and not np.any(values > 0.0):
+                if (values.size and np.all(np.isfinite(values))
+                        and not np.any(values > 0.0)):
                     pair_notes.append(f'the measured {name} recorded no '
                                       'power, so the pair has no coherence')
-            checks.append(_judged(CrossCheck(
+            averages = (None if counts is None
+                        else float(np.asarray(counts)[theirs]) / 2.0)
+            check = _judged(CrossCheck(
                 r, c, label, spec_index, theirs, '', '', '',
                 specified_coherence, measured_coherence, specified_phase,
-                measured_phase, {}, tuple(pair_notes)),
-                coherence_tolerance, phase_tolerance, coherence_floor))
+                measured_phase, {}, tuple(pair_notes), averages),
+                coherence_tolerance, phase_tolerance, coherence_floor)
+            checks.append(check)
     return MatrixComparison(
         tuple(labels), tuple(levels), tuple(checks), lines, scale,
         coherence_tolerance, phase_tolerance, coherence_floor, tuple(notes))

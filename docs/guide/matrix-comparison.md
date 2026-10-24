@@ -76,6 +76,16 @@ would fail a correct run. Judged by the share of its lines, it fails
 when the departure is real. Fewer averages widen the scatter, and a
 run judged against a tight tolerance needs enough of them.
 
+So a line is judged only where its tolerance is at least twice the
+estimate's scatter at the averages the measurement holds (half its
+statistical degrees of freedom, which `compute_cpsds` stores with the
+matrix). At a coherence of 0.5 and about sixty averages the coherence
+scatters by 0.065: a tolerance of 0.1 is inside twice that, and runs
+that were exactly their specification failed every time. Those lines
+are set aside and the cell says so, with the count of averages, rather
+than giving a verdict chance would decide. A measurement that does not
+say how many averages it holds is judged on every line, with a note.
+
 Each measured line also carries two numbers for the whole matrix: the
 RMS over the control channels of their level errors in dB, and how
 many cross terms are out at that line. Watched at each step of a
@@ -160,7 +170,7 @@ the table beside](images/matrix-comparison.png)
 hold each channel's comparison, its `pairs` each cross term's
 specified and measured coherence and phase at every line with the
 lines out, and `cell(row, column)` what one cell of the grid shows.
-`cross_term_lines` is the per-line judgement of one cross term on plain
+`cross_term_lines` is the per-line judgment of one cross term on plain
 arrays.
 
 A cross term is never read as a level. `compare` refuses one, and

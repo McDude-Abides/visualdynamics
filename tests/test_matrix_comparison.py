@@ -91,7 +91,7 @@ def measured(coherence=0.64, phase=30.0, autos=(1.0, 4.0)):
                   {(0, 1): term(coherence, phase, autos[0], autos[1])})
 
 
-# ---- the per-line judgement, by hand -----------------------------------------
+# ---- the per-line judgment, by hand -----------------------------------------
 
 
 def test_a_cross_term_is_judged_line_by_line_against_its_tolerances():
@@ -518,11 +518,12 @@ def test_an_autospectrum_held_in_a_complex_cpsd_is_compared_without_warning():
 # ---- against noise -------------------------------------------------------------
 
 
-def _random_run(coherence, phase, seed, n=2 ** 18, fs=4096.0):
+def _random_run(coherence, phase, seed, n=2 ** 18, fs=4096.0, start=0.0):
     """Three channels of band-limited random noise, 20 to 2000 Hz at a
     density of 1 (m/s^2)^2/Hz: the second carries the first at the
     coherence and phase asked for, the third is independent. Its CPSD
-    from the default Hann window, 4096 lines a frame, half overlapped."""
+    from the default Hann window, 4096 lines a frame, half overlapped;
+    the record starts at `start` seconds."""
     from visualdynamics.core.averaging import Averaging
     from visualdynamics.core.data import TimeHistory
 
@@ -539,7 +540,7 @@ def _random_run(coherence, phase, seed, n=2 ** 18, fs=4096.0):
     x2 = (np.sqrt(coherence) * np.exp(1j * np.radians(phase)) * z1
           + np.sqrt(1.0 - coherence) * z2)
     rows = [np.fft.irfft(z, n) for z in (z1, x2, z3)]
-    history = TimeHistory(np.arange(n) / fs, np.vstack(rows),
+    history = TimeHistory(start + np.arange(n) / fs, np.vstack(rows),
                           response_dof=DOFS, ordinate_dim=['acceleration'] * 3,
                           ordinate_unit=['m/s**2'] * 3)
     history.averaging = Averaging(frame_length=4096, overlap=0.5,
@@ -706,7 +707,7 @@ def test_a_level_exactly_on_its_tolerance_is_in():
 
 
 def test_a_comparison_judged_again_at_other_tolerances_is_a_fresh_one():
-    """The readings are kept and the judgement moves: the same states and
+    """The readings are kept and the judgment moves: the same states and
     lines as comparing afresh at the new tolerances."""
     run = measured(coherence=np.linspace(0.5, 0.64, F.size),
                    phase=np.linspace(20.0, 45.0, F.size))
@@ -805,7 +806,7 @@ def test_undeclared_units_on_both_sides_are_compared_and_noted_once():
     run = matrix([1.0, 4.0], {(0, 1): term(0.64, 30.0, 1.0, 4.0)}, dims=dims)
     result = compare_matrix(spec, run, scale_db=0)
     assert result.passed is True
-    assert result.notes == (RAW_NOTE,)
+    assert result.notes.count(RAW_NOTE) == 1
 
 
 def test_the_shared_channels_are_counted_in_the_refusal():
@@ -823,3 +824,100 @@ def test_a_detected_scale_is_warned_at_the_callers_line():
     with pytest.warns(ScaleWarning) as caught:
         compare_matrix(SPEC, measured(autos=(0.25, 1.0)))
     assert caught[0].filename == __file__
+
+
+# ---- empty selections, the lines out, progress --------------------------------
+
+
+def test_an_empty_selection_of_either_side_is_refused_by_name():
+    with pytest.raises(ValueError, match='no records of the specification '
+                                         'are selected'):
+        compare_matrix(SPEC, measured(), spec_records=[])
+    with pytest.raises(ValueError, match='no records of the measurement '
+                                         'are selected'):
+        compare_matrix(SPEC, measured(), measured_records=[])
+
+
+def test_the_lines_out_come_with_the_comparison():
+    from visualdynamics.core.compliance import exceedances
+
+    run = measured(autos=(1.0, 4.0 * 10 ** 0.8))
+    result = compare_matrix(SPEC, run, scale_db=0)
+    for level in result.levels:
+        over, under = exceedances(SPEC, run, level.spec_record,
+                                  level.measured_record, 'abort', 0)
+        np.testing.assert_array_equal(level.lines_out, over | under)
+    assert not result.levels[0].lines_out.any()
+    assert result.levels[1].lines_out.all()
+
+
+def test_progress_is_told_and_a_raise_in_it_stops_the_comparison():
+    told = []
+    compare_matrix(SPEC, measured(), scale_db=0,
+                   progress=lambda done, total: told.append((done, total)))
+    assert told[-1] == (3, 3), 'two levels and one cross term'
+
+    class Stop(Exception):
+        pass
+
+    def stop(_done, _total):
+        raise Stop
+
+    with pytest.raises(Stop):
+        compare_matrix(SPEC, measured(), scale_db=0, progress=stop)
+
+
+# ---- the edges, and how often chance trips the rule ----------------------------
+
+
+def test_the_edges_of_the_band_and_a_late_start_are_judged():
+    """The sheet's band runs from 20 to 2000 Hz and the measured lines
+    fall on both edges: each is judged. A record that starts 7.5 s in
+    is judged the same as one that starts at zero."""
+    sheet = _sheet(0.8, 30.0)
+    early = compare_matrix(sheet, _random_run(0.8, 30.0, seed=21),
+                           scale_db=0)
+    late = compare_matrix(sheet, _random_run(0.8, 30.0, seed=21, start=7.5),
+                          scale_db=0)
+    lines = early.frequency
+    judged = early.pair(0, 1).lines['coherence_judged']
+    assert judged[lines == 20.0].all() and judged[lines == 2000.0].all()
+    assert not judged[(lines < 20.0) | (lines > 2000.0)].any()
+    assert early.passed is True and late.passed is True
+    np.testing.assert_allclose(late.pair(0, 1).measured_coherence,
+                               early.pair(0, 1).measured_coherence)
+
+
+def test_a_run_that_is_its_specification_is_seldom_failed_by_chance():
+    """The rule, checked against what chance gives: ten runs at the
+    coherence floor, where the coherence estimate scatters most, each
+    exactly its specification, under the default Hann window with about
+    127 frames. Adjacent lines are correlated under Hann, so the share
+    of lines past the tolerance scatters more than independent lines
+    would; it stays well under the share a cross term is allowed, and
+    no run fails. With half the frames the estimate's scatter is wider
+    than the tolerance asks: those runs failed every time before the
+    lines were set aside for it, and now are not judged, saying why."""
+    shares = []
+    for seed in range(10):
+        result = compare_matrix(_sheet(COHERENCE_FLOOR, 30.0),
+                                _random_run(COHERENCE_FLOOR, 30.0,
+                                            seed=100 + seed),
+                                scale_db=0)
+        assert result.passed is True, (seed, result.describe())
+        pair = result.pair(0, 1)
+        assert pair.coherence_lines == 1981, 'none set aside'
+        shares.append(pair.coherence_percent)
+    assert max(shares) < 6.0
+    assert 1.0 < np.mean(shares) < 5.0
+    short = compare_matrix(_sheet(COHERENCE_FLOOR, 30.0),
+                           _random_run(COHERENCE_FLOOR, 30.0, seed=100,
+                                       n=2 ** 17), scale_db=0)
+    pair = short.pair(0, 1)
+    assert (pair.coherence_state, pair.phase_state) == ('not judged',
+                                                        'not judged')
+    assert pair.words('coherence') == (
+        'coherence not judged: 1981 lines set aside: the tolerance is '
+        "inside twice the estimate's scatter at 60 averages")
+    assert short.passed is True
+    assert short.pair(0, 2).coherence_state == 'in'

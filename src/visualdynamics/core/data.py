@@ -2348,7 +2348,9 @@ class TimeHistory(DataArray):
         (response, reference) pair, row by row, so an n-channel history
         gives n² records shown as a grid. A cross term's dimension is the
         product of the two, `a*b/frequency`, and a diagonal term's is
-        `a**2/frequency`.
+        `a**2/frequency`. Each record's statistical degrees of freedom,
+        the lesser of its two channels' as `compute_psds` counts them,
+        are stored as `Psd.statistical_dof`.
 
         Parameters
         ----------
@@ -2368,11 +2370,17 @@ class TimeHistory(DataArray):
             fit in the record.
         """
         frequencies, scale, groups = self._spectral_frame(averaging)
+        used = self._resolved_averaging(averaging)
         keys = list(groups)
         frames = {key: scipy_fft.rfft(workers=-1, x=windowed, axis=1)
                   for key, windowed in groups.items()}
+        # what each channel's average is worth, as `compute_psds` counts
+        # it; a term is worth the lesser of its two channels'
+        worth = {key: used.statistical_dof(
+            records=len(windowed) // used.frames).equivalent
+            for key, windowed in groups.items()}
         records, responses, references = [], [], []
-        dims, hints = [], []
+        dims, hints, counts = [], [], []
         for row, (dof_i, dim_i, hint_i) in enumerate(keys):
             for column, (dof_j, dim_j, hint_j) in enumerate(keys):
                 cross = np.mean(np.conj(frames[keys[row]])
@@ -2380,6 +2388,7 @@ class TimeHistory(DataArray):
                 records.append(cross)
                 responses.append(dof_i)
                 references.append(dof_j)
+                counts.append(min(worth[keys[row]], worth[keys[column]]))
                 known = UNKNOWN not in (dim_i, dim_j)
                 dims.append(
                     (f'{dim_i}**2/frequency' if dim_i == dim_j
@@ -2389,10 +2398,13 @@ class TimeHistory(DataArray):
                     (f'{hint_i}**2/frequency' if hint_i == hint_j
                      else f'{hint_i}*{hint_j}/frequency')
                     if hint_i and hint_j else None)
-        return Psd(frequencies, np.asarray(records, dtype=np.complex128),
-                   response_dof=responses, reference_dof=references,
-                   ordinate_dim=dims, dimension_hint=hints,
-                   comment='averaged CPSD')
+        out = Psd(frequencies, np.asarray(records, dtype=np.complex128),
+                  response_dof=responses, reference_dof=references,
+                  ordinate_dim=dims, dimension_hint=hints,
+                  comment='averaged CPSD')
+        out.statistical_dof = np.asarray(counts, dtype=np.float64)
+        out.line_correlation = used.line_correlation()
+        return out
 
     #: quantities a channel is measured in when it is driving rather
     #: than responding. What `compute_multiple_coherence` takes for its
@@ -3798,10 +3810,10 @@ class Psd(_Bands, DataArray):
         # and its two quantities are one: force against acceleration
         # at a drive point names 1X+ twice and is still a cross term,
         # whose real part alone the band would otherwise have been
-        # drawn on (2026-10-16).
-        response, reference = self.record_pair(record)
-        first, second = channel_quantities(self.ordinate_dim[record])
-        return response == reference and first == second
+        # drawn on (2026-10-16). One statement of the rule, for every
+        # kind of spectrum (`autospectrum`), which reads an undeclared
+        # record's quantities from its hint
+        return autospectrum(self, record)
 
     def _cross_term(self) -> int | None:
         """The first record that is a cross term, or None."""
