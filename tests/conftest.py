@@ -643,9 +643,13 @@ def web_close(view):
     view.stop()
     view.hide()
     if pid > 0:
+        # Windows has no SIGKILL; there os.kill with SIGTERM calls
+        # TerminateProcess, which is the same end, and a pid already
+        # gone raises OSError rather than ProcessLookupError
+        kill = getattr(signal, 'SIGKILL', signal.SIGTERM)
         try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
+            os.kill(pid, kill)
+        except (ProcessLookupError, OSError):
             gone.append(True)
         deadline = time.monotonic() + 5.0
         while not gone and time.monotonic() < deadline:
