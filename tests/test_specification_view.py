@@ -115,7 +115,8 @@ def test_a_row_per_channel_with_its_level(levels):
     assert model.rowCount() == spec.num_records
     assert model.columnCount() == 2
     assert model.index(0, 0).data() == '101Z+'
-    assert model.headerData(1, Qt.Orientation.Horizontal) ==         'Specification RMS [g]'
+    assert model.headerData(1, Qt.Orientation.Horizontal) == \
+        'Specification RMS [g]'
     # 1.4217 m/s**2 as stored, read in the g the heading names
     assert float(model.index(0, 1).data()) == pytest.approx(
         1.4217 / 9.80665, abs=1e-4)
