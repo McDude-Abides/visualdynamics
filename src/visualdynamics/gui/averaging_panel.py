@@ -401,6 +401,15 @@ class AveragingPanel(QWidget):
         if settled != self.averaging():
             self.set_averaging(settled)
         else:
+            # the limits follow the edit too: a shorter frame or a wider
+            # overlap leaves room for more frames, and a Frames box still
+            # capped at the old count would stop short of them until the
+            # record was selected again
+            self._loading = True
+            try:
+                self._apply_limits(settled)
+            finally:
+                self._loading = False
             self._restate(settled)
         self.changed.emit(settled)
 

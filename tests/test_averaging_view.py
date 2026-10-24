@@ -287,6 +287,26 @@ def test_a_continuous_capture_can_be(window, pump):
     assert window.data_pane.averaging_panel.frames_box.isEnabled()
 
 
+def test_a_shorter_frame_raises_the_frames_limit_at_once(window, pump):
+    """Lengthening the frame caps the count; shortening it again leaves
+    room for more frames, and the Frames box must allow them at once,
+    not after the record is selected again."""
+    looking_at(window, pump, MODAL)
+    show_averaging(window, pump)
+    panel = window.data_pane.averaging_panel
+    panel.length_box.setValue(8192)
+    pump()
+    capped = panel.frames_box.maximum()
+    panel.length_box.setValue(1024)
+    pump()
+    room = panel.averaging().most_frames(panel.samples, panel.sample_rate)
+    assert room > capped
+    assert panel.frames_box.maximum() == room
+    panel.frames_box.setValue(room)
+    pump()
+    assert panel.frames_box.value() == room
+
+
 # ---- what the table works out for you -----------------------------------
 
 

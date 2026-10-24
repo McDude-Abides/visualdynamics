@@ -153,11 +153,16 @@ class StatisticsPanel(QWidget):
         is drawn in, None while the range is unticked or unset),
         'margin' as a share, 'frame' and 'duration' in seconds ('frame'
         None to size it from the bandwidth, 'duration' None for the
-        record's own length), and 'kurtosis_band'."""
-        given = self.range_box.isChecked() and self.range_value.value() > 0
+        record's own length), 'kurtosis_band', and 'range_given', the
+        tick itself: ticked with no range typed yet reads no range, but
+        the tick has to survive the redraw it causes, or the box springs
+        back before a range can be typed."""
+        ticked = self.range_box.isChecked()
+        given = ticked and self.range_value.value() > 0
         duration = self.duration_box.value()
         frame = self.frame_box.value()
         return {'full_scale': self.range_value.value() if given else None,
+                'range_given': ticked,
                 'margin': self.margin_box.value() / 100.0,
                 'frame': frame if frame > FROM_BAND else None,
                 'duration': duration if duration > 0.0 else None,
@@ -172,7 +177,8 @@ class StatisticsPanel(QWidget):
         self._loading = True
         try:
             full_scale = settings.get('full_scale')
-            self.range_box.setChecked(full_scale is not None)
+            self.range_box.setChecked(settings.get('range_given',
+                                                   full_scale is not None))
             if full_scale is not None:
                 self.range_value.setValue(full_scale)
             self.margin_box.setValue(100.0 * settings.get('margin',

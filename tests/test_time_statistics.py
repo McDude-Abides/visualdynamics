@@ -826,6 +826,28 @@ def test_a_range_typed_in_the_panel_counts_the_rail(window, pump, clean):
     assert 'kurtosis_band=(2.0, 4.0)' in line
 
 
+def test_range_given_stays_ticked_before_a_range_is_typed(
+        window, pump, clean):
+    """Ticking Range given with no range typed yet reads no range, and
+    the redraw that follows must not untick it, or a range can never be
+    typed in the window."""
+    pane = _statistics(window, pump,
+                       history(np.clip(clean, -25.0, 25.0)))
+    panel = pane.statistics_panel
+    assert panel.range_value.value() == 0
+    panel.range_box.setChecked(True)
+    pump()
+    assert panel.range_box.isChecked()
+    assert not panel.editors['range_value'].isHidden()
+    assert panel.values['rail'].text() == '—'
+    window.render_current()
+    pump()
+    assert panel.range_box.isChecked()
+    panel.range_value.setValue(25.0)
+    pump()
+    assert panel.values['rail'].text() == '287 (0.47 %)'
+
+
 def test_the_kurtosis_band_set_tighter_in_the_panel_flags_the_clip(
         window, pump, clean):
     pane = _statistics(window, pump,
