@@ -434,6 +434,169 @@ def _mean_squares(values: np.ndarray, phase: np.ndarray,
     return (running[ends] - running[at] + piece) / covered
 
 
+@dataclass(frozen=True, kw_only=True, eq=False)
+class _Lines:
+    """What a reading of one tone at its extraction's lines works from,
+    laid on the recording: the level and the tone read, the channels and
+    their rows, the tone's stretch of the record and its phase, the span
+    of `cycles` cycles about each line, which lines reach a tone the
+    levels do not hold, and every tone the levels hold over the stretch,
+    laid on the record's samples (the read tone first) as (phase,
+    frequency, offset into the stretch, whether its clock drifted). The
+    distortion check and the frequency check (`core.sine_frequency`)
+    read the same lines of the same tones, so they are laid here once."""
+
+    dt: float
+    level: Any
+    chosen: Any
+    cycles: float
+    smoothing: float
+    wanted: list[str]
+    picks: list[int]
+    rows: list[int]
+    first: int
+    last: int
+    frequency: np.ndarray
+    phase: np.ndarray
+    seconds: np.ndarray
+    ends: np.ndarray
+    starts: np.ndarray
+    shared: np.ndarray
+    laid: list[tuple[np.ndarray, np.ndarray, int, bool]]
+
+
+def _tone_lines(history: Any, specification: SineSweepSpecification,
+                levels: SineLevelSet | None, *, tone: str | None,
+                channels: Sequence[str] | None, cycles: float | None,
+                doing: str, reading: str) -> _Lines:
+    """Lay one tone's lines on the recording for a reading over `cycles`
+    cycles about each (`_Lines`), extracting the levels first when none
+    are given, as the project verb would. `doing` names the reading in an
+    uneven record's refusal and `reading` what is read over the span, in
+    the refusals that name it. Raises ValueError for every refusal
+    `check_distortion` lists but the tolerance's."""
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float), doing)
+    if levels is None:
+        setting = (history.sine_extraction
+                   or history.suggest_sine_extraction())
+        levels = extract_sine(history, specification, cycles=setting.cycles,
+                              refine=setting.refine,
+                              target_db=setting.target_db)
+    if not len(levels):
+        raise ValueError('the levels hold no tone; extract them first')
+    if tone is not None and tone not in levels.tone_names:
+        raise ValueError(f'the levels hold no tone {tone!r}; they hold '
+                         f'{levels.tone_names}')
+    level = levels.levels[0] if tone is None else levels.tone(tone)
+    chosen = specification.tone(level.tone)
+    if cycles is None:
+        cycles = levels.cycles
+    if cycles is None:
+        raise ValueError('these levels do not say what smoothing they '
+                         'were read with; give cycles=')
+    cycles = float(cycles)
+    if not cycles > 0.0:
+        raise ValueError(f'{reading} is read over more than zero cycles')
+    smoothing = float(levels.cycles if levels.cycles is not None
+                      else cycles)
+    held = [str(dof) for dof in level.response_dof]
+    wanted = held if channels is None else [str(dof) for dof in channels]
+    missing = [dof for dof in wanted if dof not in held]
+    if missing:
+        raise ValueError(f'the levels hold no reading for {missing}; they '
+                         f'hold {held}')
+    picks = [held.index(dof) for dof in wanted]
+    level_dims = list(level.ordinate_dim)
+    rows = [_row_of(history, dof, str(level_dims[p]))
+            for dof, p in zip(wanted, picks, strict=True)]
+
+    samples = history.ordinate.shape[1]
+    first, last, frequency, phase = _laid(history, chosen, level.onset, dt)
+    if phase[-1] - phase[0] < 2.0 * np.pi * cycles:
+        raise ValueError(
+            f'{chosen.name}: the recording holds '
+            f'{(phase[-1] - phase[0]) / (2.0 * np.pi):.3g} cycles of the '
+            f'tone, less than the {cycles:g} {reading} is read over')
+    if level.seconds is None:
+        raise ValueError(
+            f'{chosen.name}: the levels do not say when each line was '
+            'read, so there is no span of the recording to check. Extract '
+            'them from the recording again')
+    seconds = np.asarray(level.seconds, dtype=float)
+    at = np.round(seconds / dt).astype(np.int64)
+    if len(at) and (at.min() < first or at.max() >= min(last, samples)):
+        raise ValueError(
+            f'{chosen.name}: the levels were read at times from '
+            f'{seconds.min():.4g} to {seconds.max():.4g} s, outside the '
+            f"tone's stretch of this recording; they are of another "
+            'record, or of this one before it changed. Extract them again')
+    lines = np.clip(at - first, 0, last - first - 1)
+    spans = [_span(phase, int(k), cycles) for k in lines]
+    ends = np.array([end for end, _start in spans], dtype=np.int64)
+    starts = np.array([start for _end, start in spans], dtype=float)
+    # each span's ends in recording seconds, for the other tones' share
+    t0 = (first + np.interp(starts, phase, np.arange(len(phase)))) * dt
+    t1 = (first + ends) * dt
+
+    # a tone of the specification the levels do not hold cannot be
+    # rebuilt, so a span reaching it at all is not judged
+    windows = _live_windows(specification, chosen, level.onset)
+    extracted = set(levels.tone_names)
+    shared = np.zeros(len(seconds), dtype=bool)
+    for name, (lo, hi) in windows.items():
+        if name not in extracted:
+            shared |= _overlap(t0, t1, lo, hi) > 0.0
+
+    # every tone the levels hold over the checked tone's stretch, laid on
+    # the record's samples from its own onset, the checked tone first
+    laid = []
+    for other in [level] + [o for o in levels.levels if o is not level]:
+        if other is level:
+            o_first, o_last, o_frequency, o_phase = (first, last,
+                                                     frequency, phase)
+        else:
+            try:
+                o_first, o_last, o_frequency, o_phase = _laid(
+                    history, specification.tone(other.tone), other.onset, dt)
+            except ValueError:
+                continue                       # none of it on the record
+        lo, hi = max(o_first, first), min(o_last, last)
+        if hi - lo < 2:
+            continue
+        laid.append((o_phase[lo - o_first:hi - o_first],
+                     o_frequency[lo - o_first:hi - o_first], lo - first,
+                     bool(other.drift_hz)))
+    return _Lines(dt=dt, level=level, chosen=chosen, cycles=cycles,
+                  smoothing=smoothing, wanted=wanted, picks=picks, rows=rows,
+                  first=first, last=last, frequency=frequency, phase=phase,
+                  seconds=seconds, ends=ends, starts=starts, shared=shared,
+                  laid=laid)
+
+
+def _rebuilt(x: np.ndarray, laid: Sequence[tuple], dt: float,
+             smoothing: float, unwind: Sequence[bool]
+             ) -> tuple[list[np.ndarray], list[int], list[np.ndarray]]:
+    """Every laid tone solved jointly on one channel's stretch `x` by the
+    extraction's estimator with its smoothing: (the arguments the
+    envelopes sit on, their offsets into the stretch, the complex
+    envelopes). Each tone `unwind` marks has the slow phase its envelope
+    turned through fitted and taken into its argument (`_unwound`), and
+    the solve is repeated: the distortion check does it for a tone whose
+    clock the extraction moved, the frequency check for every tone, so a
+    tone off its specified frequency is held inside the filter's band."""
+    arguments = [argument for argument, _f, _o, _d in laid]
+    frequencies = [f for _a, f, _o, _d in laid]
+    offsets = [offset for _a, _f, offset, _d in laid]
+    envelopes = vold_kalman(x, arguments, frequencies, offsets, dt, smoothing)
+    if any(unwind):
+        arguments = [_unwound(argument, envelope, dt) if moved else argument
+                     for argument, envelope, moved
+                     in zip(arguments, envelopes, unwind, strict=True)]
+        envelopes = vold_kalman(x, arguments, frequencies, offsets, dt,
+                                smoothing)
+    return arguments, offsets, envelopes
+
+
 def check_distortion(history: Any, specification: SineSweepSpecification,
                      levels: SineLevelSet | None = None, *,
                      tone: str | None = None,
@@ -491,98 +654,15 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
         lines could be judged, and the tolerance.
     """
     distortion_limit(excess)                  # refuses a bad tolerance
-    dt = _even_steps(np.asarray(history.abscissa, dtype=float),
-                     'Checking sine distortion')
-    if levels is None:
-        setting = (history.sine_extraction
-                   or history.suggest_sine_extraction())
-        levels = extract_sine(history, specification, cycles=setting.cycles,
-                              refine=setting.refine,
-                              target_db=setting.target_db)
-    if not len(levels):
-        raise ValueError('the levels hold no tone; extract them first')
-    if tone is not None and tone not in levels.tone_names:
-        raise ValueError(f'the levels hold no tone {tone!r}; they hold '
-                         f'{levels.tone_names}')
-    level = levels.levels[0] if tone is None else levels.tone(tone)
-    chosen = specification.tone(level.tone)
-    if cycles is None:
-        cycles = levels.cycles
-    if cycles is None:
-        raise ValueError('these levels do not say what smoothing they '
-                         'were read with; give cycles=')
-    cycles = float(cycles)
-    if not cycles > 0.0:
-        raise ValueError('the RMS is read over more than zero cycles')
-    smoothing = float(levels.cycles if levels.cycles is not None
-                      else cycles)
-    held = [str(dof) for dof in level.response_dof]
-    wanted = held if channels is None else [str(dof) for dof in channels]
-    missing = [dof for dof in wanted if dof not in held]
-    if missing:
-        raise ValueError(f'the levels hold no reading for {missing}; they '
-                         f'hold {held}')
-    picks = [held.index(dof) for dof in wanted]
-    level_dims = list(level.ordinate_dim)
-    rows = [_row_of(history, dof, str(level_dims[p]))
-            for dof, p in zip(wanted, picks, strict=True)]
-
-    samples = history.ordinate.shape[1]
-    first, last, frequency, phase = _laid(history, chosen, level.onset, dt)
-    if phase[-1] - phase[0] < 2.0 * np.pi * cycles:
-        raise ValueError(
-            f'{chosen.name}: the recording holds '
-            f'{(phase[-1] - phase[0]) / (2.0 * np.pi):.3g} cycles of the '
-            f'tone, less than the {cycles:g} the RMS is read over')
-    if level.seconds is None:
-        raise ValueError(
-            f'{chosen.name}: the levels do not say when each line was '
-            'read, so there is no span of the recording to check. Extract '
-            'them from the recording again')
-    seconds = np.asarray(level.seconds, dtype=float)
-    at = np.round(seconds / dt).astype(np.int64)
-    if len(at) and (at.min() < first or at.max() >= min(last, samples)):
-        raise ValueError(
-            f'{chosen.name}: the levels were read at times from '
-            f'{seconds.min():.4g} to {seconds.max():.4g} s, outside the '
-            f"tone's stretch of this recording; they are of another "
-            'record, or of this one before it changed. Extract them again')
-    lines = np.clip(at - first, 0, last - first - 1)
-    spans = [_span(phase, int(k), cycles) for k in lines]
-    ends = np.array([end for end, _start in spans], dtype=np.int64)
-    starts = np.array([start for _end, start in spans], dtype=float)
-    # each span's ends in recording seconds, for the other tones' share
-    t0 = (first + np.interp(starts, phase, np.arange(len(phase)))) * dt
-    t1 = (first + ends) * dt
-
-    # a tone of the specification the levels do not hold cannot be
-    # rebuilt, so a span reaching it at all is not judged
-    windows = _live_windows(specification, chosen, level.onset)
-    extracted = set(levels.tone_names)
-    shared = np.zeros(len(seconds), dtype=bool)
-    for name, (lo, hi) in windows.items():
-        if name not in extracted:
-            shared |= _overlap(t0, t1, lo, hi) > 0.0
-
-    # every tone the levels hold over the checked tone's stretch, laid on
-    # the record's samples from its own onset, the checked tone first
-    laid = []
-    for other in [level] + [o for o in levels.levels if o is not level]:
-        if other is level:
-            o_first, o_last, o_frequency, o_phase = (first, last,
-                                                     frequency, phase)
-        else:
-            try:
-                o_first, o_last, o_frequency, o_phase = _laid(
-                    history, specification.tone(other.tone), other.onset, dt)
-            except ValueError:
-                continue                       # none of it on the record
-        lo, hi = max(o_first, first), min(o_last, last)
-        if hi - lo < 2:
-            continue
-        laid.append((o_phase[lo - o_first:hi - o_first],
-                     o_frequency[lo - o_first:hi - o_first], lo - first,
-                     bool(other.drift_hz)))
+    lines = _tone_lines(history, specification, levels, tone=tone,
+                        channels=channels, cycles=cycles,
+                        doing='Checking sine distortion', reading='the RMS')
+    level, chosen, cycles = lines.level, lines.chosen, lines.cycles
+    wanted, picks, rows = lines.wanted, lines.picks, lines.rows
+    first, last, phase = lines.first, lines.last, lines.phase
+    ends, starts, seconds = lines.ends, lines.starts, lines.seconds
+    shared, laid = lines.shared, lines.laid
+    dt = lines.dt
 
     count = len(seconds)
     unfiltered = np.full((len(rows), count), np.nan)
@@ -600,21 +680,9 @@ def check_distortion(history: Any, specification: SineSweepSpecification,
                          'number, so no line is judged')
             continue
         x = x - np.mean(x)
-        arguments = [argument for argument, _f, _o, _d in laid]
-        frequencies = [f for _a, f, _o, _d in laid]
-        offsets = [offset for _a, _f, offset, _d in laid]
-        envelopes = vold_kalman(x, arguments, frequencies, offsets, dt,
-                                smoothing)
-        if any(drifted for *_rest, drifted in laid):
-            # the extraction moved this sweep's clock; the rebuild fits
-            # the same kind of correction to its own envelopes and
-            # solves again, so a drifted tone is not rebuilt off itself
-            arguments = [_unwound(argument, envelope, dt) if drifted
-                         else argument
-                         for (argument, *_rest, drifted), envelope
-                         in zip(laid, envelopes, strict=True)]
-            envelopes = vold_kalman(x, arguments, frequencies, offsets, dt,
-                                    smoothing)
+        arguments, offsets, envelopes = _rebuilt(
+            x, laid, dt, lines.smoothing,
+            [drifted for *_rest, drifted in laid])
         tones = np.zeros(len(x))
         for argument, offset, envelope in zip(arguments, offsets,
                                               envelopes, strict=True):

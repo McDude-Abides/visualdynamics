@@ -970,6 +970,8 @@ class MainWindow(QMainWindow):
         self.data_pane.sine_panel.dwell.read.connect(self._journal_dwell)
         self.data_pane.sine_panel.distortion.read.connect(
             self._journal_distortion)
+        self.data_pane.sine_panel.frequency.read.connect(
+            self._journal_frequency)
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(
@@ -12009,10 +12011,14 @@ class MainWindow(QMainWindow):
         # none, since it reads the extraction and never runs it, and
         # says so rather than checking levels whose settings have moved
         levels = self._extracted_levels(history, specs[0])
-        panel.distortion.show_distortion(
-            history, specs[0], levels,
-            stale=None if levels is None
-            else self._stale.get(self.project.name_of(levels)))
+        stale = (None if levels is None
+                 else self._stale.get(self.project.name_of(levels)))
+        panel.distortion.show_distortion(history, specs[0], levels,
+                                         stale=stale)
+        # and whether the tone was at the frequency the profile asks for,
+        # read the same way from the same levels
+        panel.frequency.show_frequency(history, specs[0], levels,
+                                       stale=stale)
 
     def _journal_dwell(self, history, specification, reading):
         """The dwell readout, journaled as the headless call that draws
@@ -12067,6 +12073,26 @@ class MainWindow(QMainWindow):
             prefix,
             f'{prefix}, tone={check.tone!r}, channel={dof!r}, '
             f"excess={check.excess!r}, path='distortion.png', show=False)")
+
+    def _journal_frequency(self, history, specification, levels, check,
+                           dof):
+        """The frequency readout, journaled as the headless call that
+        draws it (`_journal_view`): `plot_sine_frequency` with the tone,
+        the channel and the band the readout used."""
+        try:
+            record = self.project.name_of(history)
+            sweep = self.project.name_of(specification)
+            extracted = self.project.name_of(levels)
+        except (KeyError, ValueError):
+            return
+        prefix = ('visualdynamics.plot.plot_sine_frequency('
+                  f'project[{record!r}], project[{sweep!r}], '
+                  f'project[{extracted!r}]')
+        self._journal_view(
+            prefix,
+            f'{prefix}, tone={check.tone!r}, channel={dof!r}, '
+            f'tolerance={check.tolerance!r}, floor={check.floor!r}, '
+            "path='frequency.png', show=False)")
 
     def _octave_source(self, series):
         """The one density the octave reading would band — a PSD, a

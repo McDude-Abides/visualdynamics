@@ -525,6 +525,15 @@ def test_the_plot_draws_to_a_file_with_no_window(tmp_path):
 # ---- the readout in the window --------------------------------------------------
 
 
+def _journaled(window):
+    """The distortion readout's line in the journal: the frequency
+    readout under it journals its own line too, each settling in place."""
+    lines = [line for line in window.project.journal
+             if line.startswith('visualdynamics.plot.plot_sine_distortion(')]
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
 def _shown(window, pump, history, spec, extract=True):
     window.add_object('Record', history)
     window.add_object('Sweep', spec)
@@ -557,7 +566,7 @@ def test_the_readout_checks_the_extracted_levels_in_the_sine_view(window,
     assert panel.derived['verdict'].text() == 'over the limit'
     assert panel.derived['over'].text().endswith(' Hz')
     assert panel.preview.items, 'the distortion against frequency is drawn'
-    assert window.project.journal[-1] == (
+    assert _journaled(window) == (
         "visualdynamics.plot.plot_sine_distortion(project['Record'], "
         "project['Sweep'], project['Sine Levels'], tone='Up', "
         "channel='101Z+', excess=0.05, path='distortion.png', show=False)")
@@ -580,7 +589,7 @@ def test_a_tolerance_edit_reads_again_without_reading_the_record(window,
         'the RMS readings are kept; only the judgement moved'
     assert panel.derived['verdict'].text() == 'within the limit'
     assert panel.derived['limit'].text() == '56.8 % (-4.9 dB)'
-    assert 'excess=0.15,' in window.project.journal[-1]
+    assert 'excess=0.15,' in _journaled(window)
 
 
 def test_stale_levels_are_said_to_be_stale_and_not_checked(window, pump):

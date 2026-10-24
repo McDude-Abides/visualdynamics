@@ -5081,6 +5081,73 @@ def plot_sine_distortion(history: Any, specification: Any,
                         size=size)
 
 
+def plot_sine_frequency(history: Any, specification: Any,
+                        levels: Any = None, *, tone: str | None = None,
+                        channel: str | None = None,
+                        tolerance: float | None = None, floor: float = 0.0,
+                        cycles: float | None = None, theme: Any = None,
+                        path: str | os.PathLike | None = None,
+                        show: bool = True, title: str | None = None,
+                        size: tuple[int, int] = (1000, 620)) -> Any:
+    """Draw a sine tone's frequency error against frequency, the band
+    either side of zero.
+
+        visualdynamics.plot.plot_sine_frequency(history, spec, levels,
+                                                path='frequency.png')
+
+    The check is `core.sine_frequency.check_frequency`, with the same
+    arguments: the tone's own frequency on the channel against the
+    specification's, at every line of `levels` (extracted here when
+    omitted). It is drawn by `plot.sine_frequency.build_frequency`: the
+    band dashed, each control channel (or only `channel`) as a solid
+    curve with its own hollow marker, the same marker filled on a line
+    outside the band, and each named in the legend with its worst reading
+    and its verdict in words. The window's sine view reads the same check
+    in its Frequency readout.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The recording.
+    specification : SineSweepSpecification
+        The sweep the drive followed.
+    levels : SineLevelSet, optional
+        The levels extracted from `history`; extracted when omitted.
+    tone, floor, cycles
+        As for `core.sine_frequency.check_frequency`.
+    channel : str, optional
+        The one control channel drawn; every channel the levels hold by
+        default.
+    tolerance : float, optional
+        The band as a share of the frequency,
+        `core.sine_frequency.FREQUENCY_TOLERANCE` by default.
+    theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.sine_frequency import FREQUENCY_TOLERANCE, check_frequency
+    from .sine_frequency import build_frequency
+
+    check = check_frequency(
+        history, specification, levels, tone=tone,
+        channels=None if channel is None else [channel],
+        tolerance=FREQUENCY_TOLERANCE if tolerance is None else tolerance,
+        floor=floor, cycles=cycles)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_frequency(widget, check, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{check.tone}, frequency',
+                        size=size)
+
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,

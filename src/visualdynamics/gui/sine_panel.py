@@ -16,7 +16,9 @@ dwell, the dwell readout reads it against time (`gui.dwell_panel`); a
 held tone is one point over frequency, and its story is in time. And once
 the levels have been extracted, the distortion readout checks them
 against the record read unfiltered (`gui.distortion_panel`): what the
-channel carried besides the tone the extraction tracked.
+channel carried besides the tone the extraction tracked; and the
+frequency readout checks the tone's own frequency on the record against
+the specification's (`gui.frequency_panel`).
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from ..core.sine import CYCLES_LADDER, SineExtraction
 from .distortion_panel import DistortionPanel
 from .dwell_panel import DwellPanel
 from .editors import DoubleSpinBox, commit_on_enter
+from .frequency_panel import FrequencyPanel
 from .settings_panel import (
     PreviewPlot,
     add_derived,
@@ -198,7 +201,13 @@ class SinePanel(QWidget):
         self.distortion.hide()
         grid.addWidget(self.distortion, len(rows) + 5 + len(derived), 0, 1,
                        2)
-        grid.setRowStretch(len(rows) + 6 + len(derived), 1)
+        # and the frequency readout under it, the same way: the tone's own
+        # frequency on the record against the specification's
+        self.frequency: FrequencyPanel = FrequencyPanel()
+        self.frequency.hide()
+        grid.addWidget(self.frequency, len(rows) + 6 + len(derived), 0, 1,
+                       2)
+        grid.setRowStretch(len(rows) + 7 + len(derived), 1)
         commit_on_enter(self.cycles_box, self.target_box)
         self.mode_box.currentIndexChanged.connect(self._edited)
         self.cycles_box.valueChanged.connect(self._edited)
@@ -319,6 +328,7 @@ class SinePanel(QWidget):
             self.preview.show_samples(self._sampled)
         self.dwell.apply_theme(colors)
         self.distortion.apply_theme(colors)
+        self.frequency.apply_theme(colors)
 
 
 def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:

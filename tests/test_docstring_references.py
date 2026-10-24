@@ -74,6 +74,8 @@ THEORY = {
     'core.rms_check': 'the area under an autospectrum against the mean '
                       'square of its record, and the window that makes '
                       'it an estimate',
+    'core.sine_frequency': 'the estimator of the tone and the frequency '
+                           'band it is judged against',
 }
 
 #: and methods, where the theory lives on the call rather than the module
