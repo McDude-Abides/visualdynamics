@@ -391,22 +391,55 @@ def _row_of(history: Any, dof: str, dimension: str) -> int:
     return same[0]
 
 
-def _unwound(argument: np.ndarray, envelope: np.ndarray,
-             dt: float) -> np.ndarray:
+#: how far, in radians, a tone's argument may stand from a quadratic in
+#: time and still have its envelope's turning fitted as one: a tone off
+#: its schedule by any share under one turns its envelope from the
+#: quadratic by less than this
+_QUADRATIC_ARGUMENT = 1e-3
+
+
+def _unwound(argument: np.ndarray, envelope: np.ndarray, dt: float,
+             frequency: np.ndarray) -> np.ndarray:
     """`argument` with the slow phase its envelope turned through taken
-    into it: a quadratic in time fitted to the envelope's unwrapped
-    phase, weighted by its power, the kind of clock correction the
-    extraction applies. Solved again on the corrected argument the
-    envelope sits still, so the filter passes the tone in full."""
+    into it, fitted to the envelope's unwrapped phase weighted by its
+    power. Solved again on the corrected argument the envelope sits
+    still, so the filter passes the tone in full.
+
+    A tone whose argument is a quadratic in time (a linear sweep, a
+    dwell) has the turning fitted as a quadratic in time, the kind of
+    clock correction the extraction applies. Any other (a log sweep, a
+    sweep of segments at different rates) has it fitted on its own
+    argument and angular frequency, `frequency` in Hz at each sample: a
+    tone run at s times its schedule turns its envelope by (s - 1) times
+    the argument, and one late by d seconds by d times the angular
+    frequency, whatever the law. A quadratic in time misses a log
+    sweep's departure, and near the start of the stretch the part it
+    misses is read through the filter's band."""
     weight = np.abs(envelope) ** 2
     if not weight.sum() > 0.0 or len(argument) < 3:
         return argument
     u = (np.arange(len(argument)) - len(argument) / 2.0) * dt
     phase = np.unwrap(np.angle(envelope))
     root = np.sqrt(weight)
-    basis = np.stack([np.ones_like(u), u, u * u], axis=1) * root[:, None]
-    coefficients, *_rest = np.linalg.lstsq(basis, phase * root, rcond=None)
-    return argument + coefficients[1] * u + coefficients[2] * u * u
+    quadratic = np.stack([np.ones_like(u), u, u * u], axis=1)
+    shape, *_rest = np.linalg.lstsq(quadratic, argument, rcond=None)
+    if np.max(np.abs(argument - quadratic @ shape)) <= _QUADRATIC_ARGUMENT:
+        basis = quadratic * root[:, None]
+        coefficients, *_rest = np.linalg.lstsq(basis, phase * root,
+                                               rcond=None)
+        return argument + coefficients[1] * u + coefficients[2] * u * u
+    # each column scaled to one, so the cut-off below reads the two as
+    # shapes: on a log sweep the argument is the angular frequency times
+    # a constant less a constant, the two are one column, and lstsq takes
+    # the least-norm answer, whose fitted turning is the same
+    middle = len(argument) // 2
+    columns = [argument - argument[middle],
+               2.0 * np.pi * (frequency - frequency[middle])]
+    columns = [c / np.max(np.abs(c)) for c in columns]
+    basis = np.stack([np.ones_like(u)] + columns, axis=1)
+    coefficients, *_rest = np.linalg.lstsq(basis * root[:, None],
+                                           phase * root, rcond=1e-9)
+    return argument + basis[:, 1:] @ coefficients[1:]
 
 
 def _mean_squares(values: np.ndarray, phase: np.ndarray,
@@ -589,9 +622,11 @@ def _rebuilt(x: np.ndarray, laid: Sequence[tuple], dt: float,
     offsets = [offset for _a, _f, offset, _d in laid]
     envelopes = vold_kalman(x, arguments, frequencies, offsets, dt, smoothing)
     if any(unwind):
-        arguments = [_unwound(argument, envelope, dt) if moved else argument
-                     for argument, envelope, moved
-                     in zip(arguments, envelopes, unwind, strict=True)]
+        arguments = [_unwound(argument, envelope, dt, f) if moved
+                     else argument
+                     for argument, envelope, f, moved
+                     in zip(arguments, envelopes, frequencies, unwind,
+                            strict=True)]
         envelopes = vold_kalman(x, arguments, frequencies, offsets, dt,
                                 smoothing)
     return arguments, offsets, envelopes

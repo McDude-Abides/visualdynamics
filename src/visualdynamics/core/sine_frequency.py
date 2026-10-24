@@ -35,7 +35,11 @@ and taken into its argument and the tone solved again, as the extraction
 corrects a drifted sweep clock, so a tone well off its frequency is held
 inside the estimator's band rather than read through its skirt; the
 frequency read is the same either way, since the correction is added to
-the argument and taken out of the envelope.
+the argument and taken out of the envelope. On a linear sweep or a dwell
+the turning is fitted as a quadratic in time. On any other sweep, a log
+sweep among them, it is fitted on the sweep's own argument and angular
+frequency, which is how a tone run at a share off its schedule, or late
+on it, turns its envelope whatever the law.
 
 What the check reads, and what it does not:
 
@@ -56,15 +60,6 @@ What the check reads, and what it does not:
   is 0.15 Hz, 0.18 percent. A control channel rarely sits on a sharp
   mode, and where it does the offset is real: it is the frequency the
   channel carried.
-- The envelope's slow turning is fitted as a quadratic in time. A linear
-  sweep run at the wrong rate or on a late clock turns its envelope
-  exactly that way. A logarithmic sweep does not, and near the start of
-  its stretch the part the fit misses is read through the estimator's
-  band. The first lines of a log sweep off its schedule read the error
-  short there: a 20 to 200 Hz sweep at 8 octaves a minute run 1.5
-  percent ahead reads 1.35 to 1.49 percent over its first second, and
-  1.50 percent after it. A wider band, or a sweep further off, makes
-  the shortfall larger and carries it further in.
 - A line under the noise floor (`SineLevel.below_floor`), a line whose
   span reaches a tone of the specification the levels do not hold, a
   line with no tone on the channel (a dead channel) and every line of a

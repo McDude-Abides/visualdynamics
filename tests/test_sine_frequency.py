@@ -329,31 +329,66 @@ def test_a_record_off_zero_reads_the_same_frequency():
     assert offset.error[0] == pytest.approx(clean.error[0], abs=1e-4)
 
 
-def test_a_log_sweep_off_its_schedule_reads_its_own_share():
-    # 1.5 % ahead of a 20 to 200 Hz sweep at 8 octaves a minute. Before
-    # the phase is read, each envelope's turning is fitted as a quadratic
-    # in time, which a log sweep's departure is not, and the first second
-    # reads short (1.35, 1.46, 1.45 and 1.49 % here), as the module
-    # docstring says; those lines are left out of this pin. Fitting the
-    # turning in the sweep's own argument and frequency instead (a rate
-    # error and a clock error, exactly, for any law) read every line of
-    # this sweep within 0.002 %, but alone it failed four dwell tests; the
-    # fit is shared with the distortion check, so the change is left to
-    # be designed (2026-10-24).
-    tone = SineTone('Log', ONSET, [20.0, 200.0], [[AMPLITUDE]] * 2, [LOG],
-                    [8.0])
+def _log_sweep(low, high, rate, scale):
+    """A log sweep from `low` to `high` Hz at `rate` octaves a minute,
+    recorded `scale` times its specified frequency, and its levels."""
+    tone = SineTone('Log', ONSET, [low, high], [[AMPLITUDE]] * 2, [LOG],
+                    [rate])
     spec = SineSweepSpecification([tone], [CONTROL], ordinate_unit='m/s**2')
     n = int((ONSET + tone.duration() + 0.5) * FS)
     x = np.zeros(n)
     argument = tone.argument(1.0 / FS)
     start = int(ONSET * FS)
     m = min(len(argument), n - start)
-    x[start:start + m] = AMPLITUDE * np.cos(1.015 * argument[:m])
+    x[start:start + m] = AMPLITUDE * np.cos(scale * argument[:m])
     history = _record(x)
-    check = check_frequency(history, spec, _levels(history, spec))
-    settled = check.seconds - ONSET > 1.0
-    assert (~settled).sum() == 4
-    assert check.relative[0][settled] == pytest.approx(0.015, abs=1e-4)
+    return history, spec, _levels(history, spec)
+
+
+@pytest.mark.parametrize('low,high,rate', [(20.0, 200.0, 8.0),
+                                           (10.0, 1000.0, 4.0)])
+def test_a_log_sweep_off_its_schedule_reads_its_own_share(low, high, rate):
+    # A log sweep's departure from its schedule is no quadratic in time.
+    # Fitted as one, the turning the fit missed was read through the
+    # filter's band near the start: 1.35 to 1.49 % over the first second
+    # of the 20 to 200 Hz sweep, and -20.7 to +3.2 % over the first lines
+    # of the 10 to 1000 Hz one (2026-10-24). Every line is pinned here,
+    # judged or not: the wide sweep's extraction leaves its first 174
+    # lines under its noise floor, and they read 1.5 % all the same.
+    history, spec, levels = _log_sweep(low, high, rate, 1.015)
+    check = check_frequency(history, spec, levels)
+    assert np.isfinite(check.relative[0]).all()
+    assert check.relative[0] == pytest.approx(0.015, abs=1e-4)
+
+
+def test_a_sweep_of_two_laws_recorded_late_reads_how_far_behind_it_is():
+    # a log segment and then a linear one, recorded 0.2 s behind its
+    # schedule: the tone reads the frequency the schedule had 0.2 s
+    # earlier, up to 4 Hz below it. Late on any law, the envelope turns
+    # by the delay times the angular frequency, which is a column of the
+    # fit; without it the worst line here read 0.0043 Hz off rather than
+    # 0.0011 (2026-10-24).
+    tone = SineTone('Two', ONSET, [20.0, 100.0, 500.0], [[AMPLITUDE]] * 3,
+                    [LOG, 0], [8.0, 20.0])
+    spec = SineSweepSpecification([tone], [CONTROL], ordinate_unit='m/s**2')
+    late = 0.2
+    t = np.arange(int((ONSET + tone.duration() + 0.5) * FS)) / FS
+    since = t - ONSET - late
+    x = np.where((since >= 0.0) & (since < tone.duration()),
+                 AMPLITUDE * np.cos(tone.phase_at(np.clip(since, 0.0, None))),
+                 0.0)
+    history = _record(x)
+    levels = _levels(history, spec)
+    check = check_frequency(history, spec, levels)
+    when = check.seconds - ONSET
+    expected = tone.frequency_at(when - late) - tone.frequency_at(when)
+    # away from the ends, and from the breakpoint, where the frequency
+    # turns a corner inside the span
+    corner = float(np.interp(100.0, tone.frequency_at(when), when))
+    away = ((when > 0.5) & (when < tone.duration() - 0.5)
+            & (np.abs(when - corner) > 0.5))
+    assert away.sum() > 0.8 * len(away)
+    assert check.error[0][away] == pytest.approx(expected[away], abs=0.0025)
 
 
 def test_what_cannot_be_checked_is_refused():

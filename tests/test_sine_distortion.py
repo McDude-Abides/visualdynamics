@@ -19,6 +19,7 @@ from conftest import select_objects
 
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.sine import (
+    LOG,
     SineLevel,
     SineLevelSet,
     SineSweepSpecification,
@@ -406,6 +407,31 @@ def test_a_drifted_sweep_clock_is_rebuilt_on_its_tone():
     check = check_distortion(history, spec, levels)
     assert check.distortion[0][_inside(check)].max() < 0.01
     assert check.passed
+
+
+def test_a_log_sweep_off_its_schedule_is_rebuilt_on_its_tone():
+    """A 10 to 1000 Hz log sweep at 4 octaves a minute recorded 1.5 %
+    above its schedule: the extraction moves the clock, and the rebuild
+    must follow the tone the whole way, or the tone is rebuilt off itself
+    and read as distortion (more than 500 times the tone at its worst,
+    fitted as a quadratic in time, 2026-10-24)."""
+    spec_tone = SineTone('Log', 0.5, [10.0, 1000.0], [[2.0]] * 2, [LOG],
+                         [4.0])
+    spec = SineSweepSpecification([spec_tone], [CONTROL],
+                                  ordinate_unit='m/s**2')
+    n = int((0.5 + spec_tone.duration() + 0.5) * FS)
+    x = np.zeros(n)
+    start = int(0.5 * FS)
+    argument = spec_tone.argument(1.0 / FS)
+    m = min(len(argument), n - start)
+    x[start:start + m] = AMPLITUDE * np.cos(1.015 * argument[:m])
+    history = _record(x)
+    levels = extract_sine(history, spec, cycles=10.0, workers=1,
+                          onsets={'Log': 0.5})
+    assert levels.levels[0].drift_hz > 10.0
+    check = check_distortion(history, spec, levels)
+    assert np.isfinite(check.distortion[0]).all()
+    assert check.distortion[0].max() < 0.01
 
 
 def test_a_dead_channel_is_not_judged_and_does_not_pass():
