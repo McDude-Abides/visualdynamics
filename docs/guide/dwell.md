@@ -138,10 +138,9 @@ again and is journaled as the `plot_dwell` call that draws it.
   that reads no level at all over the dwell's last quarter, as a dead
   one does, is refused; read anyway, its zero would pass for a build-up
   done in one cycle.
-- The matched filter places a held tone's start to within a sample. A
-  pure tone looks the same one cycle along, so its edges place it; the
+- The matched filter places a held tone's start to within a sample on
+  a clean control; noise on the control moves it further. A pure tone
+  looks the same one cycle along, so its edges place it; the
   correlation is taken against the tone's cosine and sine together, so
-  the phase the tone starts at does not move it. (Against the cosine
-  alone, a tone starting at a zero crossing landed a quarter cycle late,
-  enough to move the ring-down count by half a cycle.) Give `onset=`
-  when the start is known otherwise.
+  the phase the tone starts at does not move it. Give `onset=` when the
+  start is known otherwise.

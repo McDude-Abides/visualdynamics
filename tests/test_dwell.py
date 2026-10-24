@@ -47,18 +47,20 @@ def _resonator(x, q):
     return lfilter(b[0], a[0], x)
 
 
-def _dwell_record(q=30.0, lead=0.0, on=None, off=None, tone=None):
+def _dwell_record(q=30.0, lead=0.0, on=None, off=None, tone=None,
+                  phase=0.0):
     """A 1 g tone at `FN` held `on` cycles (3Q by default) after `lead`
-    seconds of quiet, then `off` cycles (2Q) of nothing; the control
-    and the resonator's response, in m/s**2, and a specification that
-    holds the tone (`SineTone.dwell`, or `tone` when given)."""
+    seconds of quiet, starting `phase` radians into its sine, then `off`
+    cycles (2Q) of nothing; the control and the resonator's response, in
+    m/s**2, and a specification that holds the tone (`SineTone.dwell`, or
+    `tone` when given)."""
     on = int(3 * q) if on is None else on
     off = int(2 * q) if off is None else off
     n = np.arange(round(lead * RATE) + (on + off) * 200)
     t = n / RATE
     local = t - lead
-    x = np.sin(2.0 * np.pi * FN * local) * ((local >= 0.0)
-                                            & (local < on / FN - 1e-12))
+    x = np.sin(2.0 * np.pi * FN * local + phase) * (
+        (local >= 0.0) & (local < on / FN - 1e-12))
     y = _resonator(x, q)
     history = TimeHistory(t, np.vstack([x, y]) * G,
                           response_dof=[CONTROL, RESPONSE],
@@ -227,8 +229,11 @@ def test_the_tone_is_found_in_the_record():
     assert reading.share_at(30.0) == pytest.approx(0.957, abs=0.003)
 
 
+@pytest.mark.parametrize('phase', [0.0, np.pi / 2, np.pi, 1.234],
+                         ids=['0', 'pi/2', 'pi', '1.234'])
 @pytest.mark.parametrize('lead', [0.0, 0.37])
-def test_a_held_tone_is_found_where_it_starts_whatever_its_phase(lead):
+def test_a_held_tone_is_found_where_it_starts_whatever_its_phase(lead,
+                                                                  phase):
     """A held tone's start, not its phase. The matched filter correlated
     the record with the tone's cosine and squared it, which is zero
     where the template is in quadrature with the record, so on one
@@ -237,16 +242,23 @@ def test_a_held_tone_is_found_where_it_starts_whatever_its_phase(lead):
     quarter of a cycle late, and the readout (which sets no onset) read
     the ring-down to 5 % in 28.1 cycles where the onset given reads
     28.6. Correlated in quadrature it is found within a sample, and
-    the two readings agree."""
-    history, spec = _dwell_record(30.0, lead=lead)
+    the two readings agree, whatever the phase the tone starts at."""
+    history, spec = _dwell_record(30.0, lead=lead, phase=phase)
     given = read_dwell(history, spec, onset=lead)
     found = read_dwell(history, spec)
     assert found.onset == pytest.approx(lead, abs=1.5 / RATE), \
         'within a sample'
     assert found.built == pytest.approx(given.built, abs=0.05)
     assert found.rung == pytest.approx(given.rung, abs=0.05)
-    assert given.rung == pytest.approx(30.0 * np.log(20.0) / np.pi, abs=0.1), \
-        'Q ln 20 / pi cycles, by hand'
+    if phase in (0.0, np.pi):
+        # the tone is cut where in its cycle it started, and with the
+        # onset given the count moves with that by a fraction of a cycle
+        # (28.15 to 28.61 measured over the phase), the record's doing
+        # and not the onset's; the hand count is for a tone that starts
+        # and stops at a zero crossing
+        assert given.rung == pytest.approx(30.0 * np.log(20.0) / np.pi,
+                                           abs=0.1), \
+            'Q ln 20 / pi cycles, by hand'
 
 
 def test_a_band_reads_the_same_steady_level_and_lags_the_build_up():

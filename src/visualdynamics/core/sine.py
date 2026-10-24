@@ -720,39 +720,44 @@ def _tone_score(records: Any, dt: float, tone: SineTone) -> np.ndarray:
     record's (2026-10-01: a 23 GB run).
 
     The correlation is taken in quadrature, against the tone's cosine
-    and its sine together (one complex template), and the power is the
-    sum of both, so a tone is placed by where it starts and not by the
-    phase it starts at. Against the cosine alone the power is zero
-    where the template is in quadrature with the record; on a held
-    tone, whose start and phase one frequency cannot tell apart, that
-    took the crest nearest the start, and a tone starting at a zero
-    crossing, as a drive from rest does, was placed a quarter of a
-    cycle late (the dwell readout's ring-down read 28.1 cycles where
-    28.6 is right, 2026-10-24)."""
+    and its sine, and the power is the sum of both squares, so a tone
+    is placed by where it starts and not by the phase it starts at.
+    Against the cosine alone the power is zero where the template is
+    in quadrature with the record, so on a held tone, whose start and
+    phase one frequency cannot tell apart, it would take the crest
+    nearest the start."""
     from scipy.fft import set_workers
     from scipy.signal import oaconvolve
 
     records = [np.asarray(record) for record in records]
     length = len(records[0])
-    template = np.exp(1j * tone.argument(dt))
-    if length <= len(template):
+    argument = tone.argument(dt)
+    if length <= len(argument):
         # a recording that stopped mid-sweep still holds the sweep's
         # opening, and the opening aligns it: correlate on the half
         # that fits, leaving the other half as search room. Anything
         # shorter than one second of tone has nothing to lock onto.
-        template = template[:length // 2]
-        if len(template) < 1.0 / dt:
+        argument = argument[:length // 2]
+        if len(argument) < 1.0 / dt:
             raise ValueError(
                 f'{tone.name}: the recording '
                 f'({length * dt:.2f} s) holds less than a '
                 'second of the tone; nothing to align')
-    score = np.zeros(length - len(template) + 1)
-    flipped = template[::-1]
-    # the FFTs inside run on every core; nothing is copied for it
+    score = np.zeros(length - len(argument) + 1)
+    # 2026-10-24: against the cosine alone a tone starting at a zero
+    # crossing, as a drive from rest does, was placed a quarter of a
+    # cycle late, and the dwell readout's ring-down read 28.1 cycles
+    # where 28.6 is right. One complex template gave the same score but
+    # nearly doubled the peak memory (309 MB against 169 MB on a 240 s
+    # sweep at 8192 Hz): the record is real, so the cosine and sine
+    # passes are taken as two real correlations, one after the other.
+    # The FFTs inside run on every core; nothing is copied for it.
     with set_workers(_workers()):
-        for record in records:
-            score += np.abs(oaconvolve(np.asarray(record, dtype=float),
-                                       flipped, mode='valid')) ** 2
+        for part in (np.cos, np.sin):
+            flipped = part(argument)[::-1]
+            for record in records:
+                score += oaconvolve(np.asarray(record, dtype=float), flipped,
+                                    mode='valid') ** 2
     return score
 
 
