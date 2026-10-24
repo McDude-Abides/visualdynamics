@@ -2227,8 +2227,7 @@ def confidence_preview(items: Iterable[Any], psd: Any,
     darker; the edges of each level are dashed their own way
     (`BAND_STYLES`) and named in the legend with the confidence and the
     degrees of freedom the band was worked out at, '90 % confidence,
-    225.9 DOF', so each band is named in the legend and told apart by
-    its line style. The band is drawn behind the data and widens the
+    225.9 DOF'. The band is drawn behind the data and widens the
     plot's limits to take it in, so its top edge is not cut off at the
     highest peak.
 
