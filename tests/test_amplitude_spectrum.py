@@ -341,6 +341,38 @@ def test_a_dead_channel_is_named_not_read():
         spectrum.tallest(0)
 
 
+def test_a_constant_channel_is_named_not_read():
+    """A constant 0.3 g, its means taken out, leaves lines of 1e-17 g,
+    which once read as the tallest line."""
+    spectrum = framed(history(np.full(round(12.0 * RATE), 0.3))
+                      ).amplitude_spectrum()
+    with pytest.raises(ValueError, match='constant throughout'):
+        spectrum.tallest(0)
+    with pytest.raises(ValueError, match='constant throughout'):
+        spectrum.describe(0, 'g', 1.0 / G)
+
+
+@pytest.mark.parametrize('window, lowest', [
+    ('hann', 1), ('boxcar', 1), ('flattop', 3)])
+def test_the_lowest_line_read_is_the_window_s(window, lowest):
+    spectrum = framed(history(tone(500.0))).amplitude_spectrum(window=window)
+    assert spectrum.lowest_line == lowest
+
+
+def test_a_tone_below_the_flat_top_s_lowest_line_is_flagged():
+    """Under the flat top a 5 Hz tone on 5 Hz lines reads anywhere from
+    (10 Hz, 0.77 g) to (5 Hz, 1.64 g) with its phase: the reading says
+    so, and names the window that reads it."""
+    low = framed(history(tone(5.0)))
+    said = low.amplitude_spectrum(window='flattop').describe(0, 'g', 1 / G)
+    assert ('below 15 Hz the flattop window mixes a tone with its mirror '
+            'at negative frequency; read it under hann') in said
+    assert 'mixes' not in low.amplitude_spectrum().describe(0, 'g', 1 / G)
+    clear = framed(history(tone(15.0)))
+    said = clear.amplitude_spectrum(window='flattop').describe(0, 'g', 1 / G)
+    assert 'mixes' not in said
+
+
 def test_a_band_with_no_line_says_so():
     spectrum = framed(history(tone(10.0, 0.5))).amplitude_spectrum()
     with pytest.raises(ValueError, match='no line'):
@@ -551,6 +583,18 @@ def test_a_dead_channel_is_named_in_the_pane(window, pump):
     assert panel.derived['amplitude'].text() == '—'
     assert 'zero throughout' in panel.notes.text()
     assert 'zero throughout' in window.statusBar().currentMessage()
+
+
+def test_a_low_tone_under_the_flat_top_is_flagged_in_the_pane(window, pump):
+    pane = _amplitude(window, pump, framed(history(tone(5.0))))
+    panel = pane.amplitude_panel
+    assert 'mixes' not in panel.notes.text()
+    panel.window_box.setCurrentIndex(panel.window_box.findData('flattop'))
+    pump()
+    assert ('Below 15 Hz the flattop window mixes a tone with its mirror '
+            'at negative frequency; read it under hann.') in \
+        panel.notes.text()
+    assert 'read it under hann' in window.statusBar().currentMessage()
 
 
 def test_frames_that_do_not_fit_clear_the_reading(window, pump):

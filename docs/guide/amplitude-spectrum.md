@@ -66,6 +66,13 @@ half the floor. The floor of an amplitude spectrum is not a level. A
 random record's level is read from its ASD, and its tones from its
 amplitude spectrum.
 
+A tone that is not well clear of the floor reads high, because the
+floor's magnitude adds to the tone's in every frame and does not
+average away. On a 0.89 grms floor from 20 to 2,000 Hz, read at 5 Hz
+lines under Hann, the floor alone reads about 0.069 g and a 0.05 g peak
+tone reads about 0.08 g, some 4 dB high. A tone ten times the floor
+reads within about a percent.
+
 ## From a script
 
 `TimeHistory.amplitude_spectrum` reads every channel. The frames are
@@ -101,9 +108,12 @@ read as a tone, and a real tone on those lines is: 5 Hz at 5 Hz lines
 reads 5 Hz under Hann. The drawn curve keeps the mean, at DC and where
 it leaks. A tone's own mirror at negative frequency is 2k lines from a
 tone on line k, and inside the main lobe the two add, so the flat top,
-whose lobe reaches five lines, reads a tone exactly from line 3 up. A
-channel that is zero throughout, or holds samples that are not finite,
-is named as such rather than read. `coherent_gain`,
+whose lobe reaches five lines, reads a tone exactly from line 3 up.
+`lowest_line` is that line for the window chosen (1 for Hann), and when
+the tallest line falls below it, `describe` and the pane say that the
+window mixes a tone with its mirror there and that Hann reads it. A
+channel that is zero throughout, constant throughout, or holds samples
+that are not finite, is named as such rather than read. `coherent_gain`,
 `amplitude_correction` and
 `scalloping` in `visualdynamics.core.amplitude_spectrum` are the
 window's arithmetic on its own.

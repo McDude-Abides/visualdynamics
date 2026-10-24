@@ -13,8 +13,9 @@ Under the rule are the reading's numbers: where the frames came from,
 the line spacing and how many frames were averaged, the window's
 coherent gain and the amplitude correction it gives, its noise
 bandwidth, how far low it reads a sine midway between lines, and the
-tallest line above DC in peak and in rms. Under them, in words, what an
-amplitude spectrum's floor is not. Nothing is made: the reading is of a
+tallest line above DC in peak and in rms. Under them, in words, a
+tallest line too low for the window to read, and what an amplitude
+spectrum's floor is not. Nothing is made: the reading is of a
 record that already exists, as the time statistics are, so there is no
 Apply button.
 """
@@ -44,7 +45,9 @@ ROWS = (('channel', 'Channel'), ('source', 'Frames from'),
 #: what is said under the numbers whatever the window: what the average
 #: of magnitudes does to a tone, and what it does not make of a floor
 FLOOR_NOTE = ('The frames\' magnitudes are averaged, so a tone reads its '
-              'amplitude whatever its phase in each frame. The floor '
+              'amplitude whatever its phase in each frame. A tone not '
+              'well clear of the floor reads high, since the floor adds '
+              'to it in every frame and does not average away. The floor '
               'between tones is not a level: it moves with the line '
               'spacing and the window. A random level is read from the '
               'ASD.')
@@ -188,6 +191,9 @@ class AmplitudePanel(QWidget):
             return
         notes = [] if unread is None else [unread[:1].upper() + unread[1:]
                                            + '.']
+        mirror = None if tallest is None else spectrum.mirror_note(tallest[0])
+        if mirror is not None:
+            notes.append(mirror[:1].upper() + mirror[1:] + '.')
         notes.append(FLOOR_NOTE)
         if spectrum.scalloping_db > 0.1:
             # the tallest line is the reading, and between lines it is

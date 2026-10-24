@@ -31,7 +31,9 @@ record saved as captures with a fresh phase each, keeps its amplitude
 where a complex mean would shrink it. A broadband floor reads its mean
 magnitude per line, which is not a level: it moves with the line spacing
 and the window, and a random record's level is read from its ASD. An
-amplitude spectrum is for tones.
+amplitude spectrum is for tones. The same averaging makes a tone that is
+not well clear of the floor read high: the floor's magnitude adds to the
+tone's in every frame and does not average away.
 
 The window is chosen here, not taken from the record's averaging. The
 frames are the averaging's (its frame length, overlap, start, frame
@@ -73,6 +75,11 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
+
+#: a channel whose lines above DC, its frames' means taken out, are no
+#: more than this share of its largest line, DC included, is constant:
+#: what is left is rounding, not a tone
+CONSTANT_SHARE = 1e-9
 
 #: the frame the window's arithmetic is worked out on when no frame
 #: length is given. A periodic cosine-sum window's mean is its first
@@ -202,6 +209,9 @@ class AmplitudeSpectrum:
     when the averaging levels its frames already.
     `from_averaging` says whether the frames are the record's averaging
     (False: each record whole as one frame, the record having none).
+    `lowest_line` is the lowest line a tone is read on exactly under this
+    window: below it the tone's mirror at negative frequency is inside
+    the main lobe (1 for Hann, 3 for the flat top).
     """
 
     frequencies: np.ndarray
@@ -220,6 +230,7 @@ class AmplitudeSpectrum:
     leveled: np.ndarray | None = None
     from_averaging: bool = True
     labels: list[str] = field(default_factory=list)
+    lowest_line: int = 1
 
     @property
     def correction(self) -> float:
@@ -256,7 +267,8 @@ class AmplitudeSpectrum:
         reads its own line and amplitude under Hann. A tone's own
         mirror at negative frequency lies 2k lines from it, and while
         that is inside the main lobe the two add: the flat top's lobe
-        reaches five lines, so its lowest line read exactly is line 3.
+        reaches five lines, so its lowest line read exactly is line 3
+        (`lowest_line`, and `mirror_note` says so).
 
         `band` is (low, high) in Hz to look within; the whole spectrum
         above DC when omitted. A line that is not a number is passed
@@ -267,8 +279,9 @@ class AmplitudeSpectrum:
         ValueError
             When no line of the channel is a number (it holds samples
             that are not finite), when every line is zero (the channel
-            is zero throughout, or in the band), or when the band holds
-            no line above DC.
+            is zero throughout, or in the band), when the channel is
+            constant (its lines above DC are rounding beside its mean),
+            or when the band holds no line above DC.
         """
         f = self.frequencies
         read = self.amplitude if self.leveled is None else self.leveled
@@ -278,7 +291,16 @@ class AmplitudeSpectrum:
         if not finite.any():
             raise ValueError(f'{name} holds samples that are not finite, so '
                              'no line of its spectrum is a number')
-        keep = (np.arange(len(f)) >= 1) & finite
+        above = (np.arange(len(f)) >= 1) & finite
+        drawn = np.asarray(self.amplitude[record], dtype=np.float64)
+        largest = float(np.max(np.abs(drawn[np.isfinite(drawn)]), initial=0.0))
+        # a constant channel's mean, taken out, leaves lines of 1e-17 of
+        # it, which would be read as the tallest line
+        if (largest > 0.0 and above.any()
+                and np.max(values[above]) <= CONSTANT_SHARE * largest):
+            raise ValueError(f'{name} is constant throughout: there is no '
+                             'tone to read')
+        keep = above
         if band is not None:
             low, high = band
             keep &= (f >= low) & (f <= high)
@@ -290,6 +312,17 @@ class AmplitudeSpectrum:
             raise ValueError(f'{name} is {where}: there is no tone to read')
         at = int(np.flatnonzero(keep)[np.argmax(values[keep])])
         return float(f[at]), float(values[at])
+
+    def mirror_note(self, frequency: float) -> str | None:
+        """What to say of a tallest line read at `frequency` Hz when it
+        is below `lowest_line`, where the window mixes a tone with its
+        own mirror and neither the line nor the amplitude is the tone's;
+        None at or above it."""
+        below = self.lowest_line * self.spacing
+        if frequency >= below:
+            return None
+        return (f'below {below:g} Hz the {self.window} window mixes a tone '
+                'with its mirror at negative frequency; read it under hann')
 
     def correction_text(self) -> str:
         """The window and its correction, in words, as the plot and the
@@ -306,10 +339,11 @@ class AmplitudeSpectrum:
         `scale` converts the amplitude into `unit`."""
         frequency, amplitude = self.tallest(record)
         value = f'{amplitude * scale:.4g} {unit} peak'.replace('  ', ' ')
+        note = self.mirror_note(frequency)
         return (f'{self.label(record)}: tallest line {value} at '
                 f'{frequency:.4g} Hz; {self.correction_text()}, '
                 f'{_frames_text(self.frames[record])} averaged as '
-                'magnitudes')
+                'magnitudes' + ('' if note is None else f'; {note}'))
 
 
 def _frames_text(count: int) -> str:
@@ -371,7 +405,7 @@ def amplitude_spectrum(history: Any, averaging: Any = None, *,
         the record, or the window is not one offered.
     """
     from .averaging import normalize_window
-    from .tone_readout import noise_bandwidth
+    from .tone_readout import leakage, noise_bandwidth
 
     key = normalize_window(window)
     given = averaging if averaging is not None else history.averaging
@@ -415,4 +449,7 @@ def amplitude_spectrum(history: Any, averaging: Any = None, *,
         leveled=(amplitude if leveled is groups
                  else np.asarray(flat, dtype=np.float64)),
         from_averaging=given is not None,
-        labels=labels)
+        labels=labels,
+        # a tone on line k has its mirror 2k lines off, and the two part
+        # once that reaches the main lobe's edge, its half-width
+        lowest_line=int(np.ceil(leakage(used).half_width / 2)))
