@@ -56,8 +56,8 @@ from .pattern_panel import PatternPanel
 from .profile_panel import ProfilePanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
-from .rms_check_panel import RmsCheckPanel
 from .resample_panel import ResamplePanel
+from .rms_check_panel import RmsCheckPanel
 from .segments_panel import SegmentsPanel
 from .settings_panel import PANEL_WIDTH
 from .shock_panel import ShockPanel
