@@ -123,8 +123,8 @@ arrays.
 
 The legend names each band with its confidence and the count it was
 worked out at, such as **90 % confidence, 17.17 DOF**, and each level's
-edges are dashed their own way, so the band is read in words and line
-style rather than by its shade. Records averaged to different counts
+edges are dashed their own way, so each band is named in the legend
+and told apart by its line style. Records averaged to different counts
 are named by the range they span.
 
 `Psd.confidence_reading` gives the same band as numbers, one per

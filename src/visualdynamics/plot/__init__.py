@@ -2224,13 +2224,13 @@ def confidence_preview(items: Iterable[Any], psd: Any,
     the way the PSD itself is, so each line's band sits on its own bin.
     The bands share one color, the specification's gray, and the
     narrower one is shaded over the wider, so the inner band reads
-    darker; the edges of each level are
-    dashed their own way (`BAND_STYLES`) and named in the legend with
-    the confidence and the degrees of freedom the band was worked out
-    at, '90 % confidence, 225.9 DOF', so the band is read in words and
-    line style rather than by its shade. The band is drawn behind the
-    data and widens the plot's limits to take it in, so its top edge is
-    not cut off at the highest peak.
+    darker; the edges of each level are dashed their own way
+    (`BAND_STYLES`) and named in the legend with the confidence and the
+    degrees of freedom the band was worked out at, '90 % confidence,
+    225.9 DOF', so each band is named in the legend and told apart by
+    its line style. The band is drawn behind the data and widens the
+    plot's limits to take it in, so its top edge is not cut off at the
+    highest peak.
 
     Bands are drawn only on plots whose quantity matches, and only for
     `records` when given, as `octave_preview` draws its steps. Returns

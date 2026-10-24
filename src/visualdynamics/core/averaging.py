@@ -673,11 +673,13 @@ def db_text(db: float) -> str:
 def dof_text(dof: float) -> str:
     """A count of statistical degrees of freedom as it is shown: four
     significant figures, so an equivalent count reads 225.9 and a whole
-    one 120, and a whole number from 10,000 up, 12500 rather than
-    1.25e+04; the same figure in the Averaging view, the confidence
-    reading and a plot's legend."""
+    one 120, and a whole number from the point four figures would
+    round to 10,000 up, 12500 rather than 1.25e+04; the same figure in
+    the Averaging view, the confidence reading and a plot's legend."""
     dof = float(dof)
-    return f'{dof:.0f}' if abs(dof) >= 1.0e4 else f'{dof:.4g}'
+    # 9999.5 and above round to 1e+04 at four figures, so the whole
+    # number takes over there rather than at 10,000 itself
+    return f'{dof:.0f}' if abs(dof) >= 9999.5 else f'{dof:.4g}'
 
 
 def confidence_bands(estimate: ArrayLike, dof: float,

@@ -60,7 +60,8 @@ def test_a_band_says_its_confidence_its_count_and_its_edges(dof, level,
 
 @pytest.mark.parametrize('dof, shown', [
     (120.0, '120'), (225.9437, '225.9'), (2.0, '2'), (17.1718, '17.17'),
-    (1504.6, '1505'), (9999.4, '9999'), (12500.3, '12500'),
+    (1504.6, '1505'), (9999.4, '9999'), (9999.7, '10000'),
+    (12500.3, '12500'),
     (1.3e6, '1300000'),
 ])
 def test_a_count_is_shown_to_four_figures(dof, shown):
@@ -162,7 +163,8 @@ def _legend(psd, records, **kwargs):
     plot = drawn[0][0]
     # the layout goes back with the drawing: dropped here, it would
     # take the items with it before the caller read them
-    return [label.text for _sample, label in plot.legend.items],         (layout, drawn)
+    return ([label.text for _sample, label in plot.legend.items],
+            (layout, drawn))
 
 
 def test_the_legend_states_the_confidence_and_the_count(qt_app):

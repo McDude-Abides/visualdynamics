@@ -200,7 +200,8 @@ def test_a_typed_count_overrides_the_averaging_s(window, pump):
     seen = shown[np.isfinite(shown) & (shown > 0)]
     drawn_ratio = (10.0 ** (upper - lower) if log_y else upper / lower)
     assert np.allclose(drawn_ratio[np.isfinite(drawn_ratio)],
-                       high16 / low16),         'the band is as wide as 16 DOF make it'
+                       high16 / low16), \
+        'the band is as wide as 16 DOF make it'
     assert not np.isclose(high16 / low16, high_n / low_n)
     assert seen.size
     names = [label.text for _sample, label in plot.legend.items]
