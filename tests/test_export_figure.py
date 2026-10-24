@@ -9,6 +9,7 @@ it, and both exports can keep fewer channels and fewer points.
 
 from __future__ import annotations
 
+import copy
 import json
 import pathlib
 import re
@@ -18,7 +19,7 @@ import pytest
 from conftest import web_close, web_read, web_view
 
 import visualdynamics
-from visualdynamics.core.data import Psd, Specification
+from visualdynamics.core.data import Psd, Specification, TimeHistory
 from visualdynamics.decimate import shared_peak_indices
 from visualdynamics.report import page
 
@@ -189,6 +190,25 @@ def test_shared_indices_keep_every_rows_extremes():
         assert rows[0, inside].max() == rows[0, start:start + 500].max()
 
 
+def test_shared_indices_keep_a_lone_missing_sample_as_a_gap():
+    """A slice's extremes skip a missing sample, so a lone NaN would be
+    thinned away and the line drawn across it; the start of each gap is
+    kept while the gaps fit a quarter of the budget, and past that the
+    budget still holds."""
+    rows = np.sin(np.arange(5000) / 40.0)[None, :].copy()
+    rows[0, 777] = np.nan
+    keep = shared_peak_indices(rows, 100)
+    assert 777 in keep and len(keep) <= 100
+    rows[0, 3000:3010] = np.nan
+    keep = shared_peak_indices(rows, 100)
+    assert 777 in keep and 3000 in keep and 3001 not in keep
+    many = np.sin(np.arange(5000) / 40.0)[None, :].copy()
+    many[0, 10::150] = np.nan                  # 34 gaps against 25 allowed
+    keep = shared_peak_indices(many, 100)
+    assert len(keep) <= 100
+    assert not set(range(10, 5000, 150)) <= set(keep.tolist())
+
+
 def test_shared_indices_leave_a_short_record_whole_and_refuse_too_few():
     assert np.array_equal(shared_peak_indices(np.ones((2, 50)), 64),
                           np.arange(50))
@@ -271,10 +291,16 @@ def test_a_channel_the_data_does_not_hold_is_refused(tmp_path):
 
 def test_channels_without_a_plot_are_refused(tmp_path):
     from visualdynamics import mesh
+    from visualdynamics.core.shapes import ShapeSet
 
     plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, unit=None)
     with pytest.raises(ValueError, match='channels choose the records'):
         visualdynamics.export_figure(tmp_path / 'a.json', geometry=plate,
+                                     channels=['1Z+'])
+    # data that holds no records by DOF (shapes) is refused the same way
+    shapes = ShapeSet([10.0], [0.01], ['1Z+'], np.ones((1, 1)))
+    with pytest.raises(ValueError, match='channels choose the records'):
+        visualdynamics.export_figure(tmp_path / 'a.json', shapes,
                                      channels=['1Z+'])
 
 
@@ -282,6 +308,102 @@ def test_too_few_points_are_refused(tmp_path):
     psd, _spec = _pair()
     with pytest.raises(ValueError, match='at least 16'):
         visualdynamics.export_figure(tmp_path / 'a.json', psd, max_points=8)
+
+
+def _like(psd, ordinate):
+    return Psd(psd.abscissa, ordinate, response_dof=psd.response_dof,
+               reference_dof=psd.reference_dof, ordinate_dim=psd.ordinate_dim)
+
+
+def test_a_record_with_nothing_to_draw_is_refused_naming_why(tmp_path):
+    """A record of zeros on a logarithmic axis, one missing throughout
+    and one with no samples would each be written as an empty frame;
+    each is refused with the reason."""
+    psd, _spec = _pair()
+    zero = _like(psd, np.zeros_like(psd.ordinate))
+    with pytest.raises(ValueError, match=r'^nothing in the figure has a value '
+                       r'to draw: 101Z\+/101Z\+ holds no value above zero, '
+                       r'which is all a logarithmic axis draws$'):
+        visualdynamics.export_figure(tmp_path / 'a.json', zero)
+    gone = _like(psd, np.full_like(psd.ordinate, np.nan))
+    with pytest.raises(ValueError, match=r'101Z\+/101Z\+ holds no value above'):
+        visualdynamics.export_html(tmp_path / 'a.html', gone, max_points=50)
+    empty = Psd(np.array([]), np.zeros((1, 0)), response_dof=['1Z+'],
+                reference_dof=['1Z+'], ordinate_dim=psd.ordinate_dim)
+    with pytest.raises(ValueError, match=r'1Z\+/1Z\+ holds no value above'):
+        visualdynamics.export_figure(tmp_path / 'a.json', empty)
+    # a dead channel beside a live one is drawn: the figure has a curve
+    both = Psd(psd.abscissa, np.vstack([psd.ordinate, 0 * psd.ordinate]),
+               response_dof=['101Z+', '102Z+'], reference_dof=['101Z+', '102Z+'],
+               ordinate_dim=psd.ordinate_dim * 2)
+    visualdynamics.export_figure(tmp_path / 'b.json', both)
+
+
+def test_a_lone_missing_sample_stays_a_gap_when_thinned(tmp_path):
+    psd, spec = _pair(lines=400)
+    ordinate = psd.ordinate.copy()
+    ordinate[0, 123] = np.nan
+    data = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'a.json', _like(psd, ordinate), specification=spec,
+        max_points=50)).read_text())
+    [block] = data['blocks']
+    x = block['curves'][0]['x'] or block['x']
+    [measured] = [c for c in block['curves'] if any(v is None for v in c['y'])]
+    assert measured['y'][x.index(pytest.approx(psd.abscissa[123]))] is None
+    assert len(measured['y']) <= 50
+
+
+def test_an_empty_channel_list_is_refused(tmp_path):
+    psd, _spec = _pair()
+    with pytest.raises(ValueError, match=r"^channels is empty: name at least "
+                       r"one record to keep, by its response DOF \('101Z\+'\)$"):
+        visualdynamics.export_figure(tmp_path / 'a.json', psd, channels=[])
+
+
+def test_a_limit_in_other_units_at_a_chosen_channel_is_refused(tmp_path):
+    """Records at one DOF can be different quantities; a specification
+    record kept by `channels` must be the quantity the data's record at
+    that DOF is, or the limit would be drawn against a curve in other
+    units."""
+    psd, spec = _pair(dofs=('101Z+', '102Z+'))
+    force = copy.deepcopy(spec)
+    force.ordinate_dim[0] = 'force**2/frequency'
+    with pytest.raises(ValueError, match=r"specification's 101Z\+ is "
+                       r"force\*\*2/frequency and the data's is "
+                       r"acceleration\*\*2/frequency"):
+        visualdynamics.export_figure(tmp_path / 'a.json', psd,
+                                     specification=force, channels=['101Z+'])
+    data = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'b.json', psd, specification=force,
+        channels=['102Z+'])).read_text())
+    assert [c['label'] for c in data['blocks'][0]['channels']] == ['102Z+']
+
+
+@pytest.mark.parametrize('max_points', [None, 100])
+def test_a_specification_alone_splits_on_the_grid_its_channels_are(
+        tmp_path, max_points):
+    """The split export of a specification on its own, whole and
+    trimmed: every array the page draws for a channel has the length of
+    the grid it is drawn on, and spans the band."""
+    from test_export_html import _workmanship
+
+    from visualdynamics.units import SYSTEMS
+
+    data = visualdynamics.export_figure(
+        tmp_path / 'spec.json', _workmanship(), max_points=max_points,
+        unit_system=SYSTEMS['in-slinch-lbf-s (g)'])
+    [block] = json.loads(pathlib.Path(data).read_text())['blocks']
+    drawn = block['curves'][0]['x'] or block['x']
+    [channel] = block['channels']
+    assert len(channel['y']) == len(drawn)
+    assert max_points is None or len(drawn) <= max_points
+    for zone in channel['zones']:
+        for edge in (zone['lower'], zone['upper']):
+            assert edge is None or len(edge) == len(drawn)
+    written = [f for f, v in zip(drawn, channel['y'], strict=True)
+               if v is not None]
+    assert min(written) == pytest.approx(20.0)
+    assert max(written) == pytest.approx(2000.0)
 
 
 def test_a_figure_with_nothing_to_draw_is_refused(tmp_path):
@@ -376,3 +498,122 @@ def test_a_complex_plot_reads_as_the_component_asked_for(tmp_path):
     with pytest.raises(ValueError, match='one of magnitude, phase'):
         visualdynamics.export_figure(tmp_path / 'x.json', frf,
                                      component='angle')
+
+
+# ---- the mutation run's boundaries, each pinned ----------------------------------
+
+def test_shared_indices_fill_the_budget_and_keep_a_record_that_fits_whole():
+    """A rising record keeps each slice's first and last sample, two a
+    slice, so the most slices that fit fill the budget exactly; a record
+    of exactly the budget is kept whole."""
+    rising = np.arange(1000.0)[None, :]
+    assert len(shared_peak_indices(rising, 100)) == 100
+    assert np.array_equal(shared_peak_indices(np.ones((2, 64)), 64),
+                          np.arange(64))
+
+
+def test_shared_indices_find_the_most_slices_that_fit():
+    """Two records whose extremes fall apart: the bisection finds the
+    largest slicing whose points fit, the one an exhaustive search
+    finds (the count of points kept rises with the slicing here)."""
+    from visualdynamics.decimate import _extreme_indices
+
+    n = np.arange(1000.0)
+    rows = np.array([n, (n * 37.0) % 101.0])
+    sizes = [len(np.unique(np.concatenate(
+        [[0, 999], *_extreme_indices(rows, bins)]))) for bins in range(1, 51)]
+    assert sizes == sorted(sizes), 'the premise: more slices keep more points'
+    assert len(shared_peak_indices(rows, 100)) == max(
+        s for s in sizes if s <= 100)
+
+
+def test_shared_indices_at_the_fewest_points_a_budget_may_hold():
+    """Three records need eight points, two a record and the two ends:
+    eight are taken, never more, with the ends kept; seven are refused."""
+    rows = np.random.default_rng(5).standard_normal((3, 500))
+    keep = shared_peak_indices(rows, 8)
+    assert len(keep) <= 8 and keep[0] == 0 and keep[-1] == 499
+    with pytest.raises(ValueError, match='at least 8'):
+        shared_peak_indices(rows, 7)
+
+
+def test_gaps_are_kept_up_to_a_quarter_of_the_budget_and_the_room_left():
+    """25 gaps fit a budget of 100 and are all kept. Six records at a
+    budget of 16 leave room beside the coarsest slicing's twelve
+    extremes and two ends for two gaps but not three: two are kept, and
+    with three the budget still holds."""
+    rising = np.arange(5000.0)[None, :].copy()
+    starts = list(range(100, 5000, 196))[:25]
+    rising[0, starts] = np.nan
+    assert set(starts) <= set(shared_peak_indices(rising, 100).tolist())
+    six = np.random.default_rng(9).standard_normal((6, 400))
+    six[:, [100, 300]] = np.nan
+    keep = shared_peak_indices(six, 16)
+    assert {100, 300} <= set(keep.tolist()) and len(keep) <= 16
+    six[:, 200] = np.nan
+    assert len(shared_peak_indices(six, 16)) <= 16
+
+
+def test_a_curve_of_exactly_max_points_is_left_whole(tmp_path):
+    """The plot's shared abscissa at exactly `max_points` is not thinned
+    again, and the note does not say it was. A curve on an abscissa of
+    its own (a spectrum the page already thinned, which leaves the
+    plot's own abscissa drawn on by nothing) is trimmed with that
+    abscissa thinned once, on its own values."""
+    psd, spec = _pair(lines=400)
+    whole = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'a.json', psd, specification=spec)).read_text())
+    kept = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'b.json', psd, specification=spec,
+        max_points=400)).read_text())
+    assert kept == whole
+    f = np.linspace(1.0, 2000.0, 90_000)
+    long = Psd(f, (1.0 + 0.1 * np.sin(f))[None, :] * 1e-3,
+               response_dof=['1Z+'], reference_dof=['1Z+'],
+               ordinate_dim=['acceleration**2/frequency'])
+    [own] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'c.json', long)).read_text())['blocks']
+    length = len(own['curves'][0]['x'])
+    assert length < 90_000, 'the page thinned it onto an abscissa of its own'
+    [trimmed] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'e.json', long, max_points=1000)).read_text())['blocks']
+    curve = trimmed['curves'][0]
+    assert len(curve['x']) == len(curve['y']) <= 1000
+    assert len(trimmed['x']) <= 1000
+    assert trimmed['x'][0] == own['x'][0] and trimmed['x'][-1] == own['x'][-1]
+
+
+def test_a_note_already_on_a_figure_is_kept_when_it_is_trimmed(tmp_path):
+    """A record long enough for the page to thin it already carries that
+    note; trimming adds its own sentence after it."""
+    history = TimeHistory(np.arange(100_000) / 1000.0,
+                          np.random.default_rng(0).standard_normal((1, 100_000)),
+                          response_dof=['1Z+'])
+    [own] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'a.json', history)).read_text())['blocks']
+    [trimmed] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'b.json', history, max_points=1000)).read_text())['blocks']
+    first = own['note']
+    assert first.startswith('Thinned for the file:')
+    assert trimmed['note'].startswith(first + ' Thinned for the file: ')
+
+
+def test_sixteen_points_is_the_fewest_a_curve_may_keep(tmp_path):
+    psd, _spec = _pair(lines=400)
+    [block] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'a.json', psd, max_points=16)).read_text())['blocks']
+    assert len(block['x']) <= 16
+
+
+def test_a_scene_carries_its_shapes_only_when_given(tmp_path):
+    from visualdynamics import mesh
+    from visualdynamics.core.shapes import ShapeSet
+
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, unit=None)
+    dofs = [f'{n}Z+' for n in plate.node_id]
+    shapes = ShapeSet([10.0], [0.01], dofs, np.ones((1, len(dofs))))
+    [moving] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'a.json', geometry=plate, shapes=shapes)).read_text())['blocks']
+    [still] = json.loads(pathlib.Path(visualdynamics.export_figure(
+        tmp_path / 'b.json', geometry=plate)).read_text())['blocks']
+    assert len(moving['modes']) == 1 and not still['modes']

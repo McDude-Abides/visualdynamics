@@ -87,10 +87,16 @@ visualdynamics.export_figure('run.json', history, channels=['101Z+', '102Z+'],
 
 `channels` keeps only the records at those response DOFs, and the
 specification's records likewise; a channel the data does not hold is
-refused, naming the ones it does. `max_points` thins every curve of a
+refused, naming the ones it does, and so is an empty list. A DOF can
+carry two quantities (an acceleration and a force at a drive point),
+so a specification record is kept only where the data's record at its
+DOF is the same quantity, and one in other units is refused rather
+than drawn against the wrong curve. `max_points` thins every curve of a
 plot to at most that many points by keeping, slice by slice, the
 smallest and largest value of every curve, so no peak or dip is lost
-and the first and last points stay where they were. Curves drawn on one
+and the first and last points stay where they were. A missing sample
+stays a gap: the first sample of each gap is kept, so the line breaks
+there instead of being drawn across it. Curves drawn on one
 abscissa, a measurement and the limits shaded about it, are thinned to
 the same points, so a band still lies between points that are above one
 another. A density drawn stepped across its bins is drawn as a line
@@ -100,3 +106,8 @@ as every thinned figure's does. The readouts beside a comparison, the
 lines out and the RMS error, are worked out from the whole record
 before it is thinned. A scene is not thinned by `max_points`: choose its
 modes by passing fewer shapes.
+
+A figure with nothing to draw is refused rather than written as an
+empty frame, with the reason: a record of zeros on a logarithmic axis,
+one missing throughout, one with no samples, or a comparison whose
+channel the specification does not hold.

@@ -3118,17 +3118,40 @@ from .page import (
 MIN_TRIM_POINTS = 16
 
 
-def _only_channels(obj: Any, channels: Sequence[str]) -> Any:
+def _only_channels(obj: Any, channels: Sequence[str], like: Any = None) -> Any:
     """A copy of `obj` holding only its records at `channels`, the
     response DOFs as the legend names them ('101Z+'), or None when it
     holds none of them. The copy is made with the object's own
     `delete_records`, so a specification's limit curves go with their
-    records."""
+    records.
+
+    With `like` (the data already narrowed) a record is kept only where
+    `like` has a record of the same quantity at its DOF: a DOF can carry
+    an acceleration and a force, and a limit is drawn against the one it
+    is written for. A record at a chosen DOF that matches no record of
+    `like` there is refused, naming both quantities, rather than drawn
+    against a curve in other units."""
     import copy
+
+    from ..core.unit_choices import shown_dimension
 
     held = [str(dof) for dof in obj.response_dof]
     keep = {str(channel) for channel in channels}
     doomed = [i for i, dof in enumerate(held) if dof not in keep]
+    if like is not None:
+        measured: dict[str, set[str]] = {}
+        for i, dof in enumerate(like.response_dof):
+            measured.setdefault(str(dof), set()).add(like.ordinate_dim[i])
+        for i, dof in enumerate(held):
+            if i in doomed or obj.ordinate_dim[i] in measured.get(dof, ()):
+                continue
+            theirs = ', '.join(sorted(shown_dimension(d)
+                                      for d in measured.get(dof, ())))
+            raise ValueError(
+                f'the specification\'s {dof} is '
+                f'{shown_dimension(obj.ordinate_dim[i])} and the data\'s is '
+                f'{theirs or "absent"}; a limit is drawn only against the '
+                'quantity it is written for')
     if len(doomed) == len(held):
         return None
     out = copy.deepcopy(obj)
@@ -3209,8 +3232,14 @@ def _trim_plot(block: dict, budget: int) -> None:
     def thin(node, abscissa):
         found = []
         _lists_of_length(node, len(abscissa), found)
-        values = [a for a in found if a is not abscissa] or [abscissa]
-        drawn, held = _thin_together(values, [abscissa], budget)
+        values = [a for a in found if a is not abscissa]
+        riders = [abscissa]
+        if not values:
+            # an abscissa no curve is drawn on any more (each brought
+            # its own, thinned above) is thinned on its own values;
+            # carried as a rider as well it was cut twice
+            values, riders = [abscissa], []
+        drawn, held = _thin_together(values, riders, budget)
         _unstep(node, held)
         return drawn, held
 
@@ -3240,6 +3269,26 @@ def _trim_plots(node: Any, budget: int) -> None:
             _trim_plots(value, budget)
 
 
+def _refuse_blank_plot(block: dict) -> None:
+    """Refuse a plot none of whose curves has a value to draw: a record
+    of zeros on a logarithmic axis, one missing throughout, or one with
+    no samples would be written as an empty frame that says nothing of
+    why."""
+    if block.get('kind') != 'plot':
+        return
+    drawn = [entry for key in ('curves', 'channels')
+             for entry in block.get(key) or [] if isinstance(entry, dict)]
+    if any(any(v is not None for v in entry.get('y') or [])
+           for entry in drawn):
+        return
+    names = ', '.join(str(entry.get('label')) for entry in drawn
+                      if entry.get('label')) or 'the data'
+    why = ('no value above zero, which is all a logarithmic axis draws'
+           if block.get('logy') else 'no finite value')
+    raise ValueError(f'nothing in the figure has a value to draw: {names} '
+                     f'holds {why}')
+
+
 #: how a complex plot can be read, as the app's drop-down reads it
 COMPONENTS = ('magnitude', 'phase', 'real', 'imag')
 
@@ -3263,6 +3312,9 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
     if channels is not None:
         if isinstance(channels, str):
             channels = [channels]
+        if not len(channels):
+            raise ValueError('channels is empty: name at least one record '
+                             'to keep, by its response DOF (\'101Z+\')')
         if data is None or not hasattr(data, 'response_dof'):
             raise ValueError('channels choose the records of the data a '
                              'plot draws; this figure has none')
@@ -3277,7 +3329,7 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
             raise ValueError(f'{missing} not among the data\'s channels')
         data = narrowed
         if specification is not None:
-            specification = (_only_channels(specification, channels)
+            specification = (_only_channels(specification, channels, like=data)
                              or specification)
     holder = Project('Figure')
     if geometry is not None:
@@ -3314,6 +3366,8 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
     if not payload['blocks']:
         raise ValueError('nothing in the figure could be drawn: the '
                          'data, specification and channel do not meet')
+    for block in payload['blocks']:
+        _refuse_blank_plot(block)
     if max_points is not None:
         _trim_plots(payload['blocks'], int(max_points))
     return payload

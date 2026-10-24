@@ -80,7 +80,10 @@ def shared_peak_indices(rows: ArrayLike, budget: int) -> np.ndarray:
     not above each other. This keeps, for every slice of the samples,
     the smallest and largest value of every row, with the slices as fine
     as the budget allows, and the first and last sample so the extent is
-    unchanged. Rows with fewer than `budget` samples keep them all.
+    unchanged. The first missing sample of each gap is kept too, while
+    the gaps fit a quarter of the budget, so a thinned curve breaks
+    where its data does instead of being drawn across the gap. Rows with
+    fewer than `budget` samples keep them all.
 
     Parameters
     ----------
@@ -109,6 +112,16 @@ def shared_peak_indices(rows: ArrayLike, budget: int) -> np.ndarray:
         raise ValueError(f'{budget} points cannot keep the extremes of '
                          f'{count} curves; at least {2 * count + 2} can')
     ends = np.array([0, samples - 1])
+    # a slice's extremes skip a missing sample, so a lone NaN would be
+    # thinned away and the line drawn straight across it; the start of
+    # every gap is kept with the ends while there is room for it beside
+    # the coarsest slicing's extremes
+    missing = ~np.isfinite(rows)
+    opened = missing.copy()
+    opened[:, 1:] &= ~missing[:, :-1]
+    gaps = np.flatnonzero(opened.any(axis=0))
+    if len(gaps) <= min(budget // 4, budget - 2 * count - 2):
+        ends = np.union1d(ends, gaps)
 
     def kept(bins):
         return np.unique(np.concatenate(
