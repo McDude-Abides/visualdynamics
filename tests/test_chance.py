@@ -173,6 +173,11 @@ def test_a_spectrum_on_its_target_is_expected_to_miss_by_chance():
     assert np.allclose(groups['abort_upper_db'], 3.0)
     assert np.allclose(groups['miss_db'], 0.0, atol=1e-12)
     assert groups['lines'].tolist() == [1] * 389
+    # the expectation is the lines' own chances added
+    assert groups['warning_chance'].sum() == pytest.approx(
+        result['warning_expected'])
+    assert groups['abort_chance'].sum() == pytest.approx(
+        result['abort_expected'])
 
 
 def test_the_lines_out_are_counted_by_side():
@@ -253,7 +258,7 @@ def _white_noise(window, overlap, channels, seed, frames=60):
 
 
 def test_combined_hann_lines_are_worth_what_white_noise_measures():
-    """Brandon's review: under a Hann window, the default, adjacent
+    """Under a Hann window, the default, adjacent
     lines correlate at 0.44, so eight of them combined are worth far
     less than eight times a line. At half overlap over sixty frames a
     line is worth 113.8 degrees of freedom and a group of eight 488.4,
@@ -440,7 +445,9 @@ def test_a_line_on_its_limit_is_inside_as_compare_reads_it():
     """Lines on a specification of their own lines, two of them exactly
     on the warning edge above and two a part in a million past it: the
     two on it are inside, alone and as a pair, as `compare` counts, and
-    the two past it are out, alone and as a pair."""
+    the two past it are out, alone and as a pair. A pair whose first
+    line is inside and whose sum is out is out as a pair: the group is
+    judged on its sum, not its first line."""
     f = DF * np.arange(1, 9)
     edge = 10.0 ** 0.15
     values = np.ones((1, 8))
@@ -450,17 +457,19 @@ def test_a_line_on_its_limit_is_inside_as_compare_reads_it():
     spec.interpolation = 'bin'
     level = np.ones(8)
     level[[2, 3]] = edge
+    level[[4, 5]] = [edge * 0.999, edge * 1.002]
     level[[6, 7]] = edge * (1.0 + 1e-6)
     psd = Psd(f, level[None, :], response_dof=['1Z+'],
               ordinate_dim='acceleration**2/frequency')
     psd.statistical_dof = np.array([DOF])
     single = compare_chance(spec, psd, scale_db=0)
-    assert np.flatnonzero(single['groups']['warning_above']).tolist() == [6, 7]
+    assert np.flatnonzero(single['groups']['warning_above']).tolist() == \
+        [5, 6, 7]
     assert single['warning_above'] == compliance.compare(
-        spec, psd, scale_db=0)['warning_lines'] == 2
+        spec, psd, scale_db=0)['warning_lines'] == 3
     paired = compare_chance(spec, psd, scale_db=0, combine=2)
     assert paired['groups']['lines'].tolist() == [2, 2, 2, 2]
-    assert np.flatnonzero(paired['groups']['warning_above']).tolist() == [3]
+    assert np.flatnonzero(paired['groups']['warning_above']).tolist() == [2, 3]
 
 
 def test_the_count_is_the_measured_records_own():
@@ -728,6 +737,24 @@ def test_a_psd_without_a_count_says_so_in_the_panel(window, pump):
     panel.set_settings(dof=50.0)
     pump()
     assert panel.derived['dof'].text() == '50'
+
+
+def test_lines_summed_as_independent_are_said_so_in_the_panel(window, pump):
+    """The reading's note is part of the reading: lines combined from a
+    PSD that does not say how its window ties them are taken as
+    independent, and the panel says so under the counts."""
+    _spec, psd = _chance_reading(window, pump)
+    panel = window.data_pane.chance_panel
+    panel.set_settings(combine=8)
+    pump()
+    assert 'taken as independent' not in panel.readout.text()
+    window.objects[psd].line_correlation = None
+    window.render_current()
+    pump()
+    paragraphs = panel.readout.text().split('\n\n')
+    assert paragraphs[-1].startswith('The PSD does not say how its window')
+    assert paragraphs[-1].endswith(
+        'taken as independent, and read high if they were windowed.')
 
 
 def test_the_panel_goes_with_the_reading(window, pump):

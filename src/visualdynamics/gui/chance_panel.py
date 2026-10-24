@@ -122,5 +122,11 @@ class ChancePanel(QWidget):
             else f'{result["lines"]} groups of {result["combine"]}')
         paragraphs = [describe_chance(result, pair)
                       for pair in PAIRS if f'{pair}_lines' in result]
-        self.readout.setText('\n\n'.join(paragraphs) if paragraphs
-                             else 'The specification carries no bands.')
+        if not paragraphs:
+            paragraphs = ['The specification carries no bands.']
+        # what the counts were read on the strength of (lines taken as
+        # independent, units undeclared) is part of the reading
+        note = result.get('note')
+        if note:
+            paragraphs.append(f'{note[0].upper()}{note[1:]}.')
+        self.readout.setText('\n\n'.join(paragraphs))
