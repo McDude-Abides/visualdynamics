@@ -93,9 +93,18 @@ back in m/s² for an acceleration. The result, an `AmplitudeSpectrum`,
 carries one row per channel (a record saved as captures is one channel,
 its captures' frames pooled), the window and its parameter, the
 coherent gain and the correction, the window's noise bandwidth and its
-scalloping, the line spacing and the frames averaged. `tallest` passes
-over the DC line and the lines a record's mean leaks into through the
-window's main lobe. `coherent_gain`, `amplitude_correction` and
+scalloping, the line spacing and the frames averaged. `tallest` reads
+the lines above DC with each frame's mean taken out before its window,
+so a record's mean, which leaks through the main lobe into the lines
+just above DC (under Hann a 5 g mean reads 5 g on line 1 too), is not
+read as a tone, and a real tone on those lines is: 5 Hz at 5 Hz lines
+reads 5 Hz under Hann. The drawn curve keeps the mean, at DC and where
+it leaks. A tone's own mirror at negative frequency is 2k lines from a
+tone on line k, and inside the main lobe the two add, so the flat top,
+whose lobe reaches five lines, reads a tone exactly from line 3 up. A
+channel that is zero throughout, or holds samples that are not finite,
+is named as such rather than read. `coherent_gain`,
+`amplitude_correction` and
 `scalloping` in `visualdynamics.core.amplitude_spectrum` are the
 window's arithmetic on its own.
 

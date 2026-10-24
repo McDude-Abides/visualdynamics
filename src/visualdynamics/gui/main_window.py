@@ -18534,7 +18534,16 @@ class MainWindow(QMainWindow):
             self.data_pane.graphics, spectrum, row, unit_system=us,
             theme=self.theme_name)
         scale, unit = display_scale(spectrum, row, us)
-        panel.show_reading(spectrum, row, tallest, scale=scale, unit=unit)
+        unread = None
+        if tallest is None:
+            try:
+                spectrum.tallest(row)
+            except ValueError as reason:
+                # a dead channel, or one holding samples that are not
+                # finite: said as such, not as a band with no line
+                unread = str(reason)
+        panel.show_reading(spectrum, row, tallest, scale=scale, unit=unit,
+                           unread=unread)
         if name is not None:
             call = 'visualdynamics.plot.plot_amplitude_spectrum'
             given = ''.join(f', {key}={value!r}'
@@ -18542,10 +18551,11 @@ class MainWindow(QMainWindow):
                             if value is not None)
             self._journal_view(
                 f'{call}(project[{name!r}]',
-                f'{call}(project[{name!r}], {row}{given}, '
+                f'{call}(project[{name!r}], {channel}{given}, '
                 "path='amplitude_spectrum.png', show=False)")
         if tallest is None:
-            return f'{spectrum.label(row)}: {spectrum.correction_text()}'
+            said = f'{unread}; ' if unread else ''
+            return f'{spectrum.label(row)}: {said}{spectrum.correction_text()}'
         return spectrum.describe(row, unit, scale)
 
     def _render_wavelet(self, history, name=None, records=None):

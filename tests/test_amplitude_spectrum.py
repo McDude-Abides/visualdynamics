@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import visualdynamics
 from visualdynamics.core.amplitude_spectrum import (
     AmplitudeSpectrum,
     amplitude_correction,
@@ -284,23 +285,95 @@ def test_the_tallest_line_leaves_out_dc_and_keeps_to_its_band():
     record = framed(history(5.0 + tone(500.0, 1.0) + tone(1200.0, 0.5)))
     spectrum = record.amplitude_spectrum()
     assert spectrum.amplitude[0, 0] / G == pytest.approx(5.0, rel=1e-9)
-    # the mean leaks into the next line up under Hann, as tall again:
-    # that line is in the window's main lobe about DC, and passed over
-    assert spectrum.main_lobe == 2
+    # the mean leaks into the next line up under Hann, as tall again;
+    # the line is read with the frames' means taken out, so the leak is
+    # not taken for a tone
     assert spectrum.amplitude[0, 1] / G == pytest.approx(5.0, rel=1e-6)
+    assert spectrum.leveled[0, 1] / G < 1e-6
     assert spectrum.tallest(0)[0] == 500.0
     assert spectrum.tallest(0, band=(1000.0, 1500.0))[0] == 1200.0
     # the band's edges are in it
     assert spectrum.tallest(0, band=(1200.0, 1200.0))[0] == 1200.0
 
 
-def test_the_first_line_past_the_main_lobe_is_read():
-    """Under Hann the mean leaks into lines 0 and 1 and no further, so
-    a tone on line 2 (10 Hz at 5 Hz lines) is a tone to read."""
+@pytest.mark.parametrize('window, frequency', [
+    ('hann', 5.0), ('hann', 10.0), ('flattop', 15.0), ('boxcar', 5.0)])
+@pytest.mark.parametrize('mean', [0.0, 5.0])
+def test_a_low_tone_is_read_whatever_the_window_s_lobe(window, frequency,
+                                                       mean):
+    """A tone on line 1 under Hann or line 3 under the flat top, inside
+    the main lobe about DC, reads its own line and amplitude, with or
+    without a mean under it. At 5120 Hz and 1024-sample frames a 5 Hz
+    tone once read (10 Hz, 0.50) under Hann and (25 Hz, 0.016) under
+    the flat top (review, 2026-10-23). Line 3 is the flat top's lowest:
+    below it a tone's own mirror at negative frequency, 2k lines away,
+    is inside the main lobe's five lines and the two add, which no
+    reading undoes."""
+    record = framed(history(mean + tone(frequency, 1.0)))
+    spectrum = record.amplitude_spectrum(window=window)
+    line, amplitude = spectrum.tallest(0)
+    assert line == frequency
+    assert amplitude / G == pytest.approx(1.0, rel=1e-6)
+
+
+def test_a_line_with_no_window_reads_its_own_magnitude_not_the_mean():
+    """Leveled frames are the averaging's when it levels them: no second
+    pass, and the reading is the drawn line."""
+    record = framed(history(5.0 + tone(500.0, 1.0)))
+    record.averaging = Averaging(frame_length=FRAME, overlap=0.5,
+                                 window='hann', frames=119, detrend='mean')
+    spectrum = record.amplitude_spectrum()
+    assert np.array_equal(spectrum.leveled, spectrum.amplitude)
+    assert spectrum.amplitude[0, 0] / G < 1e-9
+
+
+def test_a_dead_channel_is_named_not_read():
+    zero = framed(history(np.zeros(round(12.0 * RATE))))
+    spectrum = zero.amplitude_spectrum()
+    with pytest.raises(ValueError, match='zero throughout'):
+        spectrum.tallest(0)
+    with pytest.raises(ValueError, match='zero throughout'):
+        spectrum.describe(0)
+    lost = tone(500.0)
+    lost[100] = np.nan
+    spectrum = framed(history(lost)).amplitude_spectrum()
+    with pytest.raises(ValueError, match='not finite'):
+        spectrum.tallest(0)
+
+
+def test_a_band_with_no_line_says_so():
     spectrum = framed(history(tone(10.0, 0.5))).amplitude_spectrum()
-    assert spectrum.tallest(0) == (10.0, pytest.approx(0.5 * G, rel=1e-6))
     with pytest.raises(ValueError, match='no line'):
         spectrum.tallest(0, band=(3000.0, 4000.0))
+    with pytest.raises(ValueError, match='no line'):
+        spectrum.tallest(0, band=(1.0, 2.0))
+
+
+def test_the_arithmetic_on_the_spectrum_is_the_module_s():
+    record = framed(history(tone(500.0)))
+    for window in ('hann', 'flattop', 'kaiser'):
+        spectrum = record.amplitude_spectrum(window=window)
+        assert spectrum.coherent_gain == coherent_gain(window, FRAME)
+        assert spectrum.scalloping == scalloping(window, FRAME)
+
+
+def test_the_plot_takes_a_record_of_the_history(qt_app, tmp_path):
+    """`record` is the history's record, as every plot of a history
+    takes it: the fourth record of a capture-saved history is its
+    second channel, drawn as that channel's row."""
+    a, b = tone(500.0, 1.0), tone(800.0, 3.0)
+    record = history(a, b, a, b, dofs=['1Z+', '2Z+', '1Z+', '2Z+'])
+    framed(record, frames=10)
+    paths = []
+    for index in (1, 3):
+        path = tmp_path / f'record{index}.png'
+        visualdynamics.plot.plot_amplitude_spectrum(
+            record, index, path=str(path), show=False)
+        paths.append(path.read_bytes())
+    assert paths[0] == paths[1]
+    with pytest.raises(ValueError, match='record 4'):
+        visualdynamics.plot.plot_amplitude_spectrum(
+            record, 4, path=str(tmp_path / 'never.png'), show=False)
 
 
 def test_frames_that_do_not_fit_are_refused():
@@ -448,6 +521,36 @@ def test_the_second_channel_selected_is_the_one_read(window, pump):
     assert panel.derived['channel'].text() == '2Z+'
     assert panel.derived['frequency'].text() == '800 Hz'
     assert panel.derived['amplitude'].text() == '3 g peak'
+
+
+def test_a_capture_is_journaled_as_its_record(window, pump):
+    """The journaled call takes the history's record, which the plot
+    maps to its channel's row: a capture-saved record replays."""
+    a, b = tone(500.0, 1.0), tone(800.0, 3.0)
+    record = framed(history(a, b, a, b, dofs=['1Z+', '2Z+', '1Z+', '2Z+']),
+                    frames=10)
+    name = window.add_object('Captures', record)
+    window.data_pane.waterfall_action.setChecked(False)
+    window.show_object(name)
+    pump()
+    window._select_records(name, [3])
+    window.data_pane.amplitude_action.trigger()
+    pump()
+    window.render_current()
+    pump()
+    panel = window.data_pane.amplitude_panel
+    assert panel.derived['channel'].text() == '2Z+'
+    line = window.project.journal[-1]
+    assert "project['Captures'], 3, window='hann'" in line
+
+
+def test_a_dead_channel_is_named_in_the_pane(window, pump):
+    pane = _amplitude(window, pump,
+                      framed(history(np.zeros(round(12.0 * RATE)))))
+    panel = pane.amplitude_panel
+    assert panel.derived['amplitude'].text() == '—'
+    assert 'zero throughout' in panel.notes.text()
+    assert 'zero throughout' in window.statusBar().currentMessage()
 
 
 def test_frames_that_do_not_fit_clear_the_reading(window, pump):

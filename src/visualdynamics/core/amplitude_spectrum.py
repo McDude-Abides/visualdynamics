@@ -194,9 +194,12 @@ class AmplitudeSpectrum:
     and `correction` its reciprocal, the factor its lines were
     multiplied by; `noise_bandwidth` is in lines and `scalloping` is the
     share of its amplitude a sine midway between lines reads.
-    `main_lobe` is the window's main-lobe half-width in whole lines (2
-    for Hann, 1 for a rectangle): a record's mean leaks into that many
-    lines from DC up, which `tallest` therefore passes over.
+    `leveled` is the same spectrum of the same frames with each frame's
+    mean taken out before its window, which `tallest` reads: a record's
+    mean leaks through the window's main lobe into the lines just above
+    DC (under Hann a 5 g mean reads 5 g on line 1 as well as at DC), and
+    a tone on those lines is read without it. It is `amplitude` itself
+    when the averaging levels its frames already.
     `from_averaging` says whether the frames are the record's averaging
     (False: each record whole as one frame, the record having none).
     """
@@ -214,7 +217,7 @@ class AmplitudeSpectrum:
     coherent_gain: float
     noise_bandwidth: float
     scalloping: float
-    main_lobe: int = 1
+    leveled: np.ndarray | None = None
     from_averaging: bool = True
     labels: list[str] = field(default_factory=list)
 
@@ -245,23 +248,46 @@ class AmplitudeSpectrum:
                 band: tuple[float, float] | None = None
                 ) -> tuple[float, float]:
         """(frequency, amplitude) of the tallest line of channel
-        `record`, the DC line and the lines its main lobe reaches left
-        out. A record's mean is not a tone, and it leaks: under Hann a
-        mean of 5 g reads 5 g at DC and 5 g again on the line above
-        (`main_lobe`).
+        `record` above DC, read off the frames with their means taken
+        out (`leveled`). A record's mean is not a tone, and it leaks:
+        under Hann a mean of 5 g reads 5 g at DC and 5 g again on the
+        line above, and under the flat top on four lines above. Taken
+        out before the window, it leaks into none, so a tone on line 1
+        reads its own line and amplitude under Hann. A tone's own
+        mirror at negative frequency lies 2k lines from it, and while
+        that is inside the main lobe the two add: the flat top's lobe
+        reaches five lines, so its lowest line read exactly is line 3.
 
         `band` is (low, high) in Hz to look within; the whole spectrum
         above DC when omitted. A line that is not a number is passed
-        over. Raises ValueError when no line is left to read.
+        over.
+
+        Raises
+        ------
+        ValueError
+            When no line of the channel is a number (it holds samples
+            that are not finite), when every line is zero (the channel
+            is zero throughout, or in the band), or when the band holds
+            no line above DC.
         """
         f = self.frequencies
-        values = np.asarray(self.amplitude[record], dtype=np.float64)
-        keep = (np.arange(len(f)) >= self.main_lobe) & np.isfinite(values)
+        read = self.amplitude if self.leveled is None else self.leveled
+        values = np.asarray(read[record], dtype=np.float64)
+        name = self.label(record)
+        finite = np.isfinite(values)
+        if not finite.any():
+            raise ValueError(f'{name} holds samples that are not finite, so '
+                             'no line of its spectrum is a number')
+        keep = (np.arange(len(f)) >= 1) & finite
         if band is not None:
             low, high = band
             keep &= (f >= low) & (f <= high)
         if not keep.any():
             raise ValueError('no line to read in that band')
+        if not np.max(values[keep]) > 0.0:
+            where = ('zero throughout' if band is None
+                     else f'zero from {band[0]:g} to {band[1]:g} Hz')
+            raise ValueError(f'{name} is {where}: there is no tone to read')
         at = int(np.flatnonzero(keep)[np.argmax(values[keep])])
         return float(f[at]), float(values[at])
 
@@ -345,6 +371,7 @@ def amplitude_spectrum(history: Any, averaging: Any = None, *,
         the record, or the window is not one offered.
     """
     from .averaging import normalize_window
+    from .tone_readout import noise_bandwidth
 
     key = normalize_window(window)
     given = averaging if averaging is not None else history.averaging
@@ -354,32 +381,38 @@ def amplitude_spectrum(history: Any, averaging: Any = None, *,
     # the framing every spectrum of a record shares, so these frames are
     # the PSD's frames exactly; its density scale is not this one
     frequencies, _density, groups = history._spectral_frame(used)
+    # and again with each frame's mean taken out before its window, the
+    # lines a tone is read from (`AmplitudeSpectrum.tallest`); frames the
+    # averaging levels already are those
+    leveled = (groups if used.detrend != 'none' else
+               history._spectral_frame(replace(used, detrend='mean'))[2])
     shape = used.shape()
-    rows, dofs, dims, hints, counts, labels = [], [], [], [], [], []
+    rows, flat, dofs, dims, hints, counts, labels = [], [], [], [], [], [], []
     first = {}
     for i in range(len(history.response_dof)):
         first.setdefault(history.channel_key(i), i)
     for (dof, dim, hint), windowed in groups.items():
         rows.append(amplitude_lines(windowed, shape))
+        flat.append(rows[-1] if leveled is groups else
+                    amplitude_lines(leveled[(dof, dim, hint)], shape))
         dofs.append(dof)
         dims.append(dim)
         hints.append(hint)
         counts.append(len(windowed))
         labels.append(history.record_label(first[(dof, dim, hint)]))
-    from .tone_readout import leakage
-
-    kernel = leakage(used)
+    amplitude = np.asarray(rows, dtype=np.float64)
     return AmplitudeSpectrum(
         frequencies=np.asarray(frequencies, dtype=np.float64),
-        amplitude=np.asarray(rows, dtype=np.float64),
+        amplitude=amplitude,
         response_dof=dofs, ordinate_dim=dims, dimension_hint=hints,
         window=key, window_parameter=used.window_parameter,
         frame_length=int(used.frame_length),
         sample_rate=float(history.sample_rate),
         frames=tuple(counts),
-        coherent_gain=float(np.mean(shape)),
-        noise_bandwidth=float(kernel.noise_bandwidth),
-        scalloping=float(np.sqrt(kernel.scallop(0.5))),
-        main_lobe=int(kernel.half_width),
+        coherent_gain=coherent_gain(used),
+        noise_bandwidth=float(noise_bandwidth(used)),
+        scalloping=scalloping(used),
+        leveled=(amplitude if leveled is groups
+                 else np.asarray(flat, dtype=np.float64)),
         from_averaging=given is not None,
         labels=labels)

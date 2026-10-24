@@ -3685,8 +3685,10 @@ def plot_amplitude_spectrum(history: Any, record: int = 0, *,
     history : TimeHistory
         The record.
     record : int, default 0
-        Which channel, counted as the spectrum's rows are (one per
-        channel; a record saved as captures is one channel).
+        Which record of `history`, as every plot of a history counts
+        them; a channel saved as captures is drawn as its one row
+        (`core.amplitude_spectrum.channel_row`), so any of its captures
+        names it.
     averaging : Averaging, optional
         The frames, as `TimeHistory.amplitude_spectrum` takes them.
     window : str, default 'hann'
@@ -3708,12 +3710,19 @@ def plot_amplitude_spectrum(history: Any, record: int = 0, *,
     Raises
     ------
     ValueError
-        As `TimeHistory.amplitude_spectrum` raises.
+        As `TimeHistory.amplitude_spectrum` raises, or for a record the
+        history does not hold.
     """
+    from ..core.amplitude_spectrum import channel_row
     from .amplitude_spectrum import build_amplitude_spectrum
 
+    count = len(history.response_dof)
+    if not 0 <= int(record) < count:
+        raise ValueError(f'record {record} is not one of the {count} '
+                         'records of this history')
     spectrum = history.amplitude_spectrum(averaging, window=window,
                                           parameter=parameter)
+    record = channel_row(history, int(record))
 
     def build(widget: Any) -> Any:
         widget.clear()

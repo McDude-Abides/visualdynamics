@@ -151,11 +151,13 @@ class AmplitudePanel(QWidget):
 
     def show_reading(self, spectrum: Any, record: int = 0,
                      tallest: tuple[float, float] | None = None, *,
-                     scale: float = 1.0, unit: str = '') -> None:
+                     scale: float = 1.0, unit: str = '',
+                     unread: str | None = None) -> None:
         """Write channel `record` of `spectrum`, an `AmplitudeSpectrum`,
         into the rows, with `tallest` its tallest line as (frequency,
         amplitude in SI); amplitudes converted by `scale` into `unit`.
-        None clears them."""
+        `unread` is why no line could be read, said in the notes. None
+        clears them."""
         values = dict.fromkeys(key for key, _name in ROWS)
         if spectrum is not None:
             frames = spectrum.frames[record]
@@ -184,7 +186,9 @@ class AmplitudePanel(QWidget):
         if spectrum is None:
             self.notes.setText('')
             return
-        notes = [FLOOR_NOTE]
+        notes = [] if unread is None else [unread[:1].upper() + unread[1:]
+                                           + '.']
+        notes.append(FLOOR_NOTE)
         if spectrum.scalloping_db > 0.1:
             # the tallest line is the reading, and between lines it is
             # short by as much as the window's scalloping
