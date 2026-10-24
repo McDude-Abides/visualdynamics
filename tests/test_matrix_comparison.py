@@ -275,6 +275,9 @@ def test_a_cross_term_the_measurement_does_not_hold_is_said_to_be_missing():
     pair = result.pair(0, 1)
     assert pair.state == 'not measured'
     assert result.passed is True, 'the levels pass and no cross term judged'
+    # and the verdict, which is the status line, says what was not judged
+    assert result.describe() == ('passes: levels pass on 2 channels; '
+                                 '1 cross term not judged')
 
 
 def test_a_term_held_the_other_way_round_is_read_as_its_conjugate():
@@ -299,6 +302,37 @@ def test_a_term_held_the_other_way_round_is_read_as_its_conjugate():
     np.testing.assert_allclose(pair.specified_phase, 30.0)
     np.testing.assert_allclose(pair.measured_phase, 30.0)
     assert pair.state == 'in'
+
+
+def test_a_term_and_a_mirror_that_disagree_are_refused_on_either_side():
+    """Both halves of the pair written, the second not the first's
+    conjugate: which one is meant is not in the data, so the pair is
+    refused, naming the side, and the verdict counts it unjudged."""
+    spec = matrix([1.0, 4.0], {(0, 1): term(0.64, 30.0, 1.0, 4.0)},
+                  Specification)
+    spec.ordinate[2] = spec.ordinate[1]          # 2X+/1X+, not conjugated
+    result = compare_matrix(spec, measured(), scale_db=0)
+    pair = result.pair(0, 1)
+    assert pair.state == 'refused'
+    assert pair.reason.startswith('the specification holds the cross term '
+                                  'of the pair both ways round')
+    assert result.describe().endswith('1 cross term not judged')
+    run = measured()
+    run.ordinate[2] = run.ordinate[2] * 1.01
+    pair = compare_matrix(SPEC, run, scale_db=0).pair(0, 1)
+    assert pair.reason.startswith('the measurement holds the cross term')
+
+
+def test_two_records_for_one_entry_are_refused():
+    run = measured()
+    doubled = Psd(F, np.vstack([run.ordinate, run.ordinate[1:2]]),
+                  response_dof=list(run.response_dof) + ['1X+'],
+                  reference_dof=list(run.reference_dof) + ['2X+'],
+                  ordinate_dim=list(run.ordinate_dim)
+                  + ['acceleration**2/frequency'])
+    with pytest.raises(ValueError, match=r'both the entry of 1X\+ against '
+                       r'2X\+; keep one'):
+        compare_matrix(SPEC, doubled, scale_db=0)
 
 
 def test_a_breakpoint_specification_keeps_its_coherence_between_points():
@@ -580,6 +614,20 @@ def test_a_run_that_is_its_specification_passes_against_noise(coherence):
     assert COHERENCE_TOLERANCE == 0.1
 
 
+def test_the_phase_has_the_sign_the_simulation_gave_it():
+    """The second channel is the first turned 30 degrees ahead plus an
+    independent part, so with a cross term stored as conj(X_1) X_2 the
+    measured phase of 1X+ against 2X+ is +30 degrees, not -30, and a
+    sheet that asks for -30 is out on every line."""
+    run = _random_run(0.8, 30.0, seed=11)
+    result = compare_matrix(_sheet(0.8, 30.0), run, scale_db=0)
+    phase = result.pair(0, 1).measured_phase
+    assert np.nanmedian(phase) == pytest.approx(30.0, abs=2.0)
+    flipped = compare_matrix(_sheet(0.8, -30.0), run, scale_db=0)
+    assert flipped.pair(0, 1).phase_state == 'out'
+    assert flipped.pair(0, 1).phase_percent > 95.0
+
+
 def test_a_run_off_its_specification_fails_against_noise():
     result = compare_matrix(_sheet(0.8, 30.0), _random_run(0.5, 50.0, seed=12),
                             scale_db=0)
@@ -678,6 +726,8 @@ def test_a_channel_with_no_measured_autospectrum_leaves_its_pairs_unread():
     assert result.pair(1, 2).state == 'not measured'
     assert result.pair(0, 1).state == 'in'
     assert result.passed is True
+    assert result.describe().endswith('; 2 cross terms not judged; '
+                                      '1 level not judged')
 
 
 def test_the_summary_skips_a_line_no_channel_was_judged_on():

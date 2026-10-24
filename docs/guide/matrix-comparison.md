@@ -45,7 +45,18 @@ channel ([How a comparison is judged](compliance.md)), not as a matrix.
    than 10 percent of the lines it judged, the share a level is allowed
    outside abort.
 5. The verdict. The matrix passes when the diagonal passes and no cross
-   term is out.
+   term is out. The verdict line also counts the cross terms and levels
+   that were asked for and not judged (not measured, refused, or every
+   line set aside), so a pass over the rest is not read as a pass over
+   them.
+
+A cross term is stored as conj(X_p)·X_q, the way `compute_cpsds` makes
+it, so its phase is the angle by which the second channel leads the
+first, and the term of q against p is its conjugate. A term held only
+the other way round is read as that conjugate. A matrix that holds a
+pair both ways round with the two not conjugates of each other, or two
+records for one entry, is refused: which one is meant is not in the
+data.
 
 The specification is read the way it is drawn. Between breakpoints
 each term's magnitude is read log-log and its phase linearly, the way

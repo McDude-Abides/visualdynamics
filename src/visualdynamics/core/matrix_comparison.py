@@ -308,11 +308,9 @@ def _channel_of(data: Any, record: int) -> tuple[tuple[str, str],
     return (str(response), out), (str(reference), into)
 
 
-# `channel_labels` and `record_grid` lay a matrix out the way the
-# matrix checks' `_labels` and `spectral_matrix` do. They stay here
-# until those land: this comparison needs which record holds each
-# entry (to read the specification at the measured lines and to name
-# the records in its results), where `spectral_matrix` returns values.
+# `record_grid` gives which record holds each entry, not its values:
+# the comparison reads the specification at the measured lines and
+# names the records in its results.
 def channel_labels(channels: Sequence[tuple[str, str]]) -> list[str]:
     """A label per (DOF, quantity) channel: the DOF, with the quantity
     added only where one DOF carries two channels.
@@ -340,7 +338,8 @@ def record_grid(data: Any, records: Sequence[int] | None = None
     The channels are the autospectra's, (DOF, quantity) in record
     order; a cross term between two of them takes the entry at its row
     and column, and one that names a channel with no autospectrum is
-    left out. An entry no record holds is None.
+    left out. An entry no record holds is None. Two records for one
+    entry are refused: which of them is the matrix is not in the data.
 
     Parameters
     ----------
@@ -353,6 +352,11 @@ def record_grid(data: Any, records: Sequence[int] | None = None
     -------
     tuple of (list of (str, str), list of list of int or None)
         The channels, and the record at each entry, row by row.
+
+    Raises
+    ------
+    ValueError
+        If two records hold one entry.
     """
     wanted = (range(data.num_records) if records is None
               else [int(i) for i in records])
@@ -369,9 +373,28 @@ def record_grid(data: Any, records: Sequence[int] | None = None
         row, column = _channel_of(data, i)
         if row in index and column in index:
             r, c = index[row], index[column]
-            if grid[r][c] is None:
-                grid[r][c] = i
+            if grid[r][c] is not None:
+                raise ValueError(
+                    f'{data.record_label(grid[r][c])} and '
+                    f'{data.record_label(i)} are both the entry of '
+                    f'{row[0]} against {column[0]}; keep one')
+            grid[r][c] = i
     return channels, grid
+
+
+def _disagrees(term: np.ndarray, mirror: np.ndarray) -> bool:
+    """Whether a cross term and its mirror, both read at the same lines,
+    are not each other's conjugate, to a part in a million, on the lines
+    where both are numbers (a line that is not one is said by its own
+    note)."""
+    term = np.asarray(term, dtype=complex)
+    other = np.conj(np.asarray(mirror, dtype=complex))
+    finite = np.isfinite(term) & np.isfinite(other)
+    if not finite.any():
+        return False
+    term, other = term[finite], other[finite]
+    scale = float(np.max(np.abs(np.concatenate([term, other]))))
+    return not np.allclose(term, other, rtol=1e-6, atol=1e-9 * scale)
 
 
 def _between(frequencies: np.ndarray, values: np.ndarray,
@@ -861,6 +884,18 @@ class MatrixComparison:
         if unspecified:
             word = 'pair' if unspecified == 1 else 'pairs'
             parts.append(f'{unspecified} {word} not specified')
+        # what was asked for and not judged is part of the verdict: a
+        # pass over the rest is not a pass over these
+        unread = sum(1 for p in self.pairs
+                     if p.state in ('not judged', 'not measured', 'refused'))
+        if unread:
+            word = 'cross term' if unread == 1 else 'cross terms'
+            parts.append(f'{unread} {word} not judged')
+        dark = sum(1 for level in self.levels
+                   if level.state not in ('in', 'out'))
+        if dark:
+            word = 'level' if dark == 1 else 'levels'
+            parts.append(f'{dark} {word} not judged')
         return f'{verdict}: ' + '; '.join(parts) if parts else verdict
 
 
@@ -1137,6 +1172,30 @@ def compare_matrix(specification: Any, measured: Any, *,
                 checks.append(CrossCheck(r, c, label, spec_index, None,
                                          'not measured', 'not measured',
                                          missing))
+                continue
+            # a term and its mirror are one statement; two that disagree
+            # leave the pair unread rather than read from whichever
+            # record the grid met first
+            mirrors = []
+            both = grid[r][c] is not None and grid[c][r] is not None
+            if both and _disagrees(
+                    _read_at(specification, grid[r][c], lines),
+                    _read_at(specification, grid[c][r], lines)):
+                mirrors.append('specification')
+            a = where[_channel_of(measured, p)[0]]
+            b = where[_channel_of(measured, q)[0]]
+            held = (measured_grid[a][b], measured_grid[b][a])
+            if None not in held and _disagrees(ordinate[held[0]],
+                                               ordinate[held[1]]):
+                mirrors.append('measurement')
+            if mirrors:
+                checks.append(CrossCheck(
+                    r, c, label, spec_index, theirs, 'refused', 'refused',
+                    f'the {" and the ".join(mirrors)} '
+                    f'{"hold" if len(mirrors) > 1 else "holds"} the cross '
+                    'term of the pair both ways round, and the two are not '
+                    "each other's conjugate, so which is meant cannot be "
+                    'read'))
                 continue
             refusal, note = units_check(specification.ordinate_dim[spec_index],
                                         measured.ordinate_dim[theirs],
