@@ -786,6 +786,7 @@ def test_the_band_the_rms_is_taken_over_is_said_low_to_high(measured):
     (1000.0 * 2.0 ** (np.arange(6) / 3.0), 3),
     (1000.0 * 2.0 ** (np.arange(6) / 6.0), 6),
     (1000.0 * 2.0 ** np.arange(4.0), 1),
+    (1000.0 * 2.0 ** (np.arange(2) / 3.0), 3),
     (np.array([1000.0]), None),
     (np.array([0.0, 10.0]), None),
     (np.array([20.0, 10.0]), None),
@@ -815,9 +816,11 @@ def test_a_geometry_gives_the_global_axis_nearest_the_channel(measured,
 
 
 def test_a_row_with_a_blank_type_answers_when_none_matches_both():
+    # no unit either, or the table infers the type from it
     untyped = ChannelTable({'channel': [7], 'node': [1], 'direction': ['Z+'],
-                            'unit': ['m/s^2'], 'channel_type': [''],
+                            'unit': [''], 'channel_type': [''],
                             'comment': ['bracket']})
+    assert untyped.frame['channel_type'].iloc[0] == ''
     t = np.arange(int(2 * FS)) / FS
     history = visualdynamics.TimeHistory(
         t, np.random.default_rng(13).standard_normal((1, t.size)),
