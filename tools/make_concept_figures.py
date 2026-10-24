@@ -1203,7 +1203,7 @@ def resample():
           f' g^2/Hz; gain at the span {reading.gain_at_span:.2f} dB, at '
           f'{reading.lowest_fold:g} Hz {reading.gain_at_fold:.1f} dB')
     plot_resample(history, 5120.0, frequencies=[4600.0],
-                  unit_system=DEFAULT_SYSTEM, show=False, size=(1000, 700),
+                  unit_system=DEFAULT_SYSTEM, show=False, size=(1100, 720),
                   path=str(OUT / 'resample.png'))
 
 

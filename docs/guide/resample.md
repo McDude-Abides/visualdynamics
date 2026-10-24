@@ -20,8 +20,7 @@ band. So a record is filtered before it is decimated, and
 A real filter cannot go from flat to fully down in no distance, so the
 band a record is trusted over stops short of the Nyquist frequency.
 Analyzers and controllers commonly keep the alias-free span, the
-sample rate divided by 2.56, and test documents commonly ask for a
-sample rate of at least 2.5 times the filter frequency. A frame of
+sample rate divided by 2.56. A frame of
 1,024 samples has 512 lines up to the Nyquist frequency; 1,024 / 2.56 =
 400 of them lie inside the span and are kept, and the other 112, in the
 filter's roll-off, are computed and dropped. That division is where the
@@ -61,8 +60,8 @@ frequency that can fold into the span is the new rate less the span
 (3,120 Hz at 5,120 Hz, 1.56 spans), 1.3 corners up. The default design
 order is 12 (`ORDER`), which run forward and backward is 55.8 dB down
 there taking 51,200 Hz to 5,120 Hz, 55.1 dB taking 81,920 Hz to
-5,120 Hz, and never less than 54.7 dB at any factor: past the 50 dB
-test documents commonly ask of an anti-alias filter. Eleventh order
+5,120 Hz, and never less than 54.7 dB at any factor, past 50 dB of
+attenuation where content would fold. Eleventh order
 just gets there at large factors, and tenth falls short at about
 46 dB.
 

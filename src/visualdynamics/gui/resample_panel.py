@@ -203,9 +203,9 @@ class ResamplePanel(QWidget):
         self.values['lowest'].setToolTip(
             'The lowest frequency that folds into the span: the new rate '
             'less the span')
-        if reading.folds:
-            self.verdict.setText('\n'.join(
-                fold.describe() + '.' for fold in reading.folds))
-        else:
-            self.verdict.setText('Nothing above the new Nyquist frequency '
-                                 'to fold.')
+        lines = [fold.describe() + '.' for fold in reading.folds]
+        if not lines:
+            lines = ['Nothing above the new Nyquist frequency to fold.']
+        # a typed frequency that does not fold is said, not dropped
+        lines += [note + '.' for note in reading.notes]
+        self.verdict.setText('\n'.join(lines))

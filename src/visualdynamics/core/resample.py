@@ -27,8 +27,8 @@ is 6.02 dB down at its nominal corner, is about 0.1 dB down at the span
 and 0.01 dB at 0.9 of it. The lowest fold is then 1.3 corners up, and
 the default twelfth-order design, doubled by the forward and backward
 pass, is 55 to 56 dB down there at the factors of 10 to 16 in common
-use and never less than 54.7 dB at any factor: past the 50 dB test
-documents commonly ask of an anti-alias filter.
+use and never less than 54.7 dB at any factor, past 50 dB of
+attenuation where content would fold.
 
 The order matters in one direction only. A filter run after the record
 is decimated cannot help: the alias is in the band by then, at a
@@ -55,11 +55,6 @@ the anti-alias filter a sampled record needs are set out.
 2. Crochiere, R. E., & Rabiner, L. R. (1983). *Multirate Digital
    Signal Processing*. Prentice Hall. Decimation and the filter it
    needs ahead of it.
-3. MIL-STD-810H (2019), *Environmental Engineering Considerations and
-   Laboratory Tests*, Method 516.8, Annex A. The alias frequency
-   |n Fs - F|, the anti-alias filter's attenuation of anything that
-   would fold into the band, and a sample rate of at least 2.5 times
-   the filter frequency.
 """
 
 from __future__ import annotations
@@ -87,8 +82,8 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # makes a record anything is computed from.
 
 #: the sample rate over the alias-free span. Analyzers and controllers
-#: commonly use 2.56, which test documents commonly ask to be at least
-#: 2.5: a power-of-two frame divided by 2.56 is a round line count
+#: commonly use 2.56: a power-of-two frame divided by 2.56 is a round
+#: line count
 SPAN_RATIO = 2.56
 
 #: the anti-alias filter's corner over the alias-free span. At 1.2 the
@@ -103,8 +98,8 @@ CORNER = 1.2
 #: backward pass, twelfth order with the corner at 1.2 spans is 55.8 dB
 #: down at the lowest frequency that folds into the span at a factor of
 #: 10, 55.1 dB at 16, and 54.7 dB in the limit of a large factor, past
-#: the 50 dB test documents commonly ask for; eleventh order is 50.2 dB
-#: in that limit, and tenth falls short (45.6 dB)
+#: 50 dB; eleventh order is 50.2 dB in that limit, and tenth falls short
+#: (45.6 dB)
 ORDER = 12
 
 #: the frame the reading's spectra are taken with at the new rate, in
@@ -203,7 +198,7 @@ def decimation_factor(source_rate: float, rate: float) -> int:
     factor = round(ratio)
     if abs(ratio - factor) > RATE_TOLERANCE * ratio or factor < 2:
         low, high = int(np.floor(ratio)), int(np.ceil(ratio))
-        near = [f'{source / q:g} Hz (every {q}th sample)'
+        near = [f'{source / q:g} Hz (every {ordinal(q)} sample)'
                 for q in (low, high) if q >= 2]
         raise ValueError(
             f'{target:g} Hz does not divide the record\'s {source:g} Hz '
@@ -240,8 +235,10 @@ def _filtered_every(sos: Any, rows: np.ndarray, factor: int) -> np.ndarray:
     are held at the full rate: `scipy.signal.sosfiltfilt` takes about
     three rows of working space for each, and the rows run on the
     filter threads (`filters.threaded_sosfiltfilt`) a few at a time, at
-    most a quarter as many as the record has rows, so the working space
-    stays under the record's own size. The values are the
+    most a quarter as many as the record has rows, so for a record of
+    four rows or more the working space stays under the record's own
+    size; a single row still takes the filter's own working space of
+    about three rows. The values are the
     filter-then-decimate ones to the bit, since each row is the same
     call.
     """
@@ -423,7 +420,9 @@ class ResampleReading:
     record as recorded on the same line spacing, and at the new rate
     'filtered' (filtered first), 'bare' (decimated with no filter) and
     'after' (decimated, then low-passed through the same filter); the
-    densities are in SI with the dimension `density_dim`.
+    densities are in SI with the dimension `density_dim`. `unfolded`
+    holds the frequencies asked for that are at or below the new Nyquist
+    frequency, which do not fold, and `notes` names them in words.
     """
 
     record: int
@@ -440,6 +439,7 @@ class ResampleReading:
     density_dim: str
     spectra: dict[str, tuple[np.ndarray, np.ndarray]] = field(
         compare=False, repr=False)
+    unfolded: tuple[float, ...] = ()
 
     @property
     def nyquist(self) -> float:
@@ -483,6 +483,18 @@ class ResampleReading:
         folds into the span, dB."""
         return _gain(self.filtering, self.source_rate, self.lowest_fold)
 
+    @property
+    def notes(self) -> tuple[str, ...]:
+        """Each frequency asked for that does not fold, in words: a
+        frequency typed at or below the new Nyquist frequency is said to
+        be there rather than dropped without a word."""
+        def where(f: float) -> str:
+            at = abs(f - self.nyquist) <= RATE_TOLERANCE * self.nyquist
+            return 'at' if at else 'below'
+
+        return tuple(f'{f:g} Hz is {where(f)} the new Nyquist frequency '
+                     'and does not fold' for f in self.unfolded)
+
     def describe(self) -> str:
         """The reading in words, as the plot's title and the status line
         give it."""
@@ -491,10 +503,10 @@ class ResampleReading:
                 f'{self.corner:g} Hz: Nyquist {self.nyquist:g} Hz, span '
                 f'{self.span:g} Hz, {self.kept} of {self.lines} lines '
                 'kept')
-        if not self.folds:
+        parts = [f.describe() for f in self.folds] + list(self.notes)
+        if not parts:
             return text + '.'
-        return text + '. ' + '; '.join(f.describe() for f in self.folds) \
-            + '.'
+        return text + '. ' + '; '.join(parts) + '.'
 
 
 def _gain(filtering: Filtering, sample_rate: float, frequency: float
@@ -567,8 +579,8 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
     record's own rate, half overlapped. `frequencies` above the new
     Nyquist frequency are folded (`alias_frequency`) and the level each
     spectrum has where each lands is read; frequencies at or below the
-    new Nyquist frequency do not fold and are left out. With none
-    given, the tallest line the record has above the new Nyquist
+    new Nyquist frequency do not fold: they are left out of the folds
+    and named in the reading's `notes`. With none given, the tallest line the record has above the new Nyquist
     frequency is the one folded.
 
     Parameters
@@ -656,11 +668,12 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
     else:
         wanted = [float(x) for x in np.atleast_1d(
             np.asarray(frequencies, dtype=float))]
-    folds = []
+    folds, unfolded = [], []
     for frequency in wanted:
-        if not abs(frequency) > nyquist:
-            continue
         frequency = abs(frequency)
+        if not frequency > nyquist:
+            unfolded.append(frequency)
+            continue
         alias = alias_frequency(frequency, new_rate)
         folds.append(Fold(
             frequency=frequency, alias=alias,
@@ -676,4 +689,4 @@ def read_resample(data: TimeHistory, rate: float, record: int = 0, *,
         source_rate=source_rate, rate=new_rate, factor=factor,
         order=int(order), frame_length=frame, lines=lines, kept=kept,
         dropped=dropped, folds=tuple(folds), density_dim=density_dim,
-        spectra=spectra)
+        spectra=spectra, unfolded=tuple(unfolded))

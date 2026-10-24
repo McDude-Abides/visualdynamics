@@ -47,6 +47,10 @@ MARKER_SIZE = 11
 #: what it falls to below that is rounding, not signal
 DECADES = 13.0
 
+#: how far above the tallest line the density axis reaches, in decades:
+#: room for the words a fold carries above its marker
+HEADROOM = 2.5
+
 #: how far past the new Nyquist frequency the frequency axis runs, as a
 #: share of it, when no fold reaches further: room to see what is above
 REACH = 1.25
@@ -148,14 +152,19 @@ def build_resample(layout: Any, reading: Any, *, unit_system: Any = None,
         f'dropped lines, {reading.dropped} of {reading.lines}')
     nyquist_pen = pg.mkPen(foreground, width=1.5, style=Qt.PenStyle.DashLine)
     span_pen = pg.mkPen(foreground, width=1.5)
-    for at, pen, text in ((reading.nyquist, nyquist_pen,
-                           f'Nyquist {reading.nyquist:g} Hz'),
-                          (reading.span, span_pen,
-                           f'span {reading.span:g} Hz')):
+    # the span's name to the left of its line and the Nyquist
+    # frequency's to the right of its own, so the hatched band lies
+    # between them: both to the left, the Nyquist frequency's name
+    # filled the band and ran into the span's
+    for at, pen, text, side in ((reading.nyquist, nyquist_pen,
+                                 f'Nyquist {reading.nyquist:g} Hz', 0),
+                                (reading.span, span_pen,
+                                 f'span {reading.span:g} Hz', 1)):
         plot.addItem(pg.InfiniteLine(
             pos=at, angle=90, pen=pen, movable=False, label=text,
             labelOpts={'position': 0.96, 'color': foreground,
-                       'anchors': [(1, 0), (1, 0)]}), ignoreBounds=True)
+                       'anchors': [(side, 0), (side, 0)]}),
+            ignoreBounds=True)
         legend.addItem(pg.PlotDataItem([], [], pen=pen), text)
 
     # ---- the folds ------------------------------------------------------
@@ -188,8 +197,10 @@ def build_resample(layout: Any, reading: Any, *, unit_system: Any = None,
 
     plot.setXRange(0.0, reach, padding=0.0)
     if top > 0.0:
-        # headroom above the tallest line for the words beside a fold
-        plot.setYRange(np.log10(top) - DECADES, np.log10(top) + 1.5,
+        # headroom above the tallest line for the words beside a fold,
+        # four lines of them standing on its marker: at 1.5 decades the
+        # first line ran under the title
+        plot.setYRange(np.log10(top) - DECADES, np.log10(top) + HEADROOM,
                        padding=0.0)
     plot.setLabel('left', axis_label(reading.density_dim, us))
     plot.setLabel('bottom', f'frequency [{us.label_html("frequency")}]')

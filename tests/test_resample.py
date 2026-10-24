@@ -10,8 +10,8 @@ folds into the span is the rate less the span, 3,120 Hz, 1.56 spans.
 The filter's corner is at 1.2 spans, 2,400 Hz, so the fold is 1.3
 corners up: a Butterworth of design order N run forward and backward
 is 20 log10(1 / (1 + 1.3^(2N))) there in the analog limit, 54.7 dB
-down at twelfth order, 50.2 at eleventh and 45.6 at tenth, against the
-50 dB test documents commonly ask for, and at the span, 1 / 1.2
+down at twelfth order, 50.2 at eleventh and 45.6 at tenth, against
+50 dB, and at the span, 1 / 1.2
 corners, it is 0.11 dB down where a corner on the span would be 6.02.
 The digital design is further down at the fold than the analog limit
 at every factor, 55.8 dB at a factor of 10 (51,200 to 5,120 Hz). A 1 g
@@ -113,6 +113,10 @@ def test_the_factor_is_a_whole_number():
     with pytest.raises(ValueError, match=r'5120 Hz \(every 10th sample\) '
                                          r'and 4654.55 Hz \(every 11th'):
         decimation_factor(51200.0, 5000.0)
+    # the small factors are spelled as ordinals too, not '2th'
+    with pytest.raises(ValueError, match='every 2nd sample') as refused:
+        decimation_factor(5120.0, 2200.0)
+    assert '1706.67 Hz (every 3rd sample)' in str(refused.value)
     with pytest.raises(ValueError, match='never raises'):
         decimation_factor(5120.0, 5120.0)
     with pytest.raises(ValueError, match='never raises'):
@@ -409,6 +413,24 @@ def test_a_frequency_that_folds_above_the_span_lands_among_the_dropped_lines():
     assert 'among the dropped lines' in fold.describe()
 
 
+def test_a_frequency_typed_that_does_not_fold_is_named_not_dropped():
+    """1,000 Hz is under the new Nyquist frequency and 2,560 Hz on it:
+    neither folds, and the reading says so rather than leaving them out
+    without a word."""
+    reading = read_resample(record(((2900.0, 1.0),)), RATE,
+                            frequencies=[2900.0, 1000.0, 2560.0])
+    assert [fold.frequency for fold in reading.folds] == [2900.0]
+    assert reading.unfolded == (1000.0, 2560.0)
+    assert reading.notes == (
+        '1000 Hz is below the new Nyquist frequency and does not fold',
+        '2560 Hz is at the new Nyquist frequency and does not fold')
+    assert reading.describe().endswith(
+        'low-passed after decimating; 1000 Hz is below the new Nyquist '
+        'frequency and does not fold; 2560 Hz is at the new Nyquist '
+        'frequency and does not fold.')
+    assert read_resample(record(), RATE, frequencies=[4600.0]).notes == ()
+
+
 def test_a_record_with_nothing_above_the_new_nyquist_folds_nothing():
     reading = read_resample(record(((300.0, 1.0),)), RATE)
     # a pure tone's leakage reaches above 2,560 Hz, so its tallest line
@@ -522,6 +544,34 @@ def test_the_view_marks_the_span_the_nyquist_frequency_and_the_dropped_lines(
         # the axis runs past the fold, so the content that folds is seen
         low, high = plot.getViewBox().viewRange()[0]
         assert low == 0.0 and high > 4600.0
+    finally:
+        layout.close()
+
+
+def test_the_view_keeps_its_words_apart_and_inside_the_plot(qt_app):
+    """At 1000 by 700 the span's and the Nyquist frequency's names do not
+    touch (the Nyquist frequency's sits right of its line, the span's
+    left of its own), and the words above a fold stay under the top of
+    the plot rather than running under the title."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.resample import build_resample
+
+    reading = read_resample(record(noise=0.01), RATE, frequencies=[4600.0])
+    layout = pg.GraphicsLayoutWidget()
+    layout.resize(1000, 700)
+    try:
+        build_resample(layout, reading)
+        layout.show()
+        qt_app.processEvents()
+        (plot,) = _plots(layout)
+        names = {round(item.value()): item.label.sceneBoundingRect()
+                 for item in plot.items if isinstance(item, pg.InfiniteLine)}
+        assert names[2000].right() < names[2560].left()
+        (words,) = [item for item in plot.items
+                    if isinstance(item, pg.TextItem)]
+        top = plot.getViewBox().sceneBoundingRect().top()
+        assert words.sceneBoundingRect().top() >= top
     finally:
         layout.close()
 
@@ -670,6 +720,26 @@ def test_the_settings_redraw_the_reading_and_are_kept(window, pump):
     assert lines[0].startswith('2900 Hz folds to 2220 Hz, among the '
                                'dropped lines')
     assert lines[1].startswith('4600 Hz folds to 520 Hz, inside the span')
+    # a typed frequency that does not fold is named under the folds
+    panel.frequencies_edit.setText('1000, 4600')
+    panel.frequencies_edit.editingFinished.emit()
+    pump()
+    lines = panel.verdict.text().splitlines()
+    assert lines[0].startswith('4600 Hz folds to 520 Hz, inside the span')
+    assert lines[1] == ('1000 Hz is below the new Nyquist frequency and '
+                        'does not fold.')
+    assert len(lines) == 2
+    assert window._status_text.endswith(
+        '1000 Hz is below the new Nyquist frequency and does not fold.')
+    panel.frequencies_edit.setText('1000')
+    panel.frequencies_edit.editingFinished.emit()
+    pump()
+    assert panel.verdict.text().splitlines() == [
+        'Nothing above the new Nyquist frequency to fold.',
+        '1000 Hz is below the new Nyquist frequency and does not fold.']
+    panel.frequencies_edit.setText('2900, 4600')
+    panel.frequencies_edit.editingFinished.emit()
+    pump()
     # text that is not a list of frequencies is put back
     panel.frequencies_edit.setText('fast')
     panel.frequencies_edit.editingFinished.emit()
