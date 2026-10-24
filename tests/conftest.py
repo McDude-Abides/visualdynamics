@@ -385,6 +385,12 @@ def destroy_window(window, qt_app):
     # destroyed one from inside the teardown
     for _ in range(3):
         qt_app.processEvents()
+    # the report editor's page goes through the same stand-down the app
+    # runs on close; its renderer is ended first, as web_close does, so
+    # the discard has nothing left to wait on
+    editor = getattr(window, 'report_editor', None)
+    if editor is not None:
+        end_render_process(getattr(editor, 'page', None))
     window.close()
     window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -611,6 +617,38 @@ def web_view():
     return view
 
 
+def end_render_process(page):
+    """End a web page's render process by its pid and wait until the
+    page reports it gone (at most five seconds). Test-only: a page torn
+    down, discarded or deleted while its renderer is alive can hang the
+    process (the 98 % stall), so every teardown that can meet a page
+    ends the renderer first. Windows has no SIGKILL; there os.kill with
+    SIGTERM calls TerminateProcess, the same end, and a pid already gone
+    raises OSError rather than ProcessLookupError."""
+    import os
+    import signal
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    if page is None:
+        return
+    pid = int(page.renderProcessPid())
+    if pid <= 0:
+        return
+    app = QApplication.instance()
+    gone = []
+    page.renderProcessTerminated.connect(lambda *_: gone.append(True))
+    try:
+        os.kill(pid, getattr(signal, 'SIGKILL', signal.SIGTERM))
+    except (ProcessLookupError, OSError):
+        gone.append(True)
+    deadline = time.monotonic() + 5.0
+    while not gone and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+
 def web_close(view):
     """Tear a view down while the application still runs.
 
@@ -628,33 +666,13 @@ def web_close(view):
     process gone — nothing left to wait on. Test-only: a test's page
     is finished with, where the app's is a person's report.
     """
-    import os
-    import signal
-    import time
-
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
     page = getattr(view, '_vd_page', None) or view.page()
-    pid = int(page.renderProcessPid()) if page is not None else 0
-    gone = []
-    if page is not None:
-        page.renderProcessTerminated.connect(lambda *_: gone.append(True))
     view.stop()
     view.hide()
-    if pid > 0:
-        # Windows has no SIGKILL; there os.kill with SIGTERM calls
-        # TerminateProcess, which is the same end, and a pid already
-        # gone raises OSError rather than ProcessLookupError
-        kill = getattr(signal, 'SIGKILL', signal.SIGTERM)
-        try:
-            os.kill(pid, kill)
-        except (ProcessLookupError, OSError):
-            gone.append(True)
-        deadline = time.monotonic() + 5.0
-        while not gone and time.monotonic() < deadline:
-            app.processEvents()
-            time.sleep(0.01)
+    end_render_process(page)
     view.setPage(None)
     if getattr(view, '_vd_page', None) is not None:
         view._vd_page.deleteLater()
