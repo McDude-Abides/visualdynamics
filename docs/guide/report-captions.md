@@ -32,7 +32,7 @@ The block has eight rows, always in this order:
 | Estimate | ASD or CPSD, one channel or several, a linear average of how many frames, how many records each channel pooled when any pooled more than one, and the bands for a banded spectrum |
 | Resolution | The line spacing, or the bands and the lines they were banded from |
 | Window | The averaging's own description (`Averaging.describe`): the window and its parameter, the overlap, the frame length, and the detrend when there is one |
-| DOF | The equivalent degrees of freedom, discounted for overlap, beside the nominal count |
+| DOF | The equivalent degrees of freedom, discounted for overlap, beside the nominal count; for a banded spectrum, the bands' counts beside a narrowband line's |
 | Requirement | The specification drawn, which of its limits are drawn, and the overall rms measured (and as drawn, where the comparison scales it) beside the rms it specifies, over the band the comparison judged; or why the record was not compared |
 
 A fact nothing records is written as "not recorded" rather than left
@@ -40,10 +40,16 @@ out, so a reader sees the gap instead of assuming the row was never
 needed. A spectrum imported from a file carries no averaging and no
 run the project knows of, so its run, window, frames and degrees of
 freedom read "not recorded": the name an import gave the object is
-not a run. A banded spectrum carries no degrees of
-freedom of its own, because banding sums lines and raises the count;
-its caption gives the count of each narrowband line before banding,
-and says so.
+not a run. A band sums lines, and carries their degrees of freedom:
+a banded spectrum's caption gives the range of its bands' counts, each
+worked from the narrowband lines the band sums (Satterthwaite's count
+for a sum of correlated lines, each weighted by the power it puts in
+the band, with the window's correlation between lines), beside the
+count of one narrowband line. Under the default Hann window a band of
+many lines is worth about half what its lines would be if they were
+independent. Without the narrowband spectrum and its averaging the
+bands' count cannot be worked out, and the caption gives the line's
+count before banding and says so.
 
 The rms values in the Requirement row are the comparison's own (the
 ones the verdict table states), over the band it judged. Where the

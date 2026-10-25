@@ -1929,9 +1929,8 @@ class Project(dict):
             history_name, history = None, None
         # an imported spectrum names no run: the object's name is what
         # the import or a person called it, which may be the file's,
-        # the channel's or anything else (Brandon, 2026-10-23). A block
-        # label, where the records carry one, is read by
-        # `record_caption`
+        # the channel's or anything else. A block label, where the
+        # records carry one, is read by `record_caption`
         run = history_name
         sample_rate, origin = None, 0.0
         if history is not None and len(history.abscissa) > 1:

@@ -23,9 +23,13 @@ them into a `RecordCaption`:
   the global axis that direction is nearest;
 - the estimate, the line spacing and the equivalent degrees of freedom
   are the spectrum's own (`Psd.statistical_dof`, stamped when the
-  spectrum was averaged; a banded spectrum carries the line spacing and
-  the degrees of freedom of the narrowband spectrum it was banded
-  from);
+  spectrum was averaged); a banded spectrum carries the line spacing of
+  the narrowband spectrum it was banded from, and its degrees of
+  freedom are those of the lines each band sums: Satterthwaite's count
+  for a sum of correlated lines, each weighted by the power it puts in
+  the band, with the window's correlation between lines
+  (`Averaging.line_correlation`), the rule `chance` judges summed lines
+  by;
 - the window, the overlap, the frames and the stretch of the record
   are the `Averaging` the spectrum was made with, which a spectrum does
   not carry itself (`Project.averaging_of` gives it from the
@@ -158,7 +162,14 @@ class RecordCaption:
         channels of one figure need not have the same.
     dof : tuple of float or None
         The equivalent statistical degrees of freedom of each channel's
-        average, discounted for overlap.
+        average, discounted for overlap; for a banded spectrum, of each
+        narrowband line it was banded from.
+    band_dof : tuple of float or None
+        For a banded spectrum, the (lowest, highest) equivalent degrees
+        of freedom of its bands over the records captioned
+        (`band_dof`); None for a narrowband one, or where the
+        narrowband spectrum, its averaging or a record's autospectrum
+        is not known.
     nominal_dof : tuple of int or None
         Two per frame averaged, the count without the discount.
     requirement : str or None
@@ -204,6 +215,7 @@ class RecordCaption:
     pooled: tuple[int, ...] | None = None
     dof: tuple[float, ...] | None = None
     nominal_dof: tuple[int, ...] | None = None
+    band_dof: tuple[float, float] | None = None
     requirement: str | None = None
     limits: tuple[str, ...] = ()
     measured_rms: float | None = None
@@ -307,12 +319,17 @@ class RecordCaption:
         said = _span(self.dof) + ' equivalent'
         if self.nominal_dof:
             said += f' ({_span(self.nominal_dof)} nominal)'
-        if self.per_octave is not None:
-            # banding sums lines and raises the count, which is why a
-            # banded spectrum carries none of its own; what is known is
-            # the count of each line that went into a band
-            said += ' per narrowband line, before banding'
-        return said
+        if self.per_octave is None:
+            return said
+        if self.band_dof is not None:
+            # a band holds the lines it sums, and their degrees of
+            # freedom with them; the band's count is the one its scatter
+            # follows
+            return (f'{_span(self.band_dof)} equivalent per band, from '
+                    f'{said} per narrowband line')
+        # without the lines' powers and the window's correlation the
+        # bands' count cannot be worked out; the lines' is what is known
+        return said + ' per narrowband line, before banding'
 
     def _requirement(self) -> str:
         if self.requirement is None:
@@ -343,6 +360,57 @@ def _span(values: Sequence[float]) -> str:
     if np.isclose(low, high, rtol=1e-9, atol=0.0):
         return f'{low:.4g}'
     return f'{low:.4g} to {high:.4g}'
+
+
+def band_dof(frequencies: Any, values: Any, dof: float, correlation: Any,
+             left: Any, right: Any) -> np.ndarray:
+    """The equivalent degrees of freedom of each band of a banded
+    autospectrum, from the narrowband lines it sums.
+
+    Each line counts in a band with the power it puts there: its value
+    times the part of its bin inside the band (`octave.resample`'s
+    rule). Lines `dof` each whose estimates vary together by
+    `correlation` at 0, 1, 2, ... lines apart (`Averaging.line_correlation`)
+    sum to Satterthwaite's count, the rule `chance` judges summed lines
+    by: N times `dof` for N equal, independent lines, fewer under any
+    window but a rectangle.
+
+    Parameters
+    ----------
+    frequencies, values : array_like
+        The narrowband lines, evenly spaced, and the autospectrum on
+        them.
+    dof : float
+        The equivalent degrees of freedom of one line.
+    correlation : array_like
+        The correlation between line estimates, starting at 1.
+    left, right : array_like
+        The bands' edges in Hz (`octave.bin_bounds`).
+
+    Returns
+    -------
+    numpy.ndarray
+        One count per band; NaN for a band no line with power reaches.
+    """
+    from .chance import _sum_dof
+    from .octave import bin_bounds
+
+    frequencies = np.asarray(frequencies, dtype=float)
+    power = np.real(np.asarray(values, dtype=complex))
+    power = np.where(np.isfinite(power) & (power > 0.0), power, 0.0)
+    low, high = bin_bounds(frequencies)
+    left, right = np.asarray(left, dtype=float), np.asarray(right, dtype=float)
+    share = np.clip(np.minimum(high[None, :], right[:, None])
+                    - np.maximum(low[None, :], left[:, None]), 0.0, None)
+    weights = share * power[None, :]
+    correlation = np.asarray(correlation, dtype=float)
+    out = np.full(len(left), np.nan)
+    for k, row in enumerate(weights):
+        held = np.flatnonzero(row > 0.0)
+        if held.size:
+            out[k] = _sum_dof(row[held[0]:held[-1] + 1], float(dof),
+                              correlation)
+    return out
 
 
 def _spacing(abscissa: np.ndarray) -> float | None:
@@ -572,6 +640,20 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
         counts = [max(round(each / one.equivalent), 1) for each in dof]
         nominal = tuple(one.nominal * count for count in counts)
         pooled = tuple(counts)
+    bands = None
+    if banded and dof is not None and averaging is not None \
+            and all(narrowband.is_autospectrum(record) for record in wanted):
+        from .octave import bin_bounds
+
+        left, right = bin_bounds(spectrum.abscissa, spectrum.bandwidth)
+        correlation = averaging.line_correlation()
+        counts = np.concatenate([
+            band_dof(narrowband.abscissa, narrowband.ordinate[record], each,
+                     correlation, left, right)
+            for record, each in zip(wanted, dof)])
+        counts = counts[np.isfinite(counts)]
+        if counts.size:
+            bands = (float(counts.min()), float(counts.max()))
 
     if run is None and spectrum.block is not None:
         labels = {spectrum.block[record] for record in wanted}
@@ -647,7 +729,7 @@ def record_caption(spectrum: Any, records: int | Sequence[int] = 0, *,
         overlap=None if averaging is None else averaging.overlap,
         frame_length=None if averaging is None else averaging.frame_length,
         frames=None if averaging is None else averaging.frames,
-        pooled=pooled, dof=dof, nominal_dof=nominal,
+        pooled=pooled, dof=dof, nominal_dof=nominal, band_dof=bands,
         requirement=(None if specification is None
                      else requirement or 'specification'),
         limits=limits, measured_rms=measured_rms,

@@ -178,16 +178,22 @@ def test_several_records_name_each_channel_and_a_span_of_dof(measured, table):
 
 
 def test_a_banded_spectrum_states_its_bands_and_its_lines_dof(measured):
-    """Banding sums lines and raises the count, which is why a banded
-    spectrum carries none; the caption gives the narrowband lines' and
-    says it is that."""
+    """Banding sums lines and raises the count: each band carries the
+    count of the lines it sums, from one line's 17.15 (a band narrower
+    than a line holds part of one) up, and the narrowband lines' count
+    is said beside it. Without the narrowband source neither is known."""
     banded = measured.to_octave(3)
     rows = _rows(record_caption(banded, 0, averaging=AVERAGING,
                                 narrowband=measured))
     assert rows['Estimate'].endswith(', banded to 1/3 octave')
     assert rows['Resolution'] == '1/3-octave bands, from 1 Hz lines'
-    assert rows['DOF'] == ('17.15 equivalent (18 nominal) per narrowband '
-                           'line, before banding')
+    assert re.fullmatch(r'17\.15 to \d+(\.\d+)? equivalent per band, from '
+                        r'17\.15 equivalent \(18 nominal\) per narrowband '
+                        r'line', rows['DOF']), rows['DOF']
+    # without the averaging, the window's correlation is not known
+    unknown = _rows(record_caption(banded, 0, narrowband=measured))
+    assert unknown['DOF'] == ('17.15 equivalent per narrowband line, '
+                              'before banding')
     # without its source, a banded spectrum has neither to give
     alone = _rows(record_caption(banded, 0))
     assert alone['Resolution'] == '1/3-octave bands'
@@ -855,3 +861,69 @@ def test_a_record_of_unknown_quantity_takes_the_one_row_at_its_dof(table):
 def test_a_record_past_the_last_is_refused_by_its_number(measured):
     with pytest.raises(IndexError, match='record 2 is not one of the 2'):
         record_caption(measured, 2)
+
+
+# ---- the degrees of freedom of a band -------------------------------------------
+
+
+def test_a_band_counts_the_lines_it_sums_by_hand():
+    """Four lines of 10 each, whole inside a band: 40 when they are
+    independent; under a Hann window's single-frame correlation of 4/9
+    at one line and 1/36 at two, 16 x 10 over 4 + 2 (3 x 4/9 + 2 x 1/36),
+    23.61. Half a line's bin inside a band weighs it by half; a band no
+    line with power reaches has no count."""
+    from visualdynamics.core.report_caption import band_dof
+
+    f = np.arange(1.0, 9.0)
+    left, right = np.array([0.5, 4.5, 20.0]), np.array([4.5, 8.5, 30.0])
+    independent = band_dof(f, np.ones(8), 10.0, [1.0], left, right)
+    assert independent[:2] == pytest.approx([40.0, 40.0])
+    assert np.isnan(independent[2])
+    hann = band_dof(f, np.ones(8), 10.0, [1.0, 4 / 9, 1 / 36], left, right)
+    assert hann[0] == pytest.approx(160.0 / (4 + 2 * (3 * 4 / 9 + 2 / 36)))
+    # a band holding half of line 1 and all of line 2: weights 1/2 and 1,
+    # (3/2)^2 x 10 / (1/4 + 1)
+    half = band_dof(f, np.ones(8), 10.0, [1.0], [1.0], [2.5])
+    assert half[0] == pytest.approx(2.25 * 10.0 / 1.25)
+
+
+def test_a_banded_spectrum_carries_its_bands_dof_against_white_noise():
+    """The rule against what chance gives: three hundred independent
+    white-noise channels under the default Hann window, nine frames at
+    half overlap, banded to 1/3 octave. Each band's count read from the
+    scatter of its three hundred estimates, 2 mean^2 / variance, sits
+    on the count the caption works out; the count of the lines summed as
+    if independent overstates it about twice at the higher bands."""
+    from visualdynamics.core.octave import bin_bounds
+    from visualdynamics.core.report_caption import band_dof
+
+    rng = np.random.default_rng(11)
+    count = 300
+    t = np.arange(int(6 * FS)) / FS
+    history = visualdynamics.TimeHistory(
+        t, rng.standard_normal((count, t.size)),
+        response_dof=[f'{k + 1}Z+' for k in range(count)],
+        ordinate_dim='acceleration')
+    history.averaging = AVERAGING
+    narrow = history.compute_psds()
+    banded = narrow.to_octave(3)
+    left, right = bin_bounds(banded.abscissa, banded.bandwidth)
+    one = AVERAGING.statistical_dof(records=1).equivalent
+    flat = np.ones(len(narrow.abscissa))
+    worked = band_dof(narrow.abscissa, flat, one,
+                      AVERAGING.line_correlation(), left, right)
+    naive = band_dof(narrow.abscissa, flat, one, [1.0], left, right)
+    values = np.real(banded.ordinate)
+    scatter = 2.0 * values.mean(axis=0) ** 2 / values.var(axis=0, ddof=1)
+    inside = (banded.abscissa >= 20.0) & (banded.abscissa <= 400.0)
+    ratio = scatter[inside] / worked[inside]
+    assert 0.9 < np.median(ratio) < 1.1
+    assert ratio.min() > 0.7 and ratio.max() < 1.4
+    high = banded.abscissa[inside] >= 200.0
+    assert np.all(scatter[inside][high] / naive[inside][high] < 0.65)
+    caption = record_caption(banded, 0, averaging=AVERAGING,
+                             narrowband=narrow)
+    # the caption's own count, from the record's own powers, is the
+    # worked one: its highest band within the scatter of one record
+    assert caption.band_dof[1] > caption.dof[0]
+    assert caption.band_dof[1] == pytest.approx(np.nanmax(worked), rel=0.2)
