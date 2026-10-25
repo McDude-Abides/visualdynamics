@@ -885,6 +885,9 @@ def test_a_band_counts_the_lines_it_sums_by_hand():
     # (3/2)^2 x 10 / (1/4 + 1)
     half = band_dof(f, np.ones(8), 10.0, [1.0], [1.0], [2.5])
     assert half[0] == pytest.approx(2.25 * 10.0 / 1.25)
+    # lines weighted by their power: 1, 1 and 4 give 6^2 x 10 / 18 = 20
+    uneven = band_dof(f[:3], [1.0, 1.0, 4.0], 10.0, [1.0], [0.5], [3.5])
+    assert uneven[0] == pytest.approx(20.0)
 
 
 def test_a_banded_spectrum_carries_its_bands_dof_against_white_noise():
