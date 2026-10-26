@@ -217,7 +217,16 @@ def _report_payload(report, objects, unit_system=None, edit=False,
                     (index, block, _build_block(block, objects, us,
                                                 object_groups)))
             continue
-        built = _build_block(block, objects, us, object_groups)
+        if block.get('kind') == 'prediction':
+            # responses against prediction: drawn only while the
+            # feature is on
+            if 'prediction' not in active:
+                continue
+            from .prediction import build as build_prediction
+
+            built = build_prediction(block, objects, us, object_groups)
+        else:
+            built = _build_block(block, objects, us, object_groups)
         if built is None:
             if not edit:
                 continue

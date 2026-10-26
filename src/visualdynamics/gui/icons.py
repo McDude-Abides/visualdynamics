@@ -74,6 +74,9 @@ COLORS = {
     'Report': '#d2c14e',        # manila, like the folder it replaces
     'Photos': '#b07d62',        # sienna, a print's warm border
     'MatchedModes': '#3fb950',  # green: agreement found
+    # the analyst's numbers: a peak drawn dashed, as a prediction is
+    # drawn over the measurement, with its band beneath
+    'Predictions': '#c9822b',   # ochre
     'Test': '#6e7681',          # slate: the container itself
 }
 
@@ -1447,6 +1450,21 @@ def _draw_matched_modes(painter, color):
     painter.drawRect(40, 40, 11, 11)
 
 
+def _draw_predictions(painter, color):
+    """A predicted peak: a resonance drawn dashed, as a prediction is
+    drawn over a measurement, over the band its measured peak is looked
+    for in."""
+    pen = _pen(color, 5)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(pen)
+    painter.drawPath(_curve([(8, 46), (20, 42), (27, 34), (32, 12),
+                             (37, 34), (44, 42), (56, 46)]))
+    painter.setPen(_pen(color, 4))
+    painter.drawLine(QPointF(20, 55), QPointF(44, 55))
+    painter.drawLine(QPointF(20, 50), QPointF(20, 58))
+    painter.drawLine(QPointF(44, 50), QPointF(44, 58))
+
+
 def _draw_test(painter, color):
     """Stacked layers: a test holding geometry, data and metadata."""
     fill = QColor(color)
@@ -2161,6 +2179,7 @@ _DRAW = {
     'Photos': _draw_photos,
     'ShapeSet': _draw_shape_set,
     'MatchedModes': _draw_matched_modes,
+    'Predictions': _draw_predictions,
     'Test': _draw_test,
 }
 

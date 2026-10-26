@@ -210,6 +210,75 @@ without the feature or without a channel table. `report_calibration`
 refuses a report with no test date, since there is then nothing to
 judge against. What to do about a lapsed sensor stays the engineer's.
 
+## Responses against prediction
+
+**Responses against prediction** (group Results) reads each response
+channel against the response its analyst predicted, scaled to the level
+run, so the analyst can give the low-level run's answer (as predicted,
+different and explained, or different and not explained) and the
+report can carry the table that answer rests on.
+
+**The predictions** are the project's: one predictions object holding,
+per response channel, the predicted peaks (frequency, level and Q) or a
+predicted curve with the frequencies of the modes it is compared at,
+the input level the prediction is stated at, its source and whether the
+customer supplied it, and the model's stated uncertainty. They are
+entered from the console or a script, one channel a line, and saved in
+the project file:
+
+```python
+project.predict('Predictions', '201Y+', 'asd', [(385, 5.8, 12)], unit='g',
+                level_db=0, frequency_uncertainty=10, level_uncertainty=3,
+                source='Stress analysis SR-12 rev B', customer=True)
+project.predict('Predictions', '301Z+', 'transmissibility',
+                [(560, 8, 8, (380, 600))], reference='1Z+')
+```
+
+An ASD's levels are in the unit squared per hertz (`unit='g'` for
+g²/Hz, the way a PSD declares its unit), an amplitude's in the unit. A
+transmissibility is a ratio and takes no unit and no level.
+
+**The scaling.** A prediction stated at full level and a run at L dB
+relative to full level: the predicted ASD is multiplied by 10^(L/10)
+and a predicted amplitude by 10^(L/20), so at minus 12 dB an ASD by
+0.063 and an amplitude by 0.25. A transmissibility is not scaled. The
+level run is stated on the block (minus 12 for a run at minus 12 dB);
+left blank, the scaling a PSD holds for its comparison against the
+specification is used, and a level stated that disagrees with it is
+refused.
+
+**Peaks are looked for in their band.** Near each predicted peak, the
+measured peak is read by the package's half-power reader inside the
+peak's band: the predicted frequency plus or minus the model's stated
+frequency uncertainty, or a band stated for the peak. A band that holds
+no measured peak says so; the peak is never matched to one outside it.
+To compare a mode the model placed far from where it was found, state a
+band for it. The Q of an ASD is read where the ASD has fallen to half
+its height, its half-power points.
+
+**In the report**, a responses-against-prediction block (Insert,
+Responses Against Prediction, once the feature is on and the project
+holds predictions; or `project.report_prediction('Report', 'Response
+PSD', 'Predictions', level=-12)`) draws a figure per channel, the
+measurement over its prediction scaled to the level run on log-log
+axes, the prediction dashed; then a table with a row per predicted
+peak: the frequency, level and Q predicted and measured, the frequency
+difference in percent, the ratio of the levels named once in its
+column's heading as an ASD ratio or an amplitude ratio and given in
+decibels, and the model's stated uncertainty. A note beneath names the
+predictions' source (supplied by the customer, where it is), the peaks
+with no measured peak in their band, and the channels not compared and
+why. The figures and the table fall under the skeleton's Results.
+
+Refused, with the cause named: a prediction of one quantity against a
+record of another, or in units of another dimension; an ASD or
+amplitude whose input level or run level is not stated; a peak with no
+band to look in; two peaks of one channel whose bands overlap. A
+channel with two records, a record that is zero or constant, or one
+with its units undefined is listed as not compared. Whether a
+difference is explained is never written by the program; the table
+states the numbers, and the answer is the analyst's.
+
 ## Plot conventions
 
 **Plot conventions** (group Figures) puts a report's figures under
@@ -246,7 +315,6 @@ and are grayed out until each is built:
 | Requirement and results | Results | the requirement in words and a met or not met row per criterion; the pass/fail box labeled a screening without one |
 | Findings register | Results | deviations, anomalies and nonconformances in four parts, the fact filled from the measurement |
 | Check blocks | Results | a table for each check the project holds, a row per channel against its criterion |
-| Responses against prediction | Results | each response against its prediction at the level run |
 | Cross-axis and limit channels | Results | cross-axis against its limit, and where limit channels held the control down |
 | Control-channel uncertainty | Results | each control channel's uncertainty against one third of the tolerance |
 | Data index | Records | every file the report rests on, with its size and SHA-256, checked again at export |

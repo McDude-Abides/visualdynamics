@@ -13,13 +13,16 @@ it.
 
 Every file stamps one root attribute:
 
-    visualdynamics_schema = 1        (integer)
+    visualdynamics_schema = 1 or 2   (integer)
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
-never renamed or given a new meaning. The number would move only if a
-field's meaning had to change, which has not happened. The reader
-follows three rules:
+never renamed or given a new meaning. Version 2 added the response
+predictions (`predictions/`, below) and the report block that reads a
+measurement against them; a reader that knows only version 1 would
+meet a kind it cannot read, so a file holding either is stamped 2, and
+every other file is stamped 1 as before, so an older reader still opens
+it. The reader follows three rules:
 
 - a stamp newer than the reader knows is refused with a message saying
   the file was written by a newer Visual Dynamics and to update to open
@@ -42,7 +45,8 @@ imported and exported beside it, for exchanging data with other tools.
 
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
-`matches/`, `channel_table/`, `sine_specification/` or `sine_levels/`.
+`matches/`, `channel_table/`, `sine_specification/`, `sine_levels/` or
+`predictions/`.
 The loader recognizes the file by the group it finds.
 
 A whole project is an `objects/` container of numbered groups (`0000`,
@@ -227,6 +231,20 @@ Present only where they mean something:
                          dsets: tone_order; tones/<k>/ each an
                          ordinary data/ layout (the set only groups
                          them)
+
+## `predictions/` (schema 2)
+
+    predictions/  attrs: comment, count
+                  <k>/: attrs record (one JSON string: channel,
+                  quantity, unit, level_db, reference, source, customer,
+                  frequency_uncertainty, level_uncertainty, and peaks,
+                  each [frequency, level, Q, band] with null where not
+                  stated); dsets curve_frequency, curve_values (a
+                  predicted curve, when there is one)
+
+A report's blocks may include one of kind `prediction`, naming the
+predictions (`source`) and the measurement (`measured`) with the level
+it was run at (`level`, dB relative to full level, or null).
 
 ## Reading one without Visual Dynamics
 

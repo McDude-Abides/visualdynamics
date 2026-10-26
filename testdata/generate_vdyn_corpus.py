@@ -12,6 +12,7 @@ purpose (a few KB): it is a schema exercise, not a dataset, but it
 touches every object kind and the optional fields (averaging,
 scale_db, complex modal mass and damping, links, roles, project type)
 whose absent-with-a-default handling is what future readers must keep.
+Schema 2 adds the predictions and the report block that reads them.
 """
 
 import numpy as np
@@ -23,6 +24,7 @@ from visualdynamics.core.data import Frf, TimeHistory
 from visualdynamics.core.geometry import Geometry
 from visualdynamics.core.matches import MatchedModes
 from visualdynamics.core.photos import Photos
+from visualdynamics.core.prediction import Prediction, Predictions
 from visualdynamics.core.report import Report
 from visualdynamics.core.shapes import ShapeSet
 from visualdynamics.core.shocks import Shock
@@ -109,6 +111,19 @@ def build_project() -> visualdynamics.Project:
     photos = Photos(names=['setup'], formats=['png'],
                     images=[ONE_PIXEL_PNG])
 
+    # schema 2: predictions, one of peaks and one of a curve
+    peaked = np.abs(1.0 / (1.0 - (frequency / 48.0) ** 2
+                           + 1j * frequency / 480.0))
+    predictions = Predictions([
+        Prediction('2Y+', 'asd', [(20.0, 0.5, 10.0)], unit='g',
+                   level_db=0.0, frequency_uncertainty=10.0,
+                   level_uncertainty=3.0, source='schema exercise',
+                   customer=True),
+        Prediction('2Y+', 'transmissibility', [(48.0, None, None,
+                                                 (36.0, 60.0))],
+                   reference='1X+', curve=(frequency, peaked))],
+        comment='schema exercise predictions')
+
     project = visualdynamics.Project('Frozen Schema Exercise')
     project.project_type = 'Modal Test'
     project.add('Geometry', geometry)
@@ -121,10 +136,14 @@ def build_project() -> visualdynamics.Project:
     project.add('Report', report)
     project.add('Matches', matches)
     project.add('Photos', photos)
+    project.add('Predictions', predictions)
     # through the project's own verbs, so the file carries provenance
     # — the staleness fingerprints have to survive a save too
     psds = project.compute_psds('Time History')
     project[psds].scale_db = 3
+    project['Report'].add({'kind': 'prediction', 'source': 'Predictions',
+                           'measured': psds, 'level': -3.0,
+                           'caption': 'schema exercise'})
     srs = project.compute_srs('Time History')
     project.link('Geometry', 'Time History', psds, srs, 'FRF', 'Shapes')
     project.set_basis('Geometry', 'Time History', psds, srs, 'FRF',

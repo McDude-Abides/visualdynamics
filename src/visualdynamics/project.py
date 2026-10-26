@@ -40,6 +40,7 @@ from .core.data import (
 from .core.geometry import Geometry, View
 from .core.matches import MatchedModes
 from .core.photos import Photos
+from .core.prediction import Predictions
 from .core.report import Report
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
@@ -73,7 +74,7 @@ ObjectGroup = dict[str, Any]
 # record, where an FRF and a coherence need a reference as well.
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
-              _CoherenceBase, ShapeSet, MatchedModes,
+              _CoherenceBase, ShapeSet, MatchedModes, Predictions,
               Report)
 
 
@@ -119,6 +120,8 @@ def describe(obj: Any) -> str:
     elif isinstance(obj, MatchedModes):
         return (f'{obj.num_matches} matched pairs, '
                 f'{obj.first} against {obj.second}')
+    elif isinstance(obj, Predictions):
+        counts = [(len(obj), 'channel')]
     elif isinstance(obj, Report):
         counts = [(obj.num_blocks, 'block')]
     else:
@@ -172,7 +175,8 @@ def retarget(obj: Any, mapping: dict[str, str]) -> None:
     # nowhere and the rename simply does not happen
     if isinstance(obj, Report):
         for block in obj.blocks:
-            for key in ('source', 'geometry', 'dofs_source', 'shapes'):
+            for key in ('source', 'geometry', 'dofs_source', 'shapes',
+                        'measured'):
                 if block.get(key) in mapping:
                     block[key] = mapping[block[key]]
 
@@ -200,6 +204,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('coherence', 'coherences', _CoherenceBase),
     ('shapes', 'shape_sets', ShapeSet),
     ('matches', 'match_sets', MatchedModes),
+    ('predictions', 'prediction_sets', Predictions),
     ('report', 'reports', Report),
 )
 
@@ -273,6 +278,8 @@ class Selection:
         shape_sets: list[ShapeSet]
         matches: MatchedModes
         match_sets: list[MatchedModes]
+        predictions: Predictions
+        prediction_sets: list[Predictions]
         report: Report
         reports: list[Report]
 
@@ -440,6 +447,8 @@ class Project(dict):
         shape_sets: list[ShapeSet]
         matches: MatchedModes
         match_sets: list[MatchedModes]
+        predictions: Predictions
+        prediction_sets: list[Predictions]
         report: Report
         reports: list[Report]
 
@@ -5181,6 +5190,148 @@ class Project(dict):
 
         return draft(self._report(name), self, self.object_groups)
 
+    def predict(self, name: str, channel: str, quantity: str,
+                peaks: Sequence[Any], *, unit: str | None = None,
+                level_db: float | None = None,
+                curve: tuple[Sequence[float], Sequence[float]] | None = None,
+                reference: str | None = None, source: str = '',
+                customer: bool = False,
+                frequency_uncertainty: float | None = None,
+                level_uncertainty: float | None = None) -> str:
+        """Enter one response channel's predicted response, the
+        analyst's numbers, into the predictions object `name`, made
+        when the project has nothing of that name. A prediction already
+        held for the channel and quantity is replaced.
+
+        A report reads a measurement against these with the report
+        feature `prediction` (`visualdynamics.report.prediction`), and
+        a script with `core.prediction.compare`.
+
+        Parameters
+        ----------
+        name : str
+            The predictions object.
+        channel : str
+            The response DOF, as the records name it ('201Z+').
+        quantity : str
+            'asd', 'amplitude' or 'transmissibility'.
+        peaks : sequence
+            The predicted peaks, each (frequency [Hz], level, Q, band):
+            the level in `unit` (squared per hertz for an ASD), Q
+            optional, and the band (low, high) in Hz to look for the
+            measured peak in, optional when the model states its
+            frequency uncertainty. For a `curve`, each mode's frequency
+            alone.
+        unit : str, optional
+            The unit of the quantity: 'g' for an ASD in g²/Hz or an
+            amplitude in g. A transmissibility has none.
+        level_db : float, optional
+            The input level the prediction is stated at, dB relative to
+            full level (0 at full level). A transmissibility has none.
+        curve : (frequencies, values), optional
+            The predicted curve, in `unit`; the peaks' levels and Q are
+            read off it. Given as lists, the journal's line replays it.
+        reference : str, optional
+            The input DOF of a transmissibility.
+        source : str, optional
+            The analysis it comes from, with its document and revision.
+        customer : bool, default False
+            Whether the customer supplied it.
+        frequency_uncertainty : float, optional
+            The model's stated frequency uncertainty, plus or minus, in
+            percent.
+        level_uncertainty : float, optional
+            The model's stated level uncertainty, plus or minus, in dB.
+
+        Returns
+        -------
+        str
+            The name of the predictions object.
+
+        Raises
+        ------
+        ValueError
+            For what a prediction cannot hold
+            (`core.prediction.Prediction` lists it). Nothing is changed.
+        TypeError
+            When `name` is an object that is not a predictions object.
+        """
+        from .core.prediction import Prediction
+
+        held = self.get(name)
+        if held is not None and not isinstance(held, Predictions):
+            raise TypeError(f'{name!r} is a {type(held).__name__}, not a '
+                            'predictions object')
+        prediction = Prediction(
+            channel, quantity, peaks, unit=unit, level_db=level_db,
+            curve=curve, reference=reference, source=source,
+            customer=customer, frequency_uncertainty=frequency_uncertainty,
+            level_uncertainty=level_uncertainty)
+        if held is None:
+            return self.add(name, Predictions([prediction]))
+        held.put(prediction)
+        return name
+
+    def report_prediction(self, name: str, measured: Any, predictions: Any,
+                          *, level: float | None = None,
+                          caption: str = '') -> int:
+        """Add a block reading `measured` against `predictions` at the
+        end of the report `name` (the report editor's Insert, Responses
+        Against Prediction), and return its index.
+
+        While the report feature `prediction` is on, the block draws a
+        figure per response channel, the measurement over its
+        prediction scaled to the level run, and a table of each
+        predicted peak against the measured one.
+
+        Parameters
+        ----------
+        name : str
+            The report.
+        measured : str or object
+            The response: a PSD, an amplitude spectrum or sine level, or
+            a transmissibility (an FRF).
+        predictions : str or object
+            The predictions object.
+        level : float, optional
+            The level `measured` was run at, dB relative to full level
+            (-12 for a run at minus 12 dB). Required for an ASD or an
+            amplitude, unless the PSD holds its scaling; refused for a
+            transmissibility.
+        caption : str, optional
+            The table's caption.
+
+        Returns
+        -------
+        int
+            The block's index in the report.
+
+        Raises
+        ------
+        ValueError
+            When the comparison cannot be read; `core.prediction.compare`
+            says why. Nothing is changed.
+        TypeError
+            When `name` is not a report or `predictions` not a
+            predictions object.
+        """
+        from .core.prediction import compare
+
+        report = self._report(name)
+        measured_name = self.name_of(measured)
+        predictions_name = self.name_of(predictions)
+        held = self[predictions_name]
+        if not isinstance(held, Predictions):
+            raise TypeError(f'{predictions_name!r} is a '
+                            f'{type(held).__name__}, not a predictions '
+                            'object')
+        compare(held, self[measured_name], level)
+        report.add({'kind': 'prediction', 'source': predictions_name,
+                    'measured': measured_name,
+                    'level': None if level is None else float(level),
+                    'caption': str(caption)})
+        return report.num_blocks - 1
+
     def _report(self, name: str) -> Report:
         """The report called `name`; `TypeError` for anything else."""
         name = self.name_of(name)
@@ -6636,7 +6787,7 @@ _JOURNALED_VERBS = (
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'report_features', 'report_section',
-    'report_test_date', 'export_report',
+    'report_test_date', 'predict', 'report_prediction', 'export_report',
     'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

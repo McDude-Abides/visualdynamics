@@ -23,8 +23,12 @@ from visualdynamics.core.report import Report
 from visualdynamics.report import features as rf
 from visualdynamics.report import page, plot_conventions, render_html
 
-LIVE = ('skeleton_sections', 'calibration_in_date', 'plot_conventions',
-        'shared_decades')
+LIVE = ('skeleton_sections', 'prediction', 'calibration_in_date',
+        'plot_conventions', 'shared_decades')
+#: the built features the test report preset names (responses against
+#: prediction is built but in no preset)
+PRESET_LIVE = ('skeleton_sections', 'calibration_in_date', 'plot_conventions',
+               'shared_decades')
 #: the plot conventions and their option
 CONVENTIONS = ('plot_conventions', 'shared_decades')
 
@@ -194,7 +198,7 @@ def test_turning_a_feature_off_takes_what_needs_it_with_a_note():
 def test_the_presets_enable_what_they_can_and_say_what_they_skipped():
     report = Report()
     selection = rf.configure(report, preset='test_report')
-    assert selection.enabled == LIVE
+    assert selection.enabled == PRESET_LIVE
     skipped = [key for key in rf.PRESETS['test_report'].features
                if key not in LIVE]
     assert len(selection.notes) == len(skipped) == 7
@@ -252,7 +256,7 @@ def test_the_project_verb_is_journaled_and_refuses_in_the_core(run):
     project, name = run
     try:
         selection = project.report_features(name, preset='test_report')
-        assert selection.enabled == LIVE
+        assert selection.enabled == PRESET_LIVE
         assert project.journal[-1] == (
             f"project.report_features({name!r}, preset='test_report')")
         before = list(project.journal)
@@ -722,7 +726,7 @@ def test_the_preset_selector_applies_and_lists_what_it_skipped(editing):
     _window, editor, report, _name = editing
     panel = editor.features_panel
     panel.preset_box.setCurrentIndex(panel.preset_box.findData('test_report'))
-    assert report.features == list(LIVE)
+    assert report.features == list(PRESET_LIVE)
     assert panel.boxes['plot_conventions'].isChecked()
     assert 'Findings register skipped, not yet available' in panel.notes.text()
     assert panel.preset_box.currentData() == 'test_report'

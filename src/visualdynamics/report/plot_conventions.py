@@ -41,6 +41,12 @@ def figure_kind(block: Mapping[str, Any], objects: Mapping[str, Any],
     from ..core.data import Psd, Srs
     from ..core.report import resolve_binding
 
+    if block.get('kind') == 'prediction':
+        # a response read against its prediction: an ASD when the
+        # response is a PSD
+        measured = objects.get(resolve_binding(
+            block.get('measured'), objects, object_groups) or '')
+        return 'asd' if isinstance(measured, Psd) else None
     if block.get('kind') != 'plot' or block.get('mode', 'curves') not in (
             'curves', 'pair'):
         return None

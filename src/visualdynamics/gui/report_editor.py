@@ -114,6 +114,11 @@ BLOCK_TEMPLATES = {
     # octave-band PSDs judged against it
     'verdict': {'kind': 'verdict', 'source': '', 'measured': '',
                 '_bind': ('source', 'measured'), '_only': 'Specification'},
+    # responses against prediction: the predictions and the response
+    # read against them; the level run is typed in the pane
+    'prediction': {'kind': 'prediction', 'source': '', 'measured': '',
+                   'level': None, 'caption': '',
+                   '_bind': ('source', 'measured')},
 }
 
 #: how long typing in the text editor rests before the page re-renders
@@ -279,6 +284,9 @@ class ReportEditor(QWidget):
         #: calls `report.calibration.set_dates`. Called as
         #: `calibration_dater(report, start, end)`.
         self.calibration_dater: Callable[..., Any] | None = None
+        #: the level run, while a responses-against-prediction block is
+        #: in the pane
+        self.level_edit: QLineEdit | None = None
         self.field_boxes: dict[str, QComboBox] = {}
         self._loading_pane = False
         self._text_timer: QTimer = QTimer(self)
@@ -354,7 +362,12 @@ class ReportEditor(QWidget):
             'Markdown', lambda: self.insert('markdown'))
         self.insert_menu.addSeparator()
         objects = self.objects() if self.objects else {}
+        from ..report.features import enabled
+
+        active = enabled(self.report) if self.report is not None else ()
         for kind, label in insert_options(objects):
+            if kind == 'prediction' and 'prediction' not in active:
+                continue        # drawn only while its feature is on
             self.insert_menu.addAction(
                 label, lambda _checked=False, k=kind: self.insert(k))
 
@@ -472,7 +485,7 @@ class ReportEditor(QWidget):
         self.record_caption_check = self.record_caption_label = None
         self.title_edit = self.marking_edit = self.color_box = None
         self.features_panel = None
-        self.none_button = self.by_edit = None
+        self.none_button = self.by_edit = self.level_edit = None
         self.date_edit = self.end_edit = None
         self.calibration_button = self.calibration_note = None
         self.field_boxes = {}
@@ -575,6 +588,8 @@ class ReportEditor(QWidget):
                                 [('', '(photo)')]
                                 + [(name, name) for name in
                                    photo_options(block, objects)])
+                if block.get('kind') == 'prediction':
+                    self._prediction_pane(form, block, objects)
                 self.caption_edit = QLineEdit(block.get('caption', ''))
                 self.caption_edit.setPlaceholderText('caption')
                 self.caption_edit.editingFinished.connect(
@@ -736,6 +751,29 @@ class ReportEditor(QWidget):
             self.calibration_note.setText('')
         self.text_editor.insertPlainText(text)
         self.flush_text()
+
+    def _prediction_pane(self, form, block, objects) -> None:
+        """A responses-against-prediction block's measurement and the
+        level it was run at, beside the Source combo that names the
+        predictions."""
+        from ..core.report import measured_options
+
+        self._combo(form, 'measured', 'Measured', block.get('measured', ''),
+                    [('', '(measured)')]
+                    + [(name, name) for name in measured_options(objects)])
+        level = block.get('level')
+        self.level_edit = QLineEdit('' if level is None else f'{level:g}')
+        self.level_edit.setPlaceholderText(
+            'dB relative to full level, as -12; blank for a '
+            'transmissibility')
+        self.level_edit.editingFinished.connect(
+            lambda: self._field_edited(
+                {'op': 'field', 'at': self.selected, 'field': 'level',
+                 'value': self.level_edit.text()},
+                self.level_edit.text().strip() != (
+                    '' if block.get('level') is None
+                    else f'{block["level"]:g}')))
+        form.addRow('Level run', self.level_edit)
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -1014,6 +1052,7 @@ class ReportEditor(QWidget):
                 return
             from ..core.report import (
                 dofs_source_options,
+                measured_options,
                 photo_options,
                 record_dimensions,
                 shape_options,
@@ -1030,6 +1069,8 @@ class ReportEditor(QWidget):
                     options = photo_options(block, objects)
                 elif field == 'dofs_source':
                     options = dofs_source_options(block, objects)
+                elif field == 'measured' and block.get('kind') == 'prediction':
+                    options = measured_options(objects)
                 else:
                     options = source_options(block, objects)
                 only = template.get('_only')
@@ -1128,8 +1169,20 @@ class ReportEditor(QWidget):
                            else 'source')
                     block[key] = value
                 elif field in ('text', 'caption', 'shapes', 'photo',
-                               'dofs_source', 'channel'):
+                               'dofs_source', 'channel', 'measured'):
                     block[field] = value
+                elif field == 'level':
+                    # dB relative to full level; blank for none. Text
+                    # that is not a number changes nothing
+                    try:
+                        block['level'] = (float(value) if value.strip()
+                                          else None)
+                    except ValueError:
+                        if self.level_edit is not None:
+                            level = block.get('level')
+                            self.level_edit.setText(
+                                '' if level is None else f'{level:g}')
+                        return
         else:
             return
         self.edited.emit()

@@ -33,7 +33,37 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.report import Report
     from ..core.shapes import ShapeSet
 
-SCHEMA_VERSION = 1
+#: the newest schema this build reads. Version 2 adds response
+#: predictions (`core.prediction`): a `Predictions` object, and the
+#: report block that reads a measurement against one. A file is stamped
+#: 2 only when it holds either (`schema_for`); every other file is
+#: stamped 1, as before, so a build that reads only version 1 still
+#: opens it, and refuses one with predictions with its message to
+#: update rather than failing on a kind it does not know.
+SCHEMA_VERSION = 2
+
+#: the schema of a file that holds nothing version 2 added
+BASE_SCHEMA = 1
+
+#: the schema of a file holding predictions
+PREDICTIONS_SCHEMA = 2
+
+
+def schema_for(objects: Any) -> int:
+    """The schema version a file holding `objects` (one object, or a
+    mapping of names to objects) is stamped with: 2 when it holds
+    predictions or a report reading one, 1 otherwise."""
+    from ..core.prediction import Predictions
+    from ..core.report import Report
+
+    held = objects.values() if isinstance(objects, Mapping) else [objects]
+    for obj in held:
+        if isinstance(obj, Predictions) or (
+                isinstance(obj, Report) and any(
+                    block.get('kind') == 'prediction'
+                    for block in obj.blocks)):
+            return PREDICTIONS_SCHEMA
+    return BASE_SCHEMA
 
 
 def _write_ragged(group: h5py.Group, name: str,
@@ -682,6 +712,41 @@ def load_report(group: h5py.Group) -> Report:
                   features=features)
 
 
+def save_predictions(predictions, group) -> None:
+    """Write a `Predictions` object into `group`: its comment, and one
+    subgroup per prediction holding its values as JSON
+    (`Prediction.as_record`) and its curve, when it has one."""
+    import json
+
+    group.attrs['comment'] = predictions.comment
+    group.attrs['count'] = len(predictions)
+    for k, prediction in enumerate(predictions):
+        # index-named subgroups, in the set's order: a channel is user
+        # text, which an HDF5 group name cannot always hold
+        sub = group.create_group(str(k))
+        sub.attrs['record'] = json.dumps(prediction.as_record())
+        if prediction.curve is not None:
+            sub.create_dataset('curve_frequency', data=prediction.curve[0])
+            sub.create_dataset('curve_values', data=prediction.curve[1])
+
+
+def load_predictions(group):
+    import json
+
+    from ..core.prediction import Prediction, Predictions
+
+    held = []
+    for k in range(int(group.attrs['count'])):
+        sub = group[str(k)]
+        record = sub.attrs['record']
+        if isinstance(record, bytes):
+            record = record.decode('utf-8')
+        curve = ((sub['curve_frequency'][()], sub['curve_values'][()])
+                 if 'curve_frequency' in sub else None)
+        held.append(Prediction.from_record(json.loads(record), curve))
+    return Predictions(held, comment=str(group.attrs['comment']))
+
+
 def save_photos(photos: Photos, group: h5py.Group) -> None:
     _write_strings(group, 'names', photos.names)
     _write_strings(group, 'formats', photos.formats)
@@ -798,6 +863,7 @@ def _savers():
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
+    from ..core.prediction import Predictions
     from ..core.report import Report
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
@@ -811,7 +877,8 @@ def _savers():
             (Report, 'report', save_report),
             (Photos, 'photos', save_photos),
             (MatchedModes, 'matches', save_matches),
-            (ChannelTable, 'channel_table', save_channel_table)]
+            (ChannelTable, 'channel_table', save_channel_table),
+            (Predictions, 'predictions', save_predictions)]
 
 
 _LOADERS = {'geometry': load_geometry,
@@ -822,7 +889,8 @@ _LOADERS = {'geometry': load_geometry,
             'report': load_report,
             'photos': load_photos,
             'matches': load_matches,
-            'channel_table': load_channel_table}
+            'channel_table': load_channel_table,
+            'predictions': load_predictions}
 
 
 def _saver_for(obj):
@@ -867,7 +935,7 @@ def save_into(obj: Any, f: h5py.File) -> None:
     memory and store it inside their own files.
     """
     group_name, saver = _saver_for(obj)
-    f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
+    f.attrs['visualdynamics_schema'] = schema_for(obj)
     saver(obj, f.create_group(group_name))
 
 
@@ -907,7 +975,7 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    object_groups: Sequence[Mapping[str, Any]] | None = None,
                    provenance: Mapping[str, Any] | None = None) -> None:
     """`save_test` into an open, empty HDF5 file (see `save_into`)."""
-    f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
+    f.attrs['visualdynamics_schema'] = schema_for(objects)
     f.attrs['test_name'] = name
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''

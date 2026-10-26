@@ -119,6 +119,29 @@ def test_schema1_values_are_intact():
         'the PNG bytes ride verbatim'
 
 
+def test_schema2_predictions_are_intact():
+    """Schema 2 added the predictions and the report block that reads
+    them: a prediction of peaks with every optional field, and one of a
+    curve with its band."""
+    p = native.load(os.path.join(str(CORPUS), 'schema2.vdyn'))
+    held = p['Predictions']
+    assert held.comment == 'schema exercise predictions'
+    peaks, curve = held.predictions
+    assert peaks.as_record() == {
+        'channel': '2Y+', 'quantity': 'asd', 'unit': 'g', 'level_db': 0.0,
+        'reference': None, 'source': 'schema exercise', 'customer': True,
+        'frequency_uncertainty': 10.0, 'level_uncertainty': 3.0,
+        'peaks': [[20.0, 0.5, 10.0, None]]}
+    assert curve.quantity == 'transmissibility'
+    assert curve.reference == '1X+' and curve.bands == ((36.0, 60.0),)
+    assert curve.curve[0].tolist() == (np.arange(33) * 4.0).tolist()
+    assert curve.curve[1][12] == pytest.approx(10.0)
+    assert p['Report'].blocks[1] == {
+        'kind': 'prediction', 'source': 'Predictions',
+        'measured': 'Time History PSDs', 'level': -3.0,
+        'caption': 'schema exercise'}
+
+
 def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     newer = tmp_path / 'from_the_future.vdyn'
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), newer)

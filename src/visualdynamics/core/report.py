@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 BLOCK_KINDS = ('text', 'plot', 'scene', 'table', 'photo', 'pairs',
-               'overlay', 'bars', 'verdict')
+               'overlay', 'bars', 'verdict', 'prediction')
 
 
 class Report:
@@ -93,6 +93,14 @@ class Report:
         octave-band comparison of `measured` against `source`
         (`compliance.verdict`), with the test level it was judged at
         beside it under `level_label`, 'Test level' when absent)
+      {'kind': 'prediction', 'source': Predictions-name,
+                             'measured': Psd-, Spectrum- or Frf-name,
+                             'level': float or None, 'caption': str}
+        (each response channel of `measured` against its prediction
+        scaled to `level`, the dB relative to full level it was run at:
+        a figure per channel and a table of peaks; drawn only while the
+        report feature `prediction` is on:
+        `visualdynamics.report.prediction`)
 
     'select' filters a curves plot to the records the GUI's own filters
     would pick: 'drive' is the response==reference diagonal of an FRF,
@@ -259,6 +267,9 @@ def _wanted_classes(block):
     if kind == 'verdict':
         from .data import Specification
         return Specification
+    if kind == 'prediction':
+        from .prediction import Predictions
+        return Predictions
     return None
 
 
@@ -319,6 +330,7 @@ def binding_types() -> dict[str, type]:
     from .geometry import Geometry
     from .matches import MatchedModes
     from .photos import Photos
+    from .prediction import Predictions
     from .shapes import ShapeSet
     from .sine import SineLevel, SineLevelSet, SineSweepSpecification
 
@@ -333,7 +345,8 @@ def binding_types() -> dict[str, type]:
             'SineLevelSet': SineLevelSet,
             'Coherence': _CoherenceBase,
             'MultipleCoherence': MultipleCoherence,
-            'ShapeSet': ShapeSet, 'MatchedModes': MatchedModes}
+            'ShapeSet': ShapeSet, 'MatchedModes': MatchedModes,
+            'Predictions': Predictions}
 
 
 def resolve_binding(value: str | None, objects: Mapping[str, Any],
@@ -640,7 +653,29 @@ def insert_options(objects: Mapping[str, Any]) -> list[tuple[str, str]]:
                for component, label in (('magnitude', 'Magnitude'),
                                         ('real', 'Real'),
                                         ('imag', 'Imaginary'),
-                                        ('phase', 'Phase'))])
+                                        ('phase', 'Phase'))]
+            # read only by the report feature `prediction`, and only
+            # once the project holds predictions to read against
+            + ([('prediction', 'Responses Against Prediction')]
+               if _holds_predictions(objects) else []))
+
+
+def _holds_predictions(objects: Mapping[str, Any]) -> bool:
+    from .prediction import Predictions
+
+    return any(isinstance(obj, Predictions) for obj in objects.values())
+
+
+def measured_options(objects: Mapping[str, Any]) -> list[str]:
+    """The objects a responses-against-prediction block can read against
+    predictions: narrowband PSDs, amplitude spectra and sine levels,
+    and FRFs, never a specification or an octave-band PSD."""
+    from .data import Bounded, Frf, Psd, Spectrum, TransientSpecification
+
+    return [name for name, obj in objects.items()
+            if isinstance(obj, (Psd, Spectrum, Frf))
+            and not isinstance(obj, (Bounded, TransientSpecification))
+            and not is_banded(obj)]
 
 
 def takes_shapes(block: Mapping[str, Any]) -> bool:

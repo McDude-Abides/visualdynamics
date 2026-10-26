@@ -382,9 +382,12 @@ def check(report: Any, objects: Mapping[str, Any],
                    for name in needed)
 
     entries = []
+    active = enabled(report)
     for block in report.blocks:
         if 'section' in block or not drawn(block):
             continue
+        if block.get('kind') == 'prediction' and 'prediction' not in active:
+            continue        # not drawn while its feature is off
         figure = _figure(block.get('kind'))
         entries.append((block, figure, figure and instrumentation(
             block, objects, object_groups)))

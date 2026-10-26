@@ -37,6 +37,8 @@ from typing import Any
 # default, chosen in a selection tool, with presets. This module is the
 # framework; P23 (plot conventions) was the first feature built with
 # it, and P18 (skeleton sections, `report/skeleton.py`) the second.
+# P25 (responses against prediction, `report/prediction.py`) draws its
+# figures and table under the skeleton's Results.
 
 #: the groups the selection tool lays the features out in, in order
 GROUPS = ('Structure', 'Results', 'Records', 'Issue control', 'Figures')
@@ -109,9 +111,9 @@ CAPABILITIES: dict[str, Capability] = {cap.key: cap for cap in (
 
 
 #: every report feature, in the order the selection tool shows them
-#: within their groups. `skeleton_sections`, `calibration_in_date`,
-#: `plot_conventions` and its option `shared_decades` are built; the
-#: rest are the road map.
+#: within their groups. `skeleton_sections`, `prediction`,
+#: `calibration_in_date`, `plot_conventions` and its option
+#: `shared_decades` are built; the rest are the road map.
 FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'skeleton_sections', 'Skeleton sections', 'Structure',
@@ -148,9 +150,10 @@ FEATURES: dict[str, ReportFeature] = {feature.key: feature for feature in (
     ReportFeature(
         'prediction', 'Responses against prediction', 'Results',
         'Each response channel against its prediction scaled to the '
-        'level run: frequency and level measured and predicted, and '
-        "whether the difference is inside the model's stated uncertainty.",
-        available=False),
+        'level run: a figure of the measurement over the scaled '
+        'prediction, and a table of peak frequency, level and Q measured '
+        'and predicted, with their ratio named as an ASD ratio or an '
+        "amplitude ratio and the model's stated uncertainty beside it."),
     ReportFeature(
         'cross_axis', 'Cross-axis and limit channels', 'Results',
         'Cross-axis response against its limit, and the band and depth '
