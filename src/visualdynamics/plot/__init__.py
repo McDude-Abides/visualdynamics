@@ -4754,6 +4754,99 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
                         size=size)
 
 
+def plot_shock_synthesis(source: Any, *, sample_rate: float | None = None,
+                         channel: str | None = None,
+                         half_cycles: int | None = None,
+                         stroke: float | None = None,
+                         velocity: float | None = None,
+                         force: float | None = None,
+                         moving_mass: float | None = None,
+                         body_mass: float | None = None,
+                         unit_system: UnitSystem | None = None,
+                         theme: Any = None,
+                         path: str | os.PathLike | None = None,
+                         show: bool = True, title: str | None = None,
+                         size: tuple[int, int] = (1000, 1100)) -> Any:
+    """Draw a shock synthesized to a shock response spectrum: what it
+    asks of the shaker above its spectrum against the requirement.
+
+        visualdynamics.plot.plot_shock_synthesis(
+            spec, sample_rate=20480.0, stroke=0.0508, velocity=1.78,
+            force=35600.0, moving_mass=45.0, path='synthesis.png')
+
+    The synthesis is `core.shock_synthesis.synthesize`'s, and one
+    channel of it is drawn by `plot.shock_synthesis`: the acceleration,
+    velocity and displacement integrated raw, each rating on the row it
+    limits, as the stroke reading draws a pulse; under them the
+    record's spectrum against the requirement's band, the
+    points outside marked and the count inside stated, as the SRS
+    tolerance view draws a measured one. This is the script form of
+    the SRS synthesis in the window's Generate Signal pane.
+
+    Parameters
+    ----------
+    source : ShockSpecification or ShockSynthesis
+        The requirement, synthesized here, or a synthesis already made
+        (the settings below are then not used).
+    sample_rate : float, optional
+        Samples per second; `core.shock_synthesis.suggested_rate` when
+        omitted.
+    channel : str, optional
+        The DOF drawn; the first by default.
+    half_cycles : int, optional
+        The fewest half cycles each wavelet has;
+        `core.shock_synthesis.HALF_CYCLES` when omitted.
+    stroke, velocity, force, moving_mass, body_mass : float, optional
+        The shaker's shock ratings and the masses, in SI, as
+        `core.stroke.read_stroke` takes them.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `core.shock_synthesis.synthesize` refuses, or for a channel
+        the synthesis does not have.
+    """
+    from ..core.shaker import ShakerRating
+    from ..core.shock_synthesis import (
+        HALF_CYCLES,
+        ShockSynthesis,
+        suggested_rate,
+        synthesize,
+    )
+    from ..core.stroke import _rating
+    from .shock_synthesis import build_shock_synthesis, channel_index
+
+    if isinstance(source, ShockSynthesis):
+        made = source
+    else:
+        rating = ShakerRating(stroke=_rating(stroke),
+                              velocity=_rating(velocity),
+                              force=_rating(force),
+                              moving_mass=_rating(moving_mass),
+                              body_mass=_rating(body_mass))
+        made = synthesize(
+            source, rating=rating,
+            sample_rate=(suggested_rate(source) if sample_rate is None
+                         else sample_rate),
+            half_cycles=HALF_CYCLES if half_cycles is None else half_cycles)
+    dof = made.channels[channel_index(made, channel)].dof
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_shock_synthesis(widget, made, dof, unit_system=unit_system,
+                              theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or f'{dof}: SRS synthesis', size=size)
+
+
 def plot_resample(history: Any, rate: float, record: int = 0, *,
                   frequencies: float | Sequence[float] | None = None,
                   order: int | None = None,

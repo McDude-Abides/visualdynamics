@@ -2690,36 +2690,49 @@ class Project(dict):
             recipe=('generate_rigid_body_modes', {}))
 
     def generate_signal(self, source: Any, kind: str = 'random', *,
-                        name: str | None = None, **settings: Any) -> str:
+                        name: str | None = None, progress: Any = None,
+                        **settings: Any) -> str:
         """Generate a reference signal from a spectrum, a sine
-        specification or a channel table (Generate Signal), as a time
-        history in the source's group.
+        specification, a shock specification or a channel table
+        (Generate Signal), as a time history in the source's group.
 
         A spectrum gives random, burst random or periodic random at its
-        DOFs, drawn to it; a sine specification gives its tone; a channel
-        table gives any of those but sine at its reference channels, the
-        random kinds to a typed flat `band` and `level`, or an impulse or
-        a classical pulse (`core.signals`). The settings are recorded
-        with the result, and the random seed with them (one is drawn
-        when none is given), so Recompute makes the same record again.
+        DOFs, drawn to it; a sine specification gives its tone; a shock
+        specification gives a shock synthesized to its spectrum and
+        checked against the shaker's shock ratings given
+        (`core.shock_synthesis`); a channel table gives the random kinds
+        at its reference channels, to a typed flat `band` and `level`,
+        or an impulse or a classical pulse (`core.signals`). The
+        settings are recorded with the result, and the random seed with
+        them (one is drawn when none is given), so Recompute makes the
+        same record again.
+
+            project.generate_signal('Requirement', 'srs',
+                                    sample_rate=20480.0, stroke=0.0508,
+                                    velocity=1.78)
 
         Parameters
         ----------
         source : str or object
-            The spectrum, sine specification or channel table, by name
-            or as the object itself.
+            The spectrum, sine specification, shock specification or
+            channel table, by name or as the object itself.
         kind : str, default 'random'
             One of `core.signals.KINDS`: 'random', 'burst', 'periodic',
-            'impulse', 'pulse' or 'sine'.
+            'impulse', 'pulse', 'sine' or 'srs'.
         name : str, optional
             What to call the result. Defaults to the source's name and
             the kind.
+        progress : callable, optional
+            Called with ``(done, total)`` as an SRS synthesis iterates;
+            the app's progress bar uses it.
         **settings
             The fields of `core.signals.SignalSettings`: `duration`,
             `sample_rate`, `frame_length`, `seed`, `correlated`, `dofs`,
             `bursts`, `burst`, `taper`, `periods`, `repeats`, `at`,
             `area`, `shape`, `peak`, `pulse_duration`, `edge`, `band`,
-            `level` and `tone`.
+            `level`, `tone`, and for an SRS synthesis `half_cycles` and
+            the shaker's `stroke`, `velocity`, `force`, `moving_mass` and
+            `body_mass` in SI.
 
         Returns
         -------
@@ -2734,7 +2747,8 @@ class Project(dict):
         ValueError
             If the kind is not one the source makes, or as the signal's
             generator refuses (a band at or above the Nyquist frequency,
-            units not declared, no reference channel).
+            units not declared, no reference channel, a shock spectrum
+            no synthesis meets or no synthesis the shaker can hold).
         """
         from dataclasses import replace
 
@@ -2750,7 +2764,7 @@ class Project(dict):
             # drawn here and kept, so the record can be made again
             chosen = replace(chosen, seed=int(
                 np.random.SeedSequence().generate_state(1)[0]))
-        made = generate(self[source], chosen)
+        made = generate(self[source], chosen, progress=progress)
         return self._derive(source, made,
                             name or f'{source} {KINDS.get(kind, kind)}',
                             recipe=('generate_signal', chosen.to_dict()))
@@ -6095,6 +6109,13 @@ def _signal_source_digest(obj: Any) -> str:
         digest.update(np.ascontiguousarray(obj.abscissa).tobytes())
         digest.update(np.ascontiguousarray(obj.ordinate).tobytes())
         digest.update(','.join(obj.ordinate_dim).encode())
+        if isinstance(obj, ShockSpecification):
+            # a synthesis puts every point inside the warning band, at
+            # the requirement's Q and of its type
+            digest.update(f'{obj.q!r}|{obj.kind}'.encode())
+            for key in sorted(obj.limits or {}):
+                digest.update(key.encode())
+                digest.update(np.ascontiguousarray(obj.limits[key]).tobytes())
     return digest.hexdigest()
 
 

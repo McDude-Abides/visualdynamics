@@ -84,6 +84,8 @@ THEORY = {
                            'band it is judged against',
     'core.resample': 'decimation behind an anti-alias filter, and where '
                      'content above the Nyquist frequency folds',
+    'core.shock_synthesis': 'a shock synthesized to a shock response '
+                            'spectrum, and the shaker it must fit',
 }
 
 #: and methods, where the theory lives on the call rather than the module

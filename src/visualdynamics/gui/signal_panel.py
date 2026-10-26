@@ -3,15 +3,18 @@ settings, a preview as they change, and the button that makes it.
 
 It opens on the object the signal is drawn from: a spectrum (random,
 burst random, periodic random at its DOFs), a sine specification (its
-tone), or a channel table (any of those but sine at its reference
-channels, the random kinds to a typed flat band and level, or an impulse
-or a classical pulse). Only the kinds the object makes are offered, and
-only the rows the kind reads are shown (principle 3).
+tone), a shock specification (a shock synthesized to its spectrum,
+against the shaker's shock ratings typed here), or a channel table (the
+random kinds at its reference channels, to a typed flat band and level,
+or an impulse or a classical pulse). Only the kinds the object makes are
+offered, and only the rows the kind reads are shown (principle 3).
 
 This is select, see, set, apply (principle 13): the plot previews a
 short stretch of the signal, its PSD over the target for the random
-kinds, its trace and its spectrum for an impulse, and its trace for the
-others; Generate runs the project's
+kinds, its trace and its spectrum for an impulse, the synthesis's
+reading for an SRS synthesis (iterated off the window's thread once the
+settings settle), and its trace for the others; Generate runs the
+project's
 `generate_signal` with the settings shown, the seed included, so the
 record can be made again. The panel makes nothing itself: it shows the
 settings in display units and emits them in SI as a `SignalSettings`.
@@ -35,6 +38,7 @@ from ..core.classical_pulse import SHAPES
 from ..core.signals import KINDS, RANDOM_KINDS, SignalSettings
 from .editors import DoubleSpinBox, SpinBox, number_box
 from .settings_panel import add_derived, add_keyed_settings, add_rule, panel_grid
+from .stroke_panel import RATINGS
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
@@ -48,6 +52,7 @@ ROWS: dict[str, tuple[str, ...]] = {
     'impulse': ('rate', 'duration', 'at', 'peak', 'width'),
     'pulse': ('rate', 'duration', 'at', 'shape', 'peak', 'pulse', 'edge'),
     'sine': ('rate', 'tone'),
+    'srs': ('rate', 'half_cycles', *(key for key, *_rest in RATINGS)),
 }
 
 #: the rows a typed target adds to the random kinds at a channel table
@@ -154,7 +159,15 @@ class SignalPanel(QWidget):
                                tip="A sawtooth's fall, or a trapezoid's rise "
                                    'and fall, each'),
             'tone': self.tone_box,
+            'half_cycles': _int_box(
+                3, 15, 'The fewest half cycles each wavelet has, odd: more '
+                'build each point with less amplitude, and less travel, over '
+                'a longer event. While the shaker cannot hold the synthesis, '
+                'two more are tried at a time'),
         }
+        editors['half_cycles'].setSingleStep(2)
+        for key, _name, _dimension, tip in RATINGS:
+            editors[key] = number_box(0.0, 1e9, value=0.0, decimals=4, tip=tip)
         self._names, self._editors = add_keyed_settings(grid, [
             ('kind', 'Kind', self.kind_box),
             ('rate', 'Sample rate', editors['rate']),
@@ -175,26 +188,29 @@ class SignalPanel(QWidget):
             ('pulse', 'Duration', editors['pulse']),
             ('edge', 'Edge', editors['edge']),
             ('tone', 'Tone', self.tone_box),
+            ('half_cycles', 'Half cycles', editors['half_cycles']),
+            *((key, name, editors[key]) for key, name, _d, _t in RATINGS),
             ('seed', 'Seed', editors['seed']),
             ('correlated', '', self.correlated_box),
         ])
         rows = len(self._editors) + 1
         add_rule(grid, rows)
-        self._derived = add_derived(grid, [('samples', 'Samples'),
-                                           ('lines', 'Line spacing'),
-                                           ('rms', 'Preview rms'),
-                                           ('down3', '−3 dB at'),
-                                           ('down10', '−10 dB at'),
-                                           ('zero', 'First zero')], rows + 1)
+        derived = [('samples', 'Samples'), ('lines', 'Line spacing'),
+                   ('rms', 'Preview rms'), ('down3', '−3 dB at'),
+                   ('down10', '−10 dB at'), ('zero', 'First zero'),
+                   ('cycles', 'Half cycles kept'), ('passes', 'Passes'),
+                   ('event', 'Event'), ('inside', 'Inside band')]
+        self._derived = add_derived(grid, derived, rows + 1)
+        below = rows + 1 + len(derived)
         self.note: QLabel = QLabel('')
         self.note.setWordWrap(True)
-        grid.addWidget(self.note, rows + 7, 0, 1, 2)
+        grid.addWidget(self.note, below, 0, 1, 2)
         self.apply_button: QPushButton = QPushButton('Generate')
         self.apply_button.setToolTip('Make the signal shown, as a time '
                                      'history beside its source')
         self.apply_button.clicked.connect(self._apply)
-        grid.addWidget(self.apply_button, rows + 8, 0, 1, 2)
-        grid.setRowStretch(rows + 9, 1)
+        grid.addWidget(self.apply_button, below + 1, 0, 1, 2)
+        grid.setRowStretch(below + 2, 1)
         for editor in self._editors.values():
             if isinstance(editor, QComboBox):
                 editor.currentIndexChanged.connect(self._edited)
@@ -253,9 +269,16 @@ class SignalPanel(QWidget):
         e['peak'].setValue(self._shown(s.peak, self._quantity))
         e['pulse'].setValue(1e3 * s.pulse_duration)
         e['edge'].setValue(1e3 * (s.edge or 0.0))
+        e['half_cycles'].setValue(int(s.half_cycles))
         for key, dim in (('level', self._density()),
                          ('peak', self._quantity)):
             e[key].setSuffix(f' {self._label(dim)}' if dim else '')
+        # the ratings in the window's units, zero for one not given, as
+        # the stroke reading's panel shows them
+        for key, _name, dim, _tip in RATINGS:
+            value = getattr(s, key)
+            e[key].setValue(0.0 if value is None else self._shown(value, dim))
+            e[key].setSuffix(f' {self._label(dim)}')
 
     def _density(self) -> str:
         return f'{self._quantity}**2/frequency' if self._quantity else ''
@@ -303,15 +326,20 @@ class SignalPanel(QWidget):
     def show_reading(self, samples: int | None = None,
                      spacing: float | None = None,
                      rms: str | None = None, note: str = '',
-                     rolloff: tuple[str, str, str] | None = None) -> None:
+                     rolloff: tuple[str, str, str] | None = None,
+                     synthesis: tuple[str, str, str, str] | None = None
+                     ) -> None:
         """The derived rows and the note under them, after a preview.
         `rolloff` is an impulse's −3 dB, −10 dB and first-zero
-        frequencies, as text."""
+        frequencies, as text; `synthesis` an SRS synthesis's half cycles
+        kept, passes, event length and points inside the band."""
         down3, down10, zero = rolloff or ('—', '—', '—')
+        cycles, passes, event, inside = synthesis or ('—',) * 4
         values = {'samples': '—' if samples is None else f'{samples:,}',
                   'lines': '—' if spacing is None else f'{spacing:.4g} Hz',
                   'rms': rms or '—', 'down3': down3, 'down10': down10,
-                  'zero': zero}
+                  'zero': zero, 'cycles': cycles, 'passes': passes,
+                  'event': event, 'inside': inside}
         for key, (name, value) in self._derived.items():
             value.setText(values[key])
             shown = values[key] != '—'
@@ -329,6 +357,18 @@ class SignalPanel(QWidget):
         repeats = int(e['repeats'].value())
         frame = int(e['frame'].value())
         edge = 1e-3 * float(e['edge'].value())
+        ratings = {}
+        for key, _name, dim, _tip in RATINGS:
+            shown = float(e[key].value())
+            held = getattr(self._settings, key)
+            if (held is not None and shown == round(self._shown(held, dim),
+                                                    e[key].decimals())):
+                # a rating the box shows rounded is kept as held: read
+                # back on another box's edit, 45 kg shown as 0.2569
+                # slinch came back 45.008 kg
+                ratings[key] = held
+            else:
+                ratings[key] = None if shown <= 0.0 else self._si(shown, dim)
         return replace(
             self._settings,
             kind=self.kind_box.currentData() or self._settings.kind,
@@ -350,7 +390,9 @@ class SignalPanel(QWidget):
             peak=self._si(float(e['peak'].value()), self._quantity),
             pulse_duration=1e-3 * float(e['pulse'].value()),
             edge=edge or None,
-            tone=self.tone_box.currentData())
+            tone=self.tone_box.currentData(),
+            half_cycles=int(e['half_cycles'].value()),
+            **ratings)
 
     def _edited(self, *_args) -> None:
         if self._loading:

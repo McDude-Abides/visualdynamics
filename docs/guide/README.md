@@ -58,6 +58,9 @@ that is not an alpha.
 - [Generating reference signals](generating-signals.md): random,
   burst random, periodic random, an impulse or a pulse, and sine, made
   at the reference DOFs from a specification or a channel table
+- [Synthesizing a shock to its spectrum](shock-synthesis.md): wavelets
+  iterated until every point is inside the band, then read against the
+  shaker's shock stroke, velocity and force
 - [Modal responses from forces](modal-responses.md): how each mode of
   a shape set answers the forces in a time history, appended to it
 - [Taking a record to a lower sample rate](resample.md): the

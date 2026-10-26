@@ -199,6 +199,9 @@ SOLIDS_MIME = 'application/x-visualdynamics-solids'
 
 #: how long the Mesh Solids size box rests before its preview is meshed
 MESH_PREVIEW_SETTLE_MS = 250
+#: how long the Generate Signal pane rests before an SRS synthesis is
+#: iterated, off this thread, for its preview
+SYNTHESIS_SETTLE_MS = 150
 #: the most bricks the Mesh Solids pane previews; past it the count is
 #: said and Mesh makes them with the bar up
 MESH_PREVIEW_BRICKS = 50_000
@@ -1355,6 +1358,15 @@ class MainWindow(QMainWindow):
         #: the settings last shown for each source, so reopening the
         #: pane on an object starts where it was left
         self._signal_settings: dict[str, Any] = {}
+        #: the SRS synthesis last iterated for the pane, as (what it was
+        #: made from, the synthesis or the reason there is none), so a
+        #: redraw draws it rather than iterating again
+        self._synthesis_held: tuple | None = None
+        #: an SRS synthesis takes seconds of passes: it is iterated on
+        #: the worker once the settings have rested, not on every redraw
+        self._synthesis_settle: QTimer = QTimer(self)
+        self._synthesis_settle.setSingleShot(True)
+        self._synthesis_settle.timeout.connect(self._signal_synthesize)
         self.data_pane.signal_panel.changed.connect(self._signal_edited)
         self.data_pane.signal_panel.apply_asked.connect(self._signal_apply)
         #: the Compute Modal Responses pane while it is open: what it is
@@ -2883,6 +2895,9 @@ class MainWindow(QMainWindow):
         # timers, and the scene-only version left them to take their
         # chances (Brandon's crash report, 2026-08-30).
         self.set_playing(False)
+        # a synthesis waiting for its settings to rest would otherwise
+        # iterate and draw into a window being torn down
+        self._synthesis_settle.stop()
         # and the report page: a navigation in flight when the view is
         # destroyed is the gate's stall (ReportEditor.stand_down)
         if self.report_editor is not None:
@@ -10732,20 +10747,31 @@ class MainWindow(QMainWindow):
         name = self._sole_selected_name()
         obj = self.objects.get(name) if name is not None else None
         if obj is None or not kinds_for(obj):
-            self._show_status('Select a spectrum, a sine specification or a '
-                              'channel table to generate a signal from')
+            self._show_status('Select a spectrum, a sine specification, a '
+                              'shock specification or a channel table to '
+                              'generate a signal from')
             return
         if self._signaling is not None and self._signaling['source'] == name:
             self.close_signal_pane()
             return
         self._author_wanted = False
-        self._signaling = {'source': name, 'settings': self._signal_settings.get(
-            name) or suggested(obj)}
+        settings = self._signal_settings.get(name) or suggested(obj)
+        if settings.kind == 'srs' and self.data_pane.stroke_settings:
+            # the shaker the Stroke reading was last read against, so a
+            # synthesis opens on the ratings already typed for a pulse
+            from dataclasses import replace
+
+            held = self.data_pane.stroke_settings
+            settings = replace(settings, **{
+                key: value for key, value in held.items()
+                if getattr(settings, key, None) is None})
+        self._signaling = {'source': name, 'settings': settings}
         self.render_current()
 
     def close_signal_pane(self) -> None:
         """Put the Generate Signal pane away, keeping what it showed."""
         self._signaling = None
+        self._synthesis_settle.stop()
         self.data_pane.signal_panel.hide()
         self.render_current()
 
@@ -10764,6 +10790,7 @@ class MainWindow(QMainWindow):
         if (self._sole_selected_name() != self._signaling['source']
                 or self._signaling['source'] not in self.objects):
             self._signaling = None
+            self._synthesis_settle.stop()
             self.data_pane.signal_panel.hide()
             return None
         return self._signaling['source']
@@ -10801,6 +10828,8 @@ class MainWindow(QMainWindow):
                           quantity=quantity, typed=typed, cross_terms=cross,
                           tones=tones)
         panel.show()
+        if settings.kind == 'srs':
+            return self._draw_synthesis(name, obj, settings)
         what = KINDS.get(settings.kind, settings.kind).lower()
         try:
             short = preview(obj, settings)
@@ -10860,11 +10889,14 @@ class MainWindow(QMainWindow):
     def _signal_quantity(self, obj, settings) -> str:
         """What the signal from `obj` measures, for the pane's units;
         '' when the object does not say."""
+        from ..core.data import ShockSpecification
         from ..core.signals import _quantity
         from ..core.sine import SineSweepSpecification
 
         if isinstance(obj, SineSweepSpecification):
             return obj.ordinate_dim
+        if isinstance(obj, ShockSpecification):
+            return obj.ordinate_dim[0]
         if isinstance(obj, ChannelTable):
             types = {t for t, role in zip(obj.types(), obj.roles(), strict=True)
                      if role == 'reference' and t}
@@ -10890,6 +10922,95 @@ class MainWindow(QMainWindow):
             return len(tone.argument(1.0 / settings.sample_rate))
         return round(settings.duration * settings.sample_rate)
 
+    def _synthesis_key(self, name, obj, settings):
+        """What an SRS synthesis is made from: the source, what of it a
+        synthesis reads, and the settings."""
+        from ..project import _signal_source_digest
+
+        return (name, _signal_source_digest(obj), settings)
+
+    def _draw_synthesis(self, name, obj, settings) -> str:
+        """The SRS synthesis held for these settings, drawn as
+        `plot.shock_synthesis` draws it with its numbers in the pane;
+        when none is held for them, the pane says it waits and the
+        synthesis is iterated once the settings rest
+        (`_signal_synthesize`)."""
+        from ..plot.shock_synthesis import build_shock_synthesis, summary
+
+        panel = self.data_pane.signal_panel
+        held = self._synthesis_held
+        if held is None or held[0] != self._synthesis_key(name, obj,
+                                                          settings):
+            panel.show_reading(note='The synthesis is iterated when the '
+                                    'settings rest.')
+            self.data_pane.clear()
+            self._synthesis_settle.start(SYNTHESIS_SETTLE_MS)
+            return f'{name}: SRS synthesis, iterating when the settings rest'
+        made = held[1]
+        if isinstance(made, str):
+            # a refusal, or a cancel: the reason, and no picture that
+            # would read as a synthesis
+            panel.show_reading(note=made)
+            self.data_pane.clear()
+            return f'{name}: {made}'
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        build_shock_synthesis(self.data_pane.graphics, made,
+                              unit_system=self.unit_system,
+                              theme=self.theme_name)
+        first = made.channels[0]
+        judged = made.tolerance()[0][2]
+        events = [float(c.samples.max()) / made.history.sample_rate
+                  for c in made.channels]
+        panel.show_reading(
+            samples=made.history.ordinate.shape[1],
+            synthesis=(str(first.half_cycles), str(first.passes),
+                       f'{1e3 * max(events):.4g} ms',
+                       f'{judged["inside_count"]}/{judged["points"]}'),
+            note='\n'.join(made.describe(self.unit_system)[1:]))
+        given = ''.join(f', {key}={getattr(settings, key)!r}'
+                        for key in ('half_cycles', 'stroke', 'velocity',
+                                    'force', 'moving_mass', 'body_mass')
+                        if getattr(settings, key) is not None)
+        prefix = (f'visualdynamics.plot.plot_shock_synthesis('
+                  f'project[{name!r}]')
+        self._journal_view(
+            prefix, f'{prefix}, sample_rate={settings.sample_rate!r}{given}, '
+                    "path='shock_synthesis.png', show=False)")
+        return summary(made, None, self.unit_system)
+
+    def _signal_synthesize(self) -> None:
+        """Iterate the SRS synthesis the pane shows, on the worker with
+        the bar up (`_run_long`), hold it or the reason there is none,
+        and draw it."""
+        from ..core.progress import Cancelled
+        from ..core.shock_synthesis import synthesize
+
+        self._synthesis_settle.stop()
+        if self._signal_door() is None:
+            return
+        name, settings = self._signaling['source'], self._signaling['settings']
+        if settings.kind != 'srs':
+            return
+        obj = self.objects[name]
+        key = self._synthesis_key(name, obj, settings)
+        if self._synthesis_held is not None and self._synthesis_held[0] == key:
+            return
+        try:
+            made = self._run_long(f'Synthesizing a shock to {name}…',
+                                  synthesize, obj,
+                                  sample_rate=settings.sample_rate,
+                                  rating=settings.rating(),
+                                  half_cycles=settings.half_cycles,
+                                  dofs=settings.dofs)
+        except Cancelled:
+            made = 'The synthesis was cancelled; change a setting to try again.'
+        except ValueError as why:
+            made = str(why)
+        self._synthesis_held = (key, made)
+        self.render_current()
+
     def _signal_edited(self, settings) -> None:
         if self._signaling is None:
             return
@@ -10914,11 +11035,24 @@ class MainWindow(QMainWindow):
             # line carries it and replays the same record
             settings = replace(settings, seed=int(
                 np.random.SeedSequence().generate_state(1)[0]))
+        from ..core.progress import Cancelled
+
         defaults = SignalSettings().to_dict()
         chosen = {key: value for key, value in settings.to_dict().items()
                   if key != 'kind' and value != defaults[key]}
         try:
-            added = self.project.generate_signal(name, settings.kind, **chosen)
+            if settings.kind == 'srs':
+                # seconds of passes: on the worker, with the bar up
+                added = self._run_long(
+                    f'Synthesizing a shock to {name}…',
+                    self.project.generate_signal, name, settings.kind,
+                    **chosen)
+            else:
+                added = self.project.generate_signal(name, settings.kind,
+                                                     **chosen)
+        except Cancelled:
+            self._show_status(f'{name}: the synthesis was cancelled')
+            return
         except ValueError as why:
             self._show_status(f'{name}: {why}')
             return

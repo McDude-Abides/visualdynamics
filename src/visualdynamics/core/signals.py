@@ -1,5 +1,6 @@
 """Generated reference signals: random, burst random, periodic random,
-an impulse or classical pulse, and sine.
+an impulse or classical pulse, sine, and a shock synthesized to a shock
+response spectrum.
 
 Each generator returns a `TimeHistory` at the reference DOFs, in the
 quantity a specification is the density of (a force, a voltage, an
@@ -42,6 +43,10 @@ a width T, is flat at low frequency and falls 3 dB by 0.59/T, 10 dB by
 1.02/T, and to its first zero at 1.5/T (`impulse_rolloff`), so the width
 is chosen for the band the impulse should excite.
 
+A shock specification gives a shock synthesized to its spectrum, a sum
+of wavelets a shaker can play, checked against the shaker's shock
+ratings (`core.shock_synthesis`).
+
 A specification is read between its breakpoints as it is everywhere in
 the package (`author.read_at_lines`: the magnitude log-log, the phase
 linearly), or per bin when it holds a controller's lines, and is zero
@@ -67,6 +72,7 @@ import numpy as np
 from ..units import UNKNOWN
 from .classical_pulse import ClassicalPulse
 from .data import Psd, Specification, Spectrum, TimeHistory
+from .shock_synthesis import HALF_CYCLES
 from .sine import SineSweepSpecification
 
 #: what follows a density's quantity, which the signal's quantity is
@@ -714,6 +720,7 @@ KINDS: dict[str, str] = {
     'impulse': 'Impulse',
     'pulse': 'Classical pulse',
     'sine': 'Sine',
+    'srs': 'SRS synthesis',
 }
 
 #: the kinds drawn from a power spectral density
@@ -775,6 +782,29 @@ class SignalSettings:
     level: float = 1.0
     #: a sine specification's tone; the first when None
     tone: str | None = None
+    #: an SRS synthesis: the fewest half cycles each wavelet has, odd
+    #: and at least three; more are tried while the shaker cannot hold it
+    half_cycles: int = HALF_CYCLES
+    #: an SRS synthesis: the shaker's shock stroke peak to peak (m), its
+    #: shock velocity (m/s) and force (N), the moving mass and the body's
+    #: (kg), as `core.stroke.read_stroke` takes them; None, or zero, is
+    #: not judged
+    stroke: float | None = None
+    velocity: float | None = None
+    force: float | None = None
+    moving_mass: float | None = None
+    body_mass: float | None = None
+
+    def rating(self) -> Any:
+        """The shaker's shock ratings these settings give, as a
+        `core.shaker.ShakerRating`; a rating at zero is none, as the
+        stroke reading takes it."""
+        from .shaker import ShakerRating
+        from .stroke import _rating
+
+        return ShakerRating(**{name: _rating(getattr(self, name))
+                               for name in ('force', 'stroke', 'velocity',
+                                            'moving_mass', 'body_mass')})
 
     def to_dict(self) -> dict[str, Any]:
         """The settings as plain values, for a recipe or a file."""
@@ -808,17 +838,23 @@ class SignalSettings:
             return f'{self.periods} periods of {what} at {self.sample_rate:g} Hz'
         if self.kind == 'sine':
             return f'sine at {self.sample_rate:g} Hz'
+        if self.kind == 'srs':
+            return f'SRS synthesis at {self.sample_rate:g} Hz'
         return f'{self.duration:g} s of {what} at {self.sample_rate:g} Hz'
 
 
 def kinds_for(source: Any) -> tuple[str, ...]:
     """The kinds of signal `source` can make, in `KINDS` order: random
-    kinds from a spectrum, sine from a sine specification, and from a
-    channel table every kind but sine, at its reference channels."""
+    kinds from a spectrum, sine from a sine specification, an SRS
+    synthesis from a shock specification, and from a channel table every
+    kind but sine and the synthesis, at its reference channels."""
     from .channel_table import ChannelTable
+    from .data import ShockSpecification
 
     if isinstance(source, SineSweepSpecification):
         return ('sine',)
+    if isinstance(source, ShockSpecification):
+        return ('srs',)
     if isinstance(source, Psd):
         return RANDOM_KINDS
     if isinstance(source, ChannelTable):
@@ -853,17 +889,23 @@ def _references(table: Any, dofs: Sequence[str] | None
     return wanted, quantities.pop()
 
 
-def generate(source: Any, settings: SignalSettings) -> TimeHistory:
+def generate(source: Any, settings: SignalSettings, *,
+             progress: Any = None) -> TimeHistory:
     """The signal `settings` describe, made from `source`.
 
     Parameters
     ----------
-    source : Psd, Specification, SineSweepSpecification or ChannelTable
+    source : Psd, Specification, SineSweepSpecification, ShockSpecification or ChannelTable
         A spectrum's DOFs and shape for random kinds; a sine
-        specification's tone; a channel table's reference channels for
-        an impulse, a pulse, or random to the typed `band` and `level`.
+        specification's tone; a shock specification's spectrum for an
+        SRS synthesis; a channel table's reference channels for an
+        impulse, a pulse, or random to the typed `band` and `level`.
     settings : SignalSettings
         The kind and its settings.
+    progress : callable, optional
+        Called with ``(done, total)`` as an SRS synthesis iterates
+        (`core.shock_synthesis.synthesize`); the other kinds are quick
+        and do not call it.
 
     Returns
     -------
@@ -886,6 +928,12 @@ def generate(source: Any, settings: SignalSettings) -> TimeHistory:
                          f'this object; it makes {made}')
     if s.kind == 'sine':
         return sine_history(source, sample_rate=s.sample_rate, tone=s.tone)
+    if s.kind == 'srs':
+        from .shock_synthesis import synthesize
+
+        return synthesize(source, sample_rate=s.sample_rate,
+                          rating=s.rating(), half_cycles=s.half_cycles,
+                          dofs=s.dofs, progress=progress).history
     spectrum, dofs = source, s.dofs
     if isinstance(source, ChannelTable):
         dofs, quantity = _references(source, s.dofs)
@@ -938,11 +986,15 @@ def preview(source: Any, settings: SignalSettings) -> TimeHistory:
     """The signal `settings` describe, cut short to `PREVIEW_SAMPLES` so
     that it answers while a setting is being typed: fewer seconds, bursts
     or periods, every other setting as given. A sine is drawn whole only
-    when it fits; otherwise its first `PREVIEW_SAMPLES`."""
+    when it fits; otherwise its first `PREVIEW_SAMPLES`. An SRS
+    synthesis is iterated whole, as it is made: a shorter one would meet
+    a different spectrum."""
     s = settings
     rate = s.sample_rate
     if not rate > 0.0:
         raise ValueError('the sample rate has to be above zero')
+    if s.kind == 'srs':
+        return generate(source, s)
     if s.kind == 'sine':
         full = generate(source, s)
         if full.ordinate.shape[1] <= PREVIEW_SAMPLES:
@@ -982,9 +1034,15 @@ def frame_used(source: Any, settings: SignalSettings) -> int | None:
 def suggested(source: Any) -> SignalSettings:
     """Settings to open a pane with: the first kind the source makes,
     and a sample rate 2.56 times the highest frequency it holds, as an
-    analyzer's span is set, rounded up to a multiple of 1024."""
+    analyzer's span is set, rounded up to a multiple of 1024; for an SRS
+    synthesis, `core.shock_synthesis.suggested_rate`."""
     from .channel_table import ChannelTable
+    from .data import ShockSpecification
 
+    if isinstance(source, ShockSpecification):
+        from .shock_synthesis import suggested_rate
+
+        return SignalSettings(kind='srs', sample_rate=suggested_rate(source))
     kinds = kinds_for(source)
     top = None
     if isinstance(source, SineSweepSpecification):

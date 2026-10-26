@@ -124,7 +124,8 @@ def build_srs_tolerance(layout: Any, specification: Any,
                         percent: float = SRS_POINTS_PERCENT,
                         limits: bool = True,
                         unit_system: Any = None,
-                        theme: Any = None) -> list[dict[str, Any]]:
+                        theme: Any = None,
+                        row: int = 0) -> list[dict[str, Any]]:
     """Draw one channel's spectra against the requirement and its band,
     and return each spectrum's judgement (`compliance.srs_tolerance`).
 
@@ -133,7 +134,9 @@ def build_srs_tolerance(layout: Any, specification: Any,
     `event` (each spectrum's first record at that channel by default).
     A band not given is the requirement's own limits when it has them,
     as `compliance.srs_tolerance` reads it, and the curves drawn are
-    the ones judged against.
+    the ones judged against. The plot goes in the layout's row
+    ``2 * row`` and its legend under it (`legend_below`), so a view can
+    stack it under plots of its own.
     """
     import pyqtgraph as pg
 
@@ -174,10 +177,10 @@ def build_srs_tolerance(layout: Any, specification: Any,
         picked.append((data, i, result))
     dimension = specification.ordinate_dim[j]
 
-    plot = layout.addPlot(row=0, col=0)
+    plot = layout.addPlot(row=2 * row, col=0)
     plot.showGrid(x=True, y=True, alpha=0.2)
     plot.setLogMode(x=True, y=True)
-    legend = legend_below(layout, plot, 0, colors)
+    legend = legend_below(layout, plot, row, colors)
     extents = _Extents()
 
     x = np.asarray(specification.abscissa, dtype=float)

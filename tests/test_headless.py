@@ -337,6 +337,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_fit_mac': 'plot_mac',
         '_render_signal': ('core.signals.preview, then plot_data of its '
                            'PSD over the target, or plot_series of its trace; '
+                           'an SRS synthesis, plot_shock_synthesis; '
                            'Project.generate_signal makes it'),
         '_render_modal': ('core.modal_response.preview_responses, then '
                           'plot_series; Project.compute_modal_responses '

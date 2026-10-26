@@ -786,6 +786,34 @@ def stroke_readout():
                 size=(1000, 900), path=str(OUT / 'stroke-readout.png'))
 
 
+def shock_synthesis():
+    """A shock synthesized to a spectrum and read against a shaker: a
+    requirement rising 6 dB an octave from 10 Hz to 100 g at 100 Hz and
+    flat to 2 kHz, a twelfth of an octave, banded -1.5/+3 dB inside
+    -3/+6 dB, on a 2 in, 70 in/s, 10,000 lbf shaker carrying 100 lb on a
+    2,000 lb body."""
+    from visualdynamics.core.data import ShockSpecification
+    from visualdynamics.core.shaker import ShakerRating
+    from visualdynamics.core.shock_synthesis import suggested_rate, synthesize
+    from visualdynamics.plot import plot_shock_synthesis
+    from visualdynamics.units import DEFAULT_SYSTEM, to_si
+
+    spec = ShockSpecification.from_breakpoints(
+        [10.0, 100.0, 2000.0], [10.0, 100.0, 100.0], '1Z+',
+        ordinate_unit='g', warning=(-1.5, 3.0), abort=(-3.0, 6.0))
+    rating = ShakerRating(stroke=float(to_si(2.0, 'in')),
+                          velocity=float(to_si(70.0, 'in/s')),
+                          force=float(to_si(10000.0, 'lbf')),
+                          moving_mass=float(to_si(100.0, 'lb')),
+                          body_mass=float(to_si(2000.0, 'lb')))
+    made = synthesize(spec, sample_rate=suggested_rate(spec), rating=rating)
+    for line in made.describe(DEFAULT_SYSTEM):
+        print(f'  {line}')
+    plot_shock_synthesis(made, unit_system=DEFAULT_SYSTEM, show=False,
+                         size=(1000, 1100),
+                         path=str(OUT / 'shock-synthesis.png'))
+
+
 def dwell():
     """A tone held at a resonance and then stopped: a 1 g tone at 20 Hz
     on a one-mass resonator of Q 30, ninety cycles on and sixty off,
@@ -1413,6 +1441,7 @@ def main():
     signature()
     replication_fit()
     stroke_readout()
+    shock_synthesis()
     dwell()
     transmissibility()
     matrix_checks()

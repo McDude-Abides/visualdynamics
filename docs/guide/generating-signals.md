@@ -17,6 +17,7 @@ beside the plot offers only the kinds that object makes.
 |---|---|---|
 | A specification or a PSD | random, burst random, periodic random | its DOFs, drawn to its levels and cross terms |
 | A sine specification | sine | its control DOFs, following its tone |
+| A shock specification | SRS synthesis | its DOFs, a sum of wavelets meeting its spectrum, checked against the shaker's shock ratings ([Synthesizing a shock to its spectrum](shock-synthesis.md)) |
 | A channel table | random, burst random, periodic random, impulse, classical pulse | its reference channels, the random kinds to a flat band and level typed in the pane |
 
 A channel table's reference channels are the rows whose role is
@@ -64,6 +65,11 @@ starting at Starts.
 Sine follows a sine specification's tone: its frequency at the
 tone's rates, dwells included, and its amplitude and phase between
 breakpoints as the controller follows them.
+
+An SRS synthesis is iterated whole, since a shorter one would meet a
+different spectrum, and off the window's thread once the settings rest;
+[Synthesizing a shock to its spectrum](shock-synthesis.md) says how it
+is made and read.
 
 ## Read the way it was made
 
