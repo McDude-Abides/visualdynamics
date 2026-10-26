@@ -262,7 +262,7 @@ class ShockSynthesis:
     def describe(self, unit_system: Any = None) -> list[str]:
         """The synthesis in lines, a channel at a time: its wavelets and
         passes, its event length, the band it met, then its stroke
-        reading's judgements (`StrokeReading.describe`)."""
+        reading's judgments (`StrokeReading.describe`)."""
         from ..units import DEFAULT_SYSTEM
 
         us = DEFAULT_SYSTEM if unit_system is None else unit_system

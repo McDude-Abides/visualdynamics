@@ -7,7 +7,7 @@ moves the shaker. So before the first pulse two questions are asked of
 a waveform: does its spectrum meet the requirement, and can the shaker
 play it. `visualdynamics.core.shock_synthesis` makes such a waveform
 and answers both with the package's own readings: the spectrum with
-the [SRS tolerance](srs-tolerance.md) judgement, the travel, velocity
+the [SRS tolerance](srs-tolerance.md) judgment, the travel, velocity
 and force with the [stroke reading](stroke.md).
 
 ## The wavelet
@@ -127,7 +127,7 @@ it) once the settings rest, and is held for those settings: a redraw
 draws it again rather than iterating again. The plot draws the stroke
 reading's three rows and the spectrum against its bands under them, the
 rows under the settings give the half cycles kept, the passes, the
-event and the points inside the band, and the note gives each judgement
+event and the points inside the band, and the note gives each judgment
 in words, or the refusal. **Generate** makes the record as a time history
 beside the specification; the view is journaled as its
 `plot_shock_synthesis` call and the record as its `generate_signal`

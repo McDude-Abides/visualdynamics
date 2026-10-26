@@ -43,7 +43,7 @@ def build_shock_synthesis(layout: Any, synthesis: Any,
     `core.shock_synthesis.ShockSynthesis`, into `layout`: its stroke
     reading's three rows, then its spectrum against the requirement
     under them, given the height of two of them. Returns the
-    spectrum's judgement (`compliance.srs_tolerance`)."""
+    spectrum's judgment (`compliance.srs_tolerance`)."""
     from .srs_tolerance import build_srs_tolerance
     from .stroke import build_stroke
 
