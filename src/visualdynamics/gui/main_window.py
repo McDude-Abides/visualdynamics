@@ -746,7 +746,19 @@ class _InputGate(QObject):
     nowhere — except to the Cancel button, and Esc, which is the
     same request. The loop runs with all its events so the window
     paints and the button works; what the exclusion flag used to keep
-    out, this keeps out (2026-10-02)."""
+    out, this keeps out (2026-10-02).
+
+    It filters the shown windows, never the application. A filter on
+    the application is handed every event of every object on this
+    thread, and PySide makes a Python object for each receiver before
+    the filter can look at the event, the web engine's internal
+    objects included: making one for the report editor's render item,
+    on a queued call Chromium posts to it, crashed the loop on Linux.
+    Input from the platform reaches a window's QWindow before any
+    widget, and a key press is offered there as a ShortcutOverride
+    before any shortcut sees it, so the QWindow is where all of it is
+    kept out. The window widget is filtered too, for events sent to it
+    directly."""
 
     _BLOCKED = (
         QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
@@ -754,23 +766,73 @@ class _InputGate(QObject):
         QEvent.Type.KeyPress, QEvent.Type.KeyRelease,
         QEvent.Type.ShortcutOverride, QEvent.Type.Shortcut,
     )
+    _POINTED = (
+        QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick, QEvent.Type.Wheel,
+    )
 
     def __init__(self, allowed, cancel) -> None:
         super().__init__()
         self._allowed, self._cancel = allowed, cancel
+        self._watched: list = []
+
+    def install(self) -> None:
+        """Filter every shown window: its widget and its QWindow."""
+        import shiboken6
+
+        for top in QApplication.topLevelWidgets():
+            # a window Qt deleted can leave its wrapper standing, and the
+            # list can hand that back for the widget made in its place
+            if not shiboken6.isValid(top) or not top.isVisible():
+                continue
+            for target in (top, top.windowHandle()):
+                if target is not None:
+                    target.installEventFilter(self)
+                    self._watched.append(target)
+
+    def remove(self) -> None:
+        """Take the filter off everything it was put on that still exists."""
+        import shiboken6
+
+        for target in self._watched:
+            if shiboken6.isValid(target):
+                target.removeEventFilter(self)
+        self._watched.clear()
+
+    def _for_allowed(self, watched, event) -> bool:
+        """Whether the event is the Cancel button's to have.
+
+        Read from the button's own state and geometry, not by asking
+        the window which widget is under the pointer or has the focus:
+        that answer can be one of the web engine's internal widgets,
+        the kind of object this filter keeps clear of."""
+        button = self._allowed
+        if event.type() in self._POINTED:
+            if button.isDown():
+                # the press it took: its release goes back to it
+                return True
+            home = button.window()
+            if watched is not home and watched is not home.windowHandle():
+                return False
+            spot = button.mapFromGlobal(event.globalPosition().toPoint())
+            return button.isVisible() and button.rect().contains(spot)
+        return button.hasFocus()
 
     def eventFilter(self, watched, event) -> bool:
-        if event.type() not in self._BLOCKED:
+        kind = event.type()
+        if kind not in self._BLOCKED:
             return False
-        if (event.type() == QEvent.Type.KeyPress
-                and event.key() == Qt.Key.Key_Escape):
-            self._cancel()
+        keyed = kind in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride)
+        if keyed and event.key() == Qt.Key.Key_Escape:
+            if kind == QEvent.Type.KeyPress:
+                self._cancel()
+            # an override accepted is a key no shortcut takes
+            event.accept()
             return True
-        here = watched
-        while here is not None:
-            if here is self._allowed:
-                return False
-            here = here.parent() if isinstance(here, QObject) else None
+        if self._for_allowed(watched, event):
+            return False
+        if kind == QEvent.Type.ShortcutOverride:
+            event.accept()
         return True
 
 
@@ -8545,8 +8607,7 @@ class MainWindow(QMainWindow):
         self._cancel_button.show()
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         gate = _InputGate(self._cancel_button, self._ask_cancel)
-        app = QApplication.instance()
-        app.installEventFilter(gate)
+        gate.install()
         # one worker thread for the window's life, not one per verb: on
         # Linux numpy's OpenBLAS keeps buffers per OS thread that has
         # called it, and a thread per verb — hundreds of them across a
@@ -8565,7 +8626,7 @@ class MainWindow(QMainWindow):
             loop.exec()
             future.result()
         finally:
-            app.removeEventFilter(gate)
+            gate.remove()
             # deleted here, on this thread, whatever the verb did
             shiboken6.delete(gate)
             shiboken6.delete(loop)
