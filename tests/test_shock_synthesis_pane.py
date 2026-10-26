@@ -81,7 +81,8 @@ def test_the_pane_iterates_the_synthesis_on_the_worker_once(window, pump,
     graphics = window.data_pane.graphics
     plots = [row for row in range(10)
              if isinstance(graphics.getItem(row, 0), pg.PlotItem)]
-    assert plots == [0, 1, 2, 8],         'the stroke reading three rows, the spectrum under its legend'
+    assert plots == [0, 1, 2, 8], (
+        'the stroke reading three rows, the spectrum under its legend')
     assert graphics.getItem(8, 0).getViewBox().state['logMode'] == [True,
                                                                     True]
     line = next(e for e in window.project.journal
@@ -123,7 +124,8 @@ def test_the_ratings_open_on_the_stroke_readings_shaker(window, pump,
     panel = _open(window, pump, 'Requirement')
     settings = panel.settings()
     assert settings.stroke == pytest.approx(0.0508)
-    assert settings.velocity == 1.78 and settings.moving_mass == 45.0,         'kept as held, not read back through the rounding of the boxes'
+    assert settings.velocity == 1.78 and settings.moving_mass == 45.0, (
+        'kept as held, not read back through the rounding of the boxes')
     assert settings.force is None and settings.body_mass is None
 
 
