@@ -1,5 +1,5 @@
-"""Modal responses: each mode answering a record's forces, appended to the
-record.
+"""Modal responses: each mode answering a record's forces, in a time
+history of their own linked beside the record.
 
 Brandon, 2026-10-25: with an excitation and a model of the system, the
 response is computed and kept as modal responses, one record per mode,
@@ -7,6 +7,10 @@ compact where a large model has many more physical DOFs than modes. The
 modes are whatever is selected: a whole set for every mode, or the modes
 picked in its grid. Checked against a direct simulation of the physical
 equations, the package's own FRF synthesis and closed forms.
+
+Brandon, 2026-10-27: the responses were appended to the force history;
+they are an object of their own now, as a transform's result is, and
+Merge puts the two back together.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import visualdynamics
 from visualdynamics.core import modal_response as mr
 from visualdynamics.core.averaging import Averaging
 from visualdynamics.core.data import TimeHistory
+from visualdynamics.core.merge import merge
 from visualdynamics.core.shapes import ShapeSet
 from visualdynamics.core.transform import expands, modal_records, reads_as, to_physical
 
@@ -177,39 +182,40 @@ def test_what_is_refused():
         mr.modal_responses(uneven, shapes)
 
 
-# ---- appended, replacing an earlier run -------------------------------------
+# ---- an object of their own -----------------------------------------------
 
-def test_appended_keeps_the_record_and_replaces_an_earlier_run():
+def _linked_project():
     shapes, _, _ = _model()
     record = _record(seconds=1.0)
     record.averaging = Averaging(frame_length=1024).filled(4096, FS)
-    first = mr.appended(record, mr.modal_responses(record, shapes,
-                                                   label='Modes'), 'Modes')
-    assert first.response_dof == ['1X+', '2X+', 'M1', 'M2']
-    assert first.averaging == record.averaging
-    assert record.num_records == 2, 'the source is not changed'
-    other = mr.appended(first, mr.modal_responses(first, shapes, modes=[0],
-                                                  label='Other'), 'Other')
-    again = mr.appended(other, mr.modal_responses(
-        other, shapes, modes=[1], quantity='displacement', label='Modes'),
-        'Modes')
-    assert again.response_dof == ['1X+', '2X+', 'M1', 'M2']
-    assert again.comment[2].startswith('Other: ')
-    assert again.comment[3].startswith('Modes: modal displacement')
-    assert again.ordinate_dim[3] == 'modal_length'
-
-
-def test_the_verb_appends_journals_and_is_offered_for_the_pair():
-    shapes, _, _ = _model()
     project = visualdynamics.Project()
     project.add('Modes', shapes)
-    project.add('Run', _record(seconds=1.0))
+    project.add('Run', record)
+    project.link('Run', 'Modes')
+    return project, shapes, record
+
+
+def test_the_verb_makes_an_object_beside_the_forces_and_journals():
+    project, shapes, record = _linked_project()
     assert 'compute_modal_responses' in dict(
         project.selection_verbs('Run', 'Modes'))
-    assert project.compute_modal_responses('Run', 'Modes', modes=[1]) == 'Run'
-    assert project['Run'].response_dof == ['1X+', '2X+', 'M2']
-    project.compute_modal_responses('Run', 'Modes', quantity='velocity')
-    assert project['Run'].response_dof == ['1X+', '2X+', 'M1', 'M2']
+    made = project.compute_modal_responses('Run', 'Modes', modes=[1])
+    assert made == 'Run Modal Responses'
+    assert project['Run'].response_dof == ['1X+', '2X+'], \
+        'the forces are not changed'
+    responses = project[made]
+    assert responses.response_dof == ['M2']
+    assert responses.comment[0].startswith('Modes: modal acceleration, mode 2')
+    assert np.allclose(responses.ordinate, mr.modal_responses(
+        record, shapes, modes=[1]).ordinate, rtol=0, atol=0)
+    assert np.array_equal(responses.abscissa, record.abscissa)
+    assert responses.averaging == record.averaging, 'the marks ride along'
+    assert set(project.object_group_of(made)) == {'Run', 'Modes', made}
+    assert project.modal_basis(made) == 'Modes'
+    again = project.compute_modal_responses('Run', 'Modes', quantity='velocity')
+    assert again == 'Run Modal Responses (2)', 'a second run is a second object'
+    assert project[again].ordinate_dim == ['modal_velocity'] * 2
+    assert project[made].response_dof == ['M2'], 'the first is kept'
     assert "project.compute_modal_responses('Run', 'Modes', modes=[1])" in \
         project.journal
     responses_only = TimeHistory(np.arange(8.0) / FS, np.zeros((1, 8)),
@@ -218,6 +224,35 @@ def test_the_verb_appends_journals_and_is_offered_for_the_pair():
     project.add('Quiet', responses_only)
     assert 'compute_modal_responses' not in dict(
         project.selection_verbs('Quiet', 'Modes')), 'no force to answer'
+
+
+def test_a_refitted_damping_marks_them_stale_and_a_refresh_answers_again():
+    """A transform reads the shapes and frequencies alone; a response
+    reads the damping and modal masses too, so a change to either is a
+    change to the answer."""
+    project, shapes, record = _linked_project()
+    made = project.compute_modal_responses('Run', 'Modes')
+    assert project.stale() == {}
+    refit = ShapeSet(shapes.frequency, 2 * shapes.damping, shapes.coordinate,
+                     shapes.shape_matrix, mass_unit='kg')
+    project['Modes'] = refit
+    assert made in project.stale()
+    project.refresh(made)
+    assert project.stale() == {}
+    assert np.allclose(project[made].ordinate,
+                       mr.modal_responses(record, refit).ordinate,
+                       rtol=0, atol=0)
+
+
+def test_merged_with_the_forces_they_are_one_history():
+    project, shapes, _ = _linked_project()
+    made = project.compute_modal_responses('Run', 'Modes')
+    merged = project.merge('Run', made)
+    run = project[merged]
+    assert run.response_dof == ['1X+', '2X+', 'M1', 'M2']
+    assert reads_as(run, shapes) == 'physical'
+    assert modal_records(run, shapes) == [2, 3]
+    assert project.modal_basis(merged, records=[2, 3]) == 'Modes'
 
 
 # ---- the pane ---------------------------------------------------------------
@@ -247,11 +282,15 @@ def test_the_pair_offers_the_act_and_the_pane_previews(window, pump):
     assert 'modal displacement' in window.statusBar().currentMessage()
     panel.apply_button.click()
     pump()
-    run = window.objects['Run']
-    assert run.response_dof == ['1X+', '2X+', 'M1', 'M2']
-    assert run.ordinate_dim[2] == 'modal_length'
-    assert not panel.isVisible(), 'done: the history is shown'
-    assert 'appended' in window.statusBar().currentMessage()
+    assert window.objects['Run'].response_dof == ['1X+', '2X+']
+    made = window.objects['Run Modal Responses']
+    assert made.response_dof == ['M1', 'M2']
+    assert made.ordinate_dim == ['modal_length'] * 2
+    assert window._item_for_object('Run Modal Responses').isSelected(), \
+        'done: the responses are shown'
+    assert not panel.isVisible()
+    assert window.statusBar().currentMessage().startswith(
+        'Run Modal Responses: modal displacement of 2 modes through Shapes')
     assert any("compute_modal_responses('Run', 'Shapes', "
                "quantity='displacement')" in line
                for line in window.project.journal)
@@ -275,7 +314,7 @@ def test_modes_picked_in_the_grid_are_the_modes_answered(window, pump):
     assert panel._derived['modes'][1].text() == '1 of 2'
     panel.apply_button.click()
     pump()
-    assert window.objects['Run'].response_dof == ['1X+', '2X+', 'M2']
+    assert window.objects['Run Modal Responses'].response_dof == ['M2']
 
 
 def test_the_pane_stands_down_when_the_selection_moves(window, pump):
@@ -289,7 +328,7 @@ def test_the_pane_stands_down_when_the_selection_moves(window, pump):
     assert not panel.isVisible() and window._modaling is None
 
 
-# ---- expanded where they were appended --------------------------------------
+# ---- expanded once merged with the forces -----------------------------------
 
 def _forces_and_responses():
     shapes, phi, _ = _model()
@@ -297,12 +336,11 @@ def _forces_and_responses():
     force = np.random.default_rng(3).standard_normal(t.size)
     run = TimeHistory(t, force[None, :], response_dof='1X+',
                       ordinate_dim='force')
-    run = mr.appended(run, mr.modal_responses(run, shapes, label='Modes'),
-                      'Modes')
+    run = merge([run, mr.modal_responses(run, shapes, label='Modes')])
     return shapes, phi, run
 
 
-def test_the_appended_responses_expand_to_the_physical_ones():
+def test_the_merged_responses_expand_to_the_physical_ones():
     """The history reads physical as a whole (its force is at 1X+); what
     there is to expand is its modal records, and they expand to Φq."""
     shapes, phi, run = _forces_and_responses()

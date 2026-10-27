@@ -2820,26 +2820,25 @@ class Project(dict):
     def compute_modal_responses(self, source: Any, shapes: Any, *,
                                 quantity: str = 'acceleration',
                                 modes: Sequence[int] | None = None,
-                                records: Sequence[int] | None = None) -> str:
+                                records: Sequence[int] | None = None,
+                                name: str | None = None) -> str:
         """Compute how each mode of a shape set answers the forces in a
-        time history, and append the modal responses to it (Compute Modal
-        Responses).
+        time history, as a new time history (Compute Modal Responses).
 
         The history's force channels are made modal through the set
         (pᵣ = Σ φₖᵣ fₖ; channels already holding the set's modal forces
         are used as they are), and each mode's equation is solved
         exactly for a force linear between samples, from rest
-        (`core.modal_response`). The responses are appended as records
-        `M1` … `Mn`, one per mode, each comment naming the set; records
-        an earlier run through the same set appended are replaced, so
-        the history never holds two answers for one mode. The rest of
-        the history, and its averaging and shock windows, are kept.
+        (`core.modal_response`). The result holds one record per mode,
+        `M1` … `Mn`, each comment naming the set, on the history's time
+        axis with its averaging and shock windows. It is linked into the
+        history's group, and the history itself is not changed; `merge`
+        puts the forces and the responses back in one object.
 
         Parameters
         ----------
         source : str or object
-            The time history, by name or as the object itself. It is
-            changed in place.
+            The time history, by name or as the object itself.
         shapes : str or object
             The shape set: real modes with frequency, damping and modal
             mass, by name or as the object itself.
@@ -2852,11 +2851,15 @@ class Project(dict):
         records : sequence of int, optional
             Which of the history's records are the forces; every force
             channel when omitted.
+        name : str, optional
+            What to call the result. Defaults to the history's name
+            followed by 'Modal Responses'.
 
         Returns
         -------
         str
-            The time history's name.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
 
         Raises
         ------
@@ -2868,20 +2871,20 @@ class Project(dict):
             the set covers, a complex set, a mode not in the set, uneven
             sampling, or a quantity it does not know.
         """
-        from .core.modal_response import appended, modal_responses
-
+        # The responses were appended to the force history until Brandon
+        # asked for an object of their own beside it, the way Transform
+        # to Modal Coordinates leaves its result (2026-10-27): the
+        # results stay organized, and Merge puts them back together.
         source = self.name_of(source)
         set_name = self.name_of(shapes)
-        history, modal_set = self[source], self[set_name]
-        if not isinstance(history, TimeHistory):
-            raise TypeError(f'{source!r} is not a time history')
-        if not isinstance(modal_set, ShapeSet):
-            raise TypeError(f'{set_name!r} is not a shape set')
-        responses = modal_responses(history, modal_set, modes=modes,
-                                    quantity=quantity, records=records,
-                                    label=set_name)
-        self[source] = appended(history, responses, set_name)
-        return source
+        params: dict[str, Any] = {'shapes': set_name, 'quantity': quantity}
+        if modes is not None:
+            params['modes'] = sorted({int(k) for k in modes})
+        if records is not None:
+            params['records'] = [int(i) for i in records]
+        return self._derive(source, _answered(self, source, params),
+                            name or f'{source} Modal Responses',
+                            recipe=('compute_modal_responses', params))
 
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None,
@@ -5944,7 +5947,10 @@ class Project(dict):
         'generate_signal': 'signal',
         # the record and the set both: a refitted set badges the modal
         # responses made through it
-        'transform': 'pair', 'expand': 'pair'}
+        'transform': 'pair', 'expand': 'pair',
+        # the pair and the set's damping and modal masses, which a
+        # transform never reads and a response does
+        'compute_modal_responses': 'pair+model'}
 
     def _analysis_state(self, source: str, verb: str,
                         params: Mapping[str, Any] | None = None) -> Any:
@@ -5961,15 +5967,18 @@ class Project(dict):
         obj = self.get(source)
         if reads is None or obj is None:
             return None
-        if reads == 'pair':
+        if reads in ('pair', 'pair+model'):
             other = self.get((params or {}).get('shapes'))
             if other is None:
                 return None
             import hashlib
 
             digest = hashlib.blake2b(digest_size=16)
-            for array in (obj.abscissa, obj.ordinate, other.shape_matrix,
-                          other.frequency):
+            arrays = [obj.abscissa, obj.ordinate, other.shape_matrix,
+                      other.frequency]
+            if reads == 'pair+model':
+                arrays += [other.damping, other.modal_mass]
+            for array in arrays:
                 digest.update(np.ascontiguousarray(array).tobytes())
             digest.update(','.join(obj.response_dof).encode())
             digest.update(','.join(other.coordinate).encode())
@@ -6659,8 +6668,8 @@ def _physical_name(source, result=None):
     specification to '… Physical Specification'; anything else gets
     the responses suffix."""
     # 'Modal Responses' is the name transforms took until Brandon renamed
-    # the act Transform to Modal Coordinates (2026-10-25); projects saved
-    # before then still hold it
+    # the act Transform to Modal Coordinates (2026-10-25), and the name
+    # Compute Modal Responses gives its result (2026-10-27)
     for suffix in (' Modal Coordinates', ' Modal Responses'):
         if source.endswith(suffix):
             return source[:-len(suffix)] + ' Physical Responses'
@@ -6836,6 +6845,7 @@ _RECOMPUTE = {
     'generate_signal': lambda p, s, k: _generated_again(p[s], k),
     'transform': lambda p, s, k: _through(p, s, k, 'to_modal'),
     'expand': lambda p, s, k: _through(p, s, k, 'to_physical'),
+    'compute_modal_responses': lambda p, s, k: _answered(p, s, k),
     'author_specification': lambda p, s, k: _authored(p, s, k),
 }
 
@@ -6886,6 +6896,28 @@ def _through(project, source, params, which):
                                                project[shapes], records)
     result.transform_report = report
     return result
+
+
+def _answered(project, source, params):
+    """The modal responses `compute_modal_responses` makes, from its
+    recipe: computed first and when refreshed."""
+    from .core.filters import carrying_marks
+    from .core.modal_response import modal_responses
+
+    shapes = params.get('shapes')
+    if shapes not in project:
+        raise ValueError(f'{source!r} was answered through {shapes!r}, '
+                         'which is gone')
+    history, modal_set = project[source], project[shapes]
+    if not isinstance(history, TimeHistory):
+        raise TypeError(f'{source!r} is not a time history')
+    if not isinstance(modal_set, ShapeSet):
+        raise TypeError(f'{shapes!r} is not a shape set')
+    responses = modal_responses(
+        history, modal_set, modes=params.get('modes'),
+        quantity=params.get('quantity', 'acceleration'),
+        records=params.get('records'), label=shapes)
+    return carrying_marks(history, responses)
 
 
 def _rigid_shapes(geometry):

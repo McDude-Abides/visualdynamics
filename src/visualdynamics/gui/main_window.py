@@ -11375,8 +11375,8 @@ class MainWindow(QMainWindow):
     def modal_response_act(self) -> None:
         """Open Compute Modal Responses on the selected time history and
         shape set (its picked modes, or all), or put it away when it is
-        open on them. The pane previews the responses; Compute appends
-        them (`Project.compute_modal_responses`)."""
+        open on them. The pane previews the responses; Compute makes them
+        a time history of their own (`Project.compute_modal_responses`)."""
         candidates = self._modal_candidates()
         if candidates is None:
             self._show_status('Select a time history with force channels and '
@@ -11478,22 +11478,19 @@ class MainWindow(QMainWindow):
         if state['records'] is not None:
             extra['records'] = state['records']
         try:
-            self.project.compute_modal_responses(name, state['shapes'],
-                                                 **extra)
+            added = self.project.compute_modal_responses(
+                name, state['shapes'], **extra)
         except (ValueError, TypeError) as why:
             self._show_status(f'{name}: {why}')
             return
         count = (self.objects[state['shapes']].num_shapes
                  if state['modes'] is None else len(state['modes']))
-        item = self._item_for_object(name)
-        if item is not None:
-            self._refresh_item(item, self.objects[name])
         self._modaling = None
         self.data_pane.modal_response_panel.hide()
-        self.show_object(name)
-        self._show_status(f'{name}: modal {quantity} of {count} '
+        self.show_object(added)
+        self._show_status(f'{added}: modal {quantity} of {count} '
                           f'mode{"s" * (count != 1)} through '
-                          f'{state["shapes"]} appended')
+                          f'{state["shapes"]}, from {name}')
 
     # ---- writing a specification at a set's modal coordinates ------------
 

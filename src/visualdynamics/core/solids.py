@@ -775,7 +775,9 @@ def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
     the rest subtracted from it, or what they share.
 
     Each solid goes into one boolean only, so a solid already part of
-    another is refused. The operands become part of the new solid, and
+    another is refused. So is a boolean that would leave nothing: a
+    subtraction whose first solid lies inside the rest, or an
+    intersection of solids that do not meet. The operands become part of the new solid, and
     the table lists only the solids nothing else uses (`top_level`).
 
     Parameters
@@ -819,7 +821,10 @@ def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
                          f'volume to {"take away" if operation == "subtract" else "share"}')
     name = name or solid(geometry, ids[0]).name
     made = Solid(_next_id(geometry), name, operation, operands=ids)
+    before = list(geometry.solids)
     geometry.solids.append(made)
+    _refuse_nothing_left(geometry, made.id, before,
+                         f'the {operation} cannot be made')
     return made.id
 
 
@@ -847,7 +852,8 @@ def reorder(geometry: Any, ids, within: int | None = None) -> None:
     Raises
     ------
     ValueError
-        When `ids` is not exactly those solids, or `within` has none.
+        When `ids` is not exactly those solids, `within` has none, or
+        the new order would leave the boolean empty.
     """
     ids = [int(i) for i in ids]
     if within is None:
@@ -866,9 +872,58 @@ def reorder(geometry: Any, ids, within: int | None = None) -> None:
     if sorted(ids) != sorted(holder.operands) or len(set(ids)) != len(ids):
         raise ValueError(f'solid {within} is made of {list(holder.operands)}; '
                          'give each of them once, in the order wanted')
+    before = geometry.solids
     geometry.solids = [replace(item, operands=tuple(ids))
                        if item.id == holder.id else item
                        for item in geometry.solids]
+    _refuse_nothing_left(geometry, holder.id, before,
+                         f'solid {ids[0]} cannot come first')
+
+
+def nothing_left(geometry: Any, solid_id: int) -> str | None:
+    """Why a boolean leaves nothing (a subtraction whose first solid lies
+    inside the rest, an intersection of solids that do not meet), or
+    None when something is left.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+
+    Returns
+    -------
+    str or None
+    """
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+
+    if TopExp_Explorer(shape(geometry, solid_id), TopAbs_FACE).More():
+        return None
+    item = solid(geometry, solid_id)
+    first, rest = item.operands[0], item.operands[1:]
+    others = ', '.join(str(i) for i in rest)
+    if item.kind == 'subtract':
+        return (f'taking solid{"s" * (len(rest) > 1)} {others} from solid '
+                f'{first} leaves nothing')
+    if item.kind == 'intersect':
+        return f'solids {first}, {others} share nothing'
+    return f'solid {solid_id} leaves nothing'
+
+
+def _refuse_nothing_left(geometry: Any, solid_id: int, before: list,
+                         why: str) -> None:
+    """Put the solids back as they were and refuse, when `solid_id`
+    leaves nothing: an empty solid has nothing to draw or mesh."""
+    try:
+        require_kernel()
+    except ValueError:
+        return                       # nothing can be drawn or meshed either
+    reason = nothing_left(geometry, solid_id)
+    if reason is not None:
+        geometry.solids = before
+        raise ValueError(f'{why}: {reason}')
 
 
 def _checked(geometry: Any, ids) -> set[int]:
@@ -1382,7 +1437,9 @@ def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        (n, 3, 3): each triangle's three corners.
+        (n, 3, 3): each triangle's three corners; none for a shape with
+        nothing in it, such as a subtraction whose first solid lies
+        inside the rest.
     """
     from OCP.Bnd import Bnd_Box
     from OCP.BRep import BRep_Tool
@@ -1400,6 +1457,11 @@ def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
 
     box = Bnd_Box()
     BRepBndLib.Add_s(item, box)
+    # an empty shape's box is void, and asking a void box for its
+    # corners raises (Brandon, 2026-10-27: dragging a cone's inner
+    # solid ahead of the outer one left nothing, and every redraw raised)
+    if box.IsVoid():
+        return np.empty((0, 3, 3))
     size = max(box.CornerMax().XYZ().Subtracted(
         box.CornerMin().XYZ()).Modulus(), 1e-9)
     BRepMesh_IncrementalMesh(item, size * deflection, False, 0.5, True)

@@ -195,8 +195,9 @@ def modal_records(data: DataArray, shapes: ShapeSet) -> list[int]:
     """The records of `data` at the set's modal DOFs.
 
     A time history can hold physical channels and modal coordinates
-    side by side: the forces of a test, and the modal responses
-    computed from them and appended (`Project.compute_modal_responses`).
+    side by side: the forces of a test merged with the modal responses
+    computed from them (`Project.compute_modal_responses`, then
+    `Project.merge`).
     Such a record reads as physical as a whole; these are the records
     an expansion of it reads. Only records that stand alone (a time
     history, a spectrum) are counted: a density's or an FRF's records

@@ -344,7 +344,7 @@ def test_the_inventory_covers_what_the_window_renders():
                            'Project.generate_signal makes it'),
         '_render_modal': ('core.modal_response.preview_responses, then '
                           'plot_series; Project.compute_modal_responses '
-                          'appends them'),
+                          'makes them a time history of their own'),
         '_render_author': ('core.author.ModalSpecificationDraft.preview, '
                            'then plot_data; its areas and running rms '
                            'plot_breakpoints'),

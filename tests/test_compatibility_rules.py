@@ -73,7 +73,7 @@ def test_a_linked_modal_object_answers_to_its_own_groups_sets():
         'unlinked, any set in the project answers')
 
 
-# ---- forces with modal responses appended -----------------------------------
+# ---- forces with modal responses merged in ----------------------------------
 
 def _mixed(modes, force_at='1X+'):
     """A force channel, then modal coordinates M1 … M`modes`."""
