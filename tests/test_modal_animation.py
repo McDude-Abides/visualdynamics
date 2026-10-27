@@ -123,13 +123,24 @@ def _plate_project():
     return project, geometry, shapes
 
 
+def _answered(project, shapes='Modes', modes=range(6, 22)):
+    """The modal responses computed into an object of their own, merged
+    back into 'Run' beside its force, and that object's name."""
+    made = project.compute_modal_responses('Run', shapes, modes=modes)
+    project.merge('Run', made)
+    return made
+
+
 def test_the_set_behind_computed_responses_is_read_from_them():
     project, _geometry, shapes = _plate_project()
-    project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
+    made = project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
+    assert project.modal_basis(made) == 'Modes'
+    project.merge('Run', made)
     assert project.modal_basis('Run') == 'Modes'
     assert project.modal_basis('Run', records=[0]) is None, 'the force'
     project.add('Other', shapes)
-    project.compute_modal_responses('Run', 'Other', modes=[6])
+    # M6: a second M7 would be the same channel twice, which a merge refuses
+    _answered(project, 'Other', modes=[5])
     assert project.modal_basis('Run') is None, 'two sets: none says'
     assert project.modal_basis('Run', records=[17]) == 'Other'
     del project['Other']
@@ -157,25 +168,26 @@ def test_the_set_behind_a_transform_is_read_from_its_provenance():
 
 def test_a_script_plays_them_on_the_sets_geometry(tmp_path):
     project, _geometry, _shapes = _plate_project()
-    project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
+    made = project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
     path = tmp_path / 'modal.png'
-    project.animate('Run', screenshot=str(path))
+    project.animate(made, screenshot=str(path))
     assert path.stat().st_size > 1000
 
 
 # ---- the window --------------------------------------------------------------
 
-def test_appended_responses_add_no_capture_labels():
+def test_merged_responses_add_no_capture_labels():
     """A history with no capture labels keeps none: blank ones read as a
     capture named '' and the playback said 'animating  of 1 averages'."""
     project, _geometry, _shapes = _plate_project()
-    project.compute_modal_responses('Run', 'Modes', modes=[6, 7])
+    made = _answered(project, modes=[6, 7])
+    assert made not in project, 'merged into Run'
     assert project['Run'].block is None
 
 
 def test_a_history_and_a_geometry_play_its_modes(window, pump):
     project, geometry, shapes = _plate_project()
-    project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
+    _answered(project)
     for name in ('Plate', 'Modes', 'Run'):
         window.add_object(name, project[name])
     pump()
@@ -193,6 +205,24 @@ def test_a_history_and_a_geometry_play_its_modes(window, pump):
     assert window.dofs_combo.currentData() == 'modal_acceleration', \
         'the box opens on the most common quantity, not the first by name'
     assert window.dofs_combo.currentText() == 'Modal Acceleration'
+
+
+def test_the_responses_alone_play_with_the_geometry(window, pump):
+    """The object Compute makes, selected with the geometry and nothing
+    else: its comments name the set it came through."""
+    project, geometry, shapes = _plate_project()
+    made = project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
+    for name in ('Plate', 'Modes', 'Run', made):
+        window.add_object(name, project[name])
+    pump()
+    select_objects(window, pump, made, 'Plate')
+    deflection = window.animator.deflection
+    assert isinstance(deflection, ModalTimeDeflection)
+    responses = window.objects[made]
+    q = np.zeros((shapes.num_shapes, responses.ordinate.shape[1]))
+    q[6:] = responses.ordinate
+    assert np.allclose(deflection.offsets(300).copy(),
+                       _expanded(geometry, shapes, q).offsets(300))
 
 
 def test_with_no_set_behind_them_the_set_is_selected_too(window, pump):
@@ -213,7 +243,7 @@ def test_with_no_set_behind_them_the_set_is_selected_too(window, pump):
 
 def test_modes_picked_in_the_history_play_their_contribution(window, pump):
     project, geometry, shapes = _plate_project()
-    project.compute_modal_responses('Run', 'Modes', modes=range(6, 22))
+    _answered(project)
     for name in ('Plate', 'Modes', 'Run'):
         window.add_object(name, project[name])
     pump()

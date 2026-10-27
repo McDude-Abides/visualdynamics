@@ -1,12 +1,13 @@
 """Modal responses: how each mode of a model answers the forces a record
-holds, computed in modal coordinates and kept beside the forces.
+holds, computed in modal coordinates.
 
 A model's modes are a compact description of how it moves: a large
 finite element model has many more physical DOFs than modes in a
 bandwidth, and the response anywhere follows from the modal responses
 by u = Φq. So the response to a test's forces is computed and kept as
-modal responses, one record per mode, appended to the time history the
-forces are in; the physical response at any DOF is a later expansion.
+modal responses, one record per mode, in a time history of their own on
+the forces' time axis; the physical response at any DOF is a later
+expansion.
 
 The forces are made modal first, pᵣ = Σₖ φₖᵣ fₖ, the projection
 `transform.to_modal` makes of a force record (a record already holding
@@ -182,7 +183,8 @@ def modal_responses(history: TimeHistory, shapes: ShapeSet, *,
         channel when omitted.
     label : str, default 'shapes'
         The set's name, written into each record's comment, which is how
-        a later run through the same set finds the records to replace.
+        the records find their shapes again when they are played on a
+        geometry or merged in with the forces.
 
     Returns
     -------
@@ -228,54 +230,6 @@ def modal_responses(history: TimeHistory, shapes: ShapeSet, *,
     return TimeHistory(t, rows, response_dof=[names[k] for k in chosen],
                        ordinate_dim=dim, dimension_hint=hint,
                        comment=comments)
-
-
-def made_through(history: TimeHistory, label: str) -> list[int]:
-    """The records of `history` that an earlier run through the set
-    named `label` appended (`modal_responses` writes the name into each
-    record's comment)."""
-    prefix = f'{label}: modal '
-    return [i for i, comment in enumerate(history.comment)
-            if comment.startswith(prefix)]
-
-
-def appended(history: TimeHistory, responses: TimeHistory,
-             label: str) -> TimeHistory:
-    """`history` with `responses` appended as records after its own, the
-    records an earlier run through the same set made taken out first.
-    Its averaging, shock windows, roles and other settings are kept;
-    `history` itself is not changed."""
-    keep = [i for i in range(history.num_records)
-            if i not in set(made_through(history, label))]
-    out = copy.copy(history)
-    n = len(responses.response_dof)
-
-    def joined(field: str, new: list) -> list | None:
-        old = getattr(history, field)
-        if old is None and all(v is None for v in new):
-            return None
-        old = [None] * history.num_records if old is None else list(old)
-        return [old[i] for i in keep] + list(new)
-
-    out.ordinate = np.vstack([np.asarray(history.ordinate)[keep],
-                              responses.ordinate])
-    out.response_dof = [history.response_dof[i] for i in keep] + list(
-        responses.response_dof)
-    out.ordinate_dim = [history.ordinate_dim[i] for i in keep] + list(
-        responses.ordinate_dim)
-    out.ordinate_unit = [history.ordinate_unit[i] for i in keep] + list(
-        responses.ordinate_unit)
-    out.reference_unit = [history.reference_unit[i] for i in keep] + list(
-        responses.reference_unit)
-    out.comment = [history.comment[i] for i in keep] + list(responses.comment)
-    out.dimension_hint = [history.dimension_hint[i] for i in keep] + list(
-        responses.dimension_hint)
-    out.reference_dof = joined('reference_dof', [None] * n)
-    # a history with no capture labels keeps none: blank labels would
-    # read as one capture named '' (2026-10-25)
-    out.block = (None if history.block is None
-                 else [b or '' for b in joined('block', [''] * n)])
-    return out
 
 
 #: the most samples a preview computes, so that it answers while the

@@ -22,8 +22,8 @@ A data object whose DOFs are all modal coordinates (`M1` ... `Mn`, see
 the one it was transformed or computed through, and fits wherever there
 is a set with at least as many modes as it names: a set in its object
 group when it is in one, any set in the project otherwise. A time
-history can hold both kinds of record, forces with the modal responses
-computed from them appended: its physical records answer to the
+history can hold both kinds of record, forces merged with the modal
+responses computed from them: its physical records answer to the
 geometry and its modal records to the shape sets, each by its own rule.
 
 Not checked here:

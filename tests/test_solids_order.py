@@ -21,6 +21,21 @@ from visualdynamics.gui.project_tree import ROLE_REFERENCE, SOLIDS_MIME
 pytest.importorskip('OCP')
 
 
+def _cone_shell():
+    """Brandon's cone (2026-10-27): an outer cone with an inner one
+    subtracted, the same height, so the inner lies wholly inside."""
+    project = visualdynamics.Project()
+    geometry = visualdynamics.Geometry([], [])
+    geometry.define_units('m')
+    project.add('G', geometry)
+    outer = project.add_solid_cone('G', (0, 0, 0), 0.6096, 0.1016, 2.032,
+                                   name='outer')
+    inner = project.add_solid_cone('G', (0, 0, 0), 0.5842, 0.0762, 2.032,
+                                   name='inner')
+    cone = project.combine_solids('G', 'subtract', [outer, inner], name='Cone')
+    return project, geometry, outer, inner, cone
+
+
 def _project():
     project = visualdynamics.Project()
     geometry = visualdynamics.Geometry([], [])
@@ -66,6 +81,44 @@ def test_what_is_refused():
         project.reorder_solids('G', [rod, rod], within=cut)
     with pytest.raises(ValueError, match='is not made of other solids'):
         project.reorder_solids('G', [cube], within=ball)
+
+
+def test_an_order_that_leaves_nothing_is_refused():
+    """The inner cone first would have the outer cut from it, which leaves
+    nothing: an empty solid with nothing to draw or mesh, and every
+    redraw raised."""
+    project, geometry, outer, inner, cone = _cone_shell()
+    journal = list(project.journal)
+    with pytest.raises(ValueError, match=(
+            f'^solid {inner} cannot come first: taking solid {outer} from '
+            f'solid {inner} leaves nothing$')):
+        project.reorder_solids('G', [inner, outer], within=cone)
+    assert solids.solid(geometry, cone).operands == (outer, inner)
+    assert project.journal == journal
+    assert len(solids.shape_triangles(solids.shape(geometry, cone)))
+
+
+def test_a_boolean_that_leaves_nothing_is_not_made():
+    project, geometry, outer, inner, cone = _cone_shell()
+    project.separate_solids('G', [cone])
+    before = list(geometry.solids)
+    with pytest.raises(ValueError, match=(
+            f'^the subtract cannot be made: taking solid {outer} from solid '
+            f'{inner} leaves nothing$')):
+        project.combine_solids('G', 'subtract', [inner, outer])
+    assert geometry.solids == before
+    apart = project.add_solid_sphere('G', (5, 0, 0), 0.5)
+    with pytest.raises(ValueError, match=f'solids {outer}, {apart} share nothing'):
+        project.combine_solids('G', 'intersect', [outer, apart])
+
+
+def test_an_empty_shape_has_no_triangles():
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    empty = TopoDS_Compound()
+    BRep_Builder().MakeCompound(empty)
+    assert solids.shape_triangles(empty).shape == (0, 3, 3)
 
 
 # ---- the tree ----------------------------------------------------------------
@@ -167,6 +220,26 @@ def test_a_drop_outside_its_siblings_does_nothing(window, pump):
     rect = window.tree.visualItemRect(rows[ball])
     assert window.tree._solid_landing(mime, rect.center()) is None, \
         'no landing line among rows it cannot join'
+
+
+def test_a_drag_that_would_leave_nothing_is_refused_and_said(window, pump):
+    _shell, geometry, outer, inner, cone = _cone_shell()
+    window.add_object('G', geometry)
+    pump()
+    item = window._item_for_object('G')
+    item.setExpanded(True)
+    for i in range(item.childCount()):
+        item.child(i).setExpanded(True)
+    pump()
+    _rows(window)[cone].setExpanded(True)
+    pump()
+    _drag(window, pump, [inner], onto=outer, lower=False)
+    assert solids.solid(window.objects['G'], cone).operands == (outer, inner)
+    assert window.statusBar().currentMessage() == (
+        f'G: solid {inner} cannot come first: taking solid {outer} from '
+        f'solid {inner} leaves nothing')
+    select = _rows(window)
+    assert inner in select and outer in select, 'the rows are still there'
 
 
 def test_a_pick_across_two_parents_is_not_a_drag(window, pump):

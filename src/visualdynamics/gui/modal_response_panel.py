@@ -1,13 +1,13 @@
 """The Compute Modal Responses pane beside the plot: which response of
 each mode to keep, what it is computed from, a preview, and the button
-that appends it.
+that computes it.
 
 It opens on a time history with force channels selected together with a
 shape set: the whole set for every mode, or the modes picked in its
 grid. The plot previews the modal responses over the start of the
 record; Compute runs the project's `compute_modal_responses`, which
-appends them to the time history and replaces any an earlier run
-through the same set appended (principle 13: select, see, set, apply).
+puts them in a new time history linked beside the forces (principle 13:
+select, see, set, apply).
 """
 
 from __future__ import annotations

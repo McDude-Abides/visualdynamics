@@ -804,8 +804,8 @@ shapes give the half-power mass units (`modal_acceleration`,
 in/s²·slinch½), and a set with no mass unit gives responses whose units
 are left to declare. In the window, select the record and the set
 together and press *Transform to Modal Coordinates* on the bar (or
-*Expand to Physical Responses*, for a modal record or a time history
-with [modal responses appended](modal-responses.md)). The object is made
+*Expand to Physical Responses*, for a modal record such as the
+[modal responses computed from forces](modal-responses.md)). The object is made
 at once, since a transform has no settings, and the status line reports
 the DOFs shared, the DOFs left out and the residual the fit leaves. The
 same report is kept on the object as its `transform_report`
