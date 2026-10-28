@@ -10,8 +10,11 @@ of its input. These are the numbers a Rust port is measured against.
     ./.venv/bin/python bench/baseline.py                 # every case
     ./.venv/bin/python bench/baseline.py srs psd         # names containing these
     ./.venv/bin/python bench/baseline.py --quick         # the smaller sizes only
+    ./.venv/bin/python bench/baseline.py --large         # and larger ones (`LARGE`)
 
-Writes ``bench/out/baseline-<commit>.csv`` and ``.json``.
+Writes ``bench/out/baseline-<commit>[-large][-t<threads>].csv`` and
+``.json``. Set ``OPENBLAS_NUM_THREADS`` to compare thread counts: numpy
+and scipy each load their own OpenBLAS with a thread per logical CPU.
 """
 
 from __future__ import annotations
@@ -242,6 +245,32 @@ CASES = [
 ]
 
 
+#: the sizes `--large` adds past each sweep, to check that the trend
+#: holds; kept within a few gigabytes per case. The full scalogram is
+#: left out: at 4 Mi samples its result alone is about 6 GB.
+LARGE = {
+    'srs.samples': [4_000_000, 16_000_000],
+    'srs.frequencies': [10_000],
+    'psd.samples': [1 << 24],
+    'psd.channels': [256],
+    'cpsd.channels': [128],
+    'frf.Hv.responses': [128, 256],
+    'frf.H1.responses': [128, 256],
+    'frf.Hv.samples': [1 << 24],
+    'filter.samples': [1 << 24],
+    'resample.samples': [1 << 24],
+    'scalogram_peaks.samples': [1 << 24],
+    'kurtosis.frames': [65_536],
+    'time_statistics.samples': [1 << 24],
+    'mac.modes': [3_000],
+    'mac.dofs': [1_000_000],
+    'synthesize_frf.pairs': [10_000],
+    'octave.lines': [10_000_000],
+}
+#: with `--large` a case keeps growing until one call takes this long
+LARGE_SLOW_CALL = 150.0
+
+
 def measure(call: Callable[[], object]) -> list[float]:
     # one untimed call first: the first call of a kernel pays for lazy
     # imports, FFT plans and thread pools that every later call reuses
@@ -293,6 +322,7 @@ def environment() -> dict:
         'numpy': np.__version__, 'scipy': scipy.__version__,
         'cpu': cpu, 'cores': os.cpu_count(),
         'platform': platform.platform(),
+        'openblas_threads': os.environ.get('OPENBLAS_NUM_THREADS', 'default'),
         'when': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
     }
 
@@ -303,7 +333,12 @@ def main() -> int:
                         help='run only cases whose name contains one of these')
     parser.add_argument('--quick', action='store_true',
                         help='the smaller half of each sweep')
+    parser.add_argument('--large', action='store_true',
+                        help='extend each sweep with the sizes in LARGE')
     args = parser.parse_args()
+    global SLOW_CALL
+    if args.large:
+        SLOW_CALL = LARGE_SLOW_CALL
     warnings.simplefilter('ignore')
 
     env = environment()
@@ -318,6 +353,8 @@ def main() -> int:
             continue
         sizes = case.sizes[:max(2, len(case.sizes) // 2 + 1)] if args.quick \
             else case.sizes
+        if args.large:
+            sizes = sizes + LARGE.get(case.name, [])
         print(f'{case.name}  ({case.target}; {case.fixed})')
         done, best = [], []
         for size in sizes:
@@ -347,7 +384,9 @@ def main() -> int:
         print()
 
     OUT.mkdir(parents=True, exist_ok=True)
-    stem = OUT / f"baseline-{env['commit']}"
+    threads = os.environ.get('OPENBLAS_NUM_THREADS')
+    stem = OUT / (f"baseline-{env['commit']}" + ('-large' if args.large else '')
+                  + (f'-t{threads}' if threads else ''))
     with open(f'{stem}.csv', 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
