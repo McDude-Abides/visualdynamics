@@ -1,0 +1,73 @@
+# The sparse eigensolution's stages timed on each platform the app
+# ships for (Apple silicon only on macOS), under each BLAS the wheels
+# bring: numpy and scipy's own OpenBLAS on Linux and Windows,
+# Accelerate on macOS 14 and later, and OpenBLAS on a Mac as macOS 12
+# and 13 installs get it. Runs on a push to this branch only; the CSVs
+# are uploaded per job.
+name: bench
+
+on:
+  push:
+    branches: [tooling/bench-runners]
+  workflow_dispatch:
+
+jobs:
+  eigensolve:
+    name: ${{ matrix.os }} ${{ matrix.blas }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, blas: openblas}
+          - {os: windows-latest, blas: openblas}
+          - {os: macos-15, blas: accelerate}
+          - {os: macos-15, blas: openblas, wheels: macosx_12_0_arm64}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -e . threadpoolctl
+      - name: Swap in the OpenBLAS wheels an older macOS gets
+        if: matrix.wheels
+        run: |
+          python -m pip download -q --no-deps --only-binary=:all: \
+            --platform ${{ matrix.wheels }} --python-version 3.13 \
+            numpy scipy -d older
+          python -m pip install -q --force-reinstall --no-deps older/*.whl
+      - name: Machine and BLAS
+        run: |
+          python - <<'EOF'
+          import os, platform, numpy, scipy, threadpoolctl
+          print(platform.platform(), platform.machine(), os.cpu_count(), 'logical CPUs')
+          print('numpy', numpy.__version__, 'scipy', scipy.__version__)
+          for pool in threadpoolctl.threadpool_info():
+              print({k: pool.get(k) for k in ('internal_api', 'num_threads',
+                                              'version', 'filepath')})
+          EOF
+      - name: Eigensolution by stage, default threads
+        run: python bench/eigensolve.py --mesh 30 40 60 --modes 100 200
+      - name: Eigensolution, one BLAS thread per library
+        run: python bench/eigensolve.py --mesh 30 40 60 --modes 100 200
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          VECLIB_MAXIMUM_THREADS: '1'
+      - name: Eigensolution, two BLAS threads per library
+        run: python bench/eigensolve.py --mesh 30 40 60 --modes 100 200
+        env:
+          OPENBLAS_NUM_THREADS: '2'
+          VECLIB_MAXIMUM_THREADS: '2'
+      - name: Every mode up to a frequency, default threads
+        run: python bench/eigensolve.py --by frequency --mesh 40 --modes 100 200
+      - uses: actions/upload-artifact@v7
+        with:
+          name: eigensolve-${{ matrix.os }}-${{ matrix.blas }}
+          path: bench/out/*.csv

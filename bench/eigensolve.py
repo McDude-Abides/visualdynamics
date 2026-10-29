@@ -9,12 +9,18 @@ inside the polish, say) is counted once, in itself.
     ./.venv/bin/python bench/eigensolve.py
     ./.venv/bin/python bench/eigensolve.py --mesh 40 60 --modes 100 400
     OPENBLAS_NUM_THREADS=4 ./.venv/bin/python bench/eigensolve.py
+    ./.venv/bin/python bench/eigensolve.py --by frequency
 
 The BLAS thread count matters more than anything here: numpy and scipy
 each load their own OpenBLAS, and each starts a thread per logical CPU
 unless told otherwise, so the threads of the two libraries contend for
 the cores. Run it with and without `OPENBLAS_NUM_THREADS` and compare.
-Writes ``bench/out/eigensolve-<commit>-<threads>.csv``.
+`--by frequency` asks for every mode up to a frequency instead, the
+way the app's Solve Modes does: the frequency of the `num_modes`-th
+mode, found by an untimed solve first, so the two ways are timed on the
+same modes. Each Lanczos run's mode count is recorded, since the solver
+grows the count and starts again until the frequency is reached.
+Writes ``bench/out/eigensolve-<commit>-<threads>[-frequency].csv``.
 """
 
 from __future__ import annotations
@@ -59,10 +65,14 @@ class Timers:
         self.spent = {name: 0.0 for name, _owner, _attr in STAGES}
         self.calls = dict.fromkeys(self.spent, 0)
         self.stack: list[list] = []
+        #: the mode count each Lanczos run was asked for
+        self.asked: list[int] = []
 
     def wrap(self, name, function):
         @functools.wraps(function)
         def timed(*args, **kwargs):
+            if name == 'lanczos':
+                self.asked.append(int(args[3]))
             now = time.perf_counter()
             if self.stack:
                 outer = self.stack[-1]
@@ -79,8 +89,14 @@ class Timers:
         return timed
 
 
-def run(mesh: int, modes: int) -> dict:
+def run(mesh: int, modes: int, by: str = 'count') -> dict:
     model = plate.build(mesh)
+    if by == 'frequency':
+        top = float(model.eigensolution(num_modes=modes,
+                                        solver='sparse').frequency[-1])
+        ask = {'maximum_frequency': top}
+    else:
+        ask = {'num_modes': modes}
     timers = Timers()
     saved = []
     for name, owner, attr in STAGES:
@@ -95,20 +111,22 @@ def run(mesh: int, modes: int) -> dict:
         start = time.perf_counter()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
-            shapes = model.eigensolution(num_modes=modes, solver='sparse')
+            shapes = model.eigensolution(solver='sparse', **ask)
         total = time.perf_counter() - start
     finally:
         for owner, attr, original in saved:
             setattr(owner, attr, original)
     accounted = sum(timers.spent.values())
     return {
-        'mesh': mesh, 'dof': model.num_dof, 'modes': modes,
+        'mesh': mesh, 'dof': model.num_dof, 'by': by, 'modes': modes,
+        'found': len(shapes.frequency),
         'top_hz': float(shapes.frequency[-1]), 'total_s': total,
         **{f'{k}_s': v for k, v in timers.spent.items()},
         'other_s': total - accounted,
         'solve_calls': timers.calls['solves'],
         'eigh_calls': timers.calls['ritz eigh'],
         'fell_back': any('ARPACK' in str(w.message) for w in caught),
+        'lanczos_asked': ' '.join(map(str, timers.asked)),
     }
 
 
@@ -119,26 +137,34 @@ def main() -> int:
                         help='plate elements per side (at most 98)')
     parser.add_argument('--modes', type=int, nargs='+',
                         default=[50, 100, 200, 400])
+    parser.add_argument('--by', choices=('count', 'frequency'),
+                        default='count',
+                        help='ask for num_modes, or for every mode up to '
+                        'the frequency of that many')
     args = parser.parse_args()
 
     threads = os.environ.get('OPENBLAS_NUM_THREADS', 'default')
     commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT,
                             capture_output=True, text=True,
                             check=False).stdout.strip()
-    print(f'OPENBLAS_NUM_THREADS={threads}, {os.cpu_count()} logical CPUs\n')
+    print(f'OPENBLAS_NUM_THREADS={threads}, {os.cpu_count()} logical CPUs, '
+          f'asking by {args.by}\n')
     names = [name for name, _owner, _attr in STAGES] + ['other']
     print(f"{'dof':>7} {'modes':>5} {'total':>8}  "
           + ' '.join(f'{n[:9]:>9}' for n in names))
     rows = []
     for mesh in args.mesh:
         for modes in args.modes:
-            row = run(mesh, modes)
+            row = run(mesh, modes, args.by)
             rows.append({'threads': threads, **row})
             print(f"{row['dof']:>7} {modes:>5} {row['total_s']:>7.2f}s  "
                   + ' '.join(f"{row[f'{n}_s']:>9.2f}" for n in names)
-                  + ('  (ARPACK)' if row['fell_back'] else ''), flush=True)
+                  + ('  (ARPACK)' if row['fell_back'] else '')
+                  + (f"  runs {row['lanczos_asked']}" if args.by == 'frequency'
+                     else ''), flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
-    path = OUT / f'eigensolve-{commit}-{threads}.csv'
+    path = OUT / (f'eigensolve-{commit}-{threads}'
+                  + ('-frequency' if args.by == 'frequency' else '') + '.csv')
     with open(path, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
