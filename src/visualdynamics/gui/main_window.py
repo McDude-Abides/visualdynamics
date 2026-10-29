@@ -19712,8 +19712,9 @@ class MainWindow(QMainWindow):
         """With skeleton sections on, list the sections the report
         still owes and ask whether to export anyway; True to go on.
         Without the feature there is no skeleton to check, and nothing
-        is asked."""
+        is asked. A flash report lists the parts its one page owes."""
         from ..report.features import enabled
+        from ..report.flash import FEATURE as FLASH
         from ..report.skeleton import FEATURE
 
         if FEATURE not in enabled(report):
@@ -19722,10 +19723,11 @@ class MainWindow(QMainWindow):
         if not owed:
             return True
         lines = '\n'.join(owed)
+        what = 'part' if FLASH in enabled(report) else 'section'
         with self._asking():
             answer = QMessageBox.question(
                 self, 'Export Report',
-                f'{name} still owes {len(owed)} section'
+                f'{name} still owes {len(owed)} {what}'
                 f'{"s" * (len(owed) != 1)}:\n\n{lines}\n\nExport anyway?',
                 QMessageBox.StandardButton.Yes
                 | QMessageBox.StandardButton.No,
