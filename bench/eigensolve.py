@@ -49,6 +49,8 @@ STAGES = [
     ('scaling', fem.Model, 'scaled_system'),
     ('factor', sparse_solve, 'factor_symmetric'),
     ('solves', sparse_solve.SuperLUFactor, 'solve'),
+    # a Mac's factor is Accelerate's; its solves are the same stage
+    ('solves', sparse_solve.AccelerateFactor, 'solve'),
     ('lanczos', fem, 'block_lanczos_modes'),
     ('orthonormalize', fem, '_m_orthonormal'),
     ('ritz eigh', scipy.linalg, 'eigh'),
@@ -62,7 +64,8 @@ class Timers:
     it calls is running."""
 
     def __init__(self):
-        self.spent = {name: 0.0 for name, _owner, _attr in STAGES}
+        self.spent = dict.fromkeys(
+            dict.fromkeys(name for name, _owner, _attr in STAGES), 0.0)
         self.calls = dict.fromkeys(self.spent, 0)
         self.stack: list[list] = []
         #: the mode count each Lanczos run was asked for
@@ -143,13 +146,17 @@ def main() -> int:
                         'the frequency of that many')
     args = parser.parse_args()
 
-    threads = os.environ.get('OPENBLAS_NUM_THREADS', 'default')
+    # OpenBLAS's setting, or Accelerate's on a Mac, so runs of one
+    # machine at several thread counts write separate files
+    threads = os.environ.get('OPENBLAS_NUM_THREADS') or (
+        f"veclib{os.environ['VECLIB_MAXIMUM_THREADS']}"
+        if os.environ.get('VECLIB_MAXIMUM_THREADS') else 'default')
     commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT,
                             capture_output=True, text=True,
                             check=False).stdout.strip()
-    print(f'OPENBLAS_NUM_THREADS={threads}, {os.cpu_count()} logical CPUs, '
+    print(f'BLAS threads {threads}, {os.cpu_count()} logical CPUs, '
           f'asking by {args.by}\n')
-    names = [name for name, _owner, _attr in STAGES] + ['other']
+    names = list(dict.fromkeys(name for name, _owner, _attr in STAGES)) + ['other']
     print(f"{'dof':>7} {'modes':>5} {'total':>8}  "
           + ' '.join(f'{n[:9]:>9}' for n in names))
     rows = []
