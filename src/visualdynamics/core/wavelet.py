@@ -151,6 +151,12 @@ BAND_BYTES = 256 * 2**20
 COLUMNS = 4096
 
 
+try:
+    from vd_rust import scalogram_peaks as _compiled_peaks
+except ImportError:
+    _compiled_peaks = None
+
+
 def fourier_factor(omega0: float = OMEGA0) -> float:
     """Seconds of Fourier period per second of wavelet scale, `2*pi/omega0`.
 
@@ -347,11 +353,22 @@ def scalogram_peaks(values: ArrayLike, sample_rate: float,
     # a burst in the last few samples is still a burst. Padding with
     # zero cannot win a maximum of magnitudes.
     pad = kept * step - samples
-    for rows, band in _bands(record, sample_rate, wanted, omega0):
-        magnitude = np.abs(band)
-        if pad:
-            magnitude = np.pad(magnitude, ((0, 0), (0, pad)))
-        held[rows] = magnitude.reshape(len(magnitude), kept, step).max(axis=2)
+    if _compiled_peaks is not None and wanted.size:
+        # the compiled reduction: each scale's inverse transform taken
+        # and reduced to its slice maxima in one buffer, as many scales
+        # at once as three working arrays of BAND_BYTES allow
+        scales, _length, spectrum, omega = _padded_spectrum(
+            record, sample_rate, wanted, omega0)
+        held = _compiled_peaks(
+            np.ascontiguousarray(spectrum, dtype=complex),
+            np.ascontiguousarray(omega), np.ascontiguousarray(scales),
+            float(omega0), samples, step, kept, 3 * BAND_BYTES)
+    else:
+        for rows, band in _bands(record, sample_rate, wanted, omega0):
+            magnitude = np.abs(band)
+            if pad:
+                magnitude = np.pad(magnitude, ((0, 0), (0, pad)))
+            held[rows] = magnitude.reshape(len(magnitude), kept, step).max(axis=2)
     edges = np.arange(kept + 1) * step
     edges[-1] = samples
     times = (edges[:-1] + edges[1:] - 1) / 2.0 / float(sample_rate)
@@ -380,20 +397,11 @@ def _prepared(values, sample_rate, frequencies):
     return record, wanted, samples
 
 
-def _bands(record, sample_rate, wanted, omega0):
-    """The transform, a band of rows at a time: yields (row slice, coefficients).
-
-    Each band's coefficients are already cut back to the record's
-    length; the caller stacks them or reduces them as it likes.
-    """
-    from functools import partial
-
-    from scipy.fft import fft as _fft
-    from scipy.fft import ifft as _ifft
-    from scipy.fft import next_fast_len
-
-    # every core on the transforms (2026-10-01); the same numbers
-    fft, ifft = partial(_fft, workers=-1), partial(_ifft, workers=-1)
+def _padded_spectrum(record, sample_rate, wanted, omega0):
+    """(scales, padded length, the padded record's FFT, each bin's angular
+    frequency): what every scale's transform is computed from, for
+    `_bands` and for the compiled peaks alike."""
+    from scipy.fft import fft, next_fast_len
 
     samples = record.size
     step = 1.0 / float(sample_rate)
@@ -425,6 +433,24 @@ def _bands(record, sample_rate, wanted, omega0):
     # angular frequencies of the FFT bins, negative above Nyquist — the
     # Morlet is analytic, so the negative half is what gets discarded
     omega = 2.0 * np.pi * np.fft.fftfreq(length, step)
+    return scales, length, spectrum, omega
+
+
+def _bands(record, sample_rate, wanted, omega0):
+    """The transform, a band of rows at a time: yields (row slice, coefficients).
+
+    Each band's coefficients are already cut back to the record's
+    length; the caller stacks them or reduces them as it likes.
+    """
+    from functools import partial
+
+    from scipy.fft import ifft as _ifft
+
+    # every core on the transforms (2026-10-01); the same numbers
+    ifft = partial(_ifft, workers=-1)
+    samples = record.size
+    scales, length, spectrum, omega = _padded_spectrum(
+        record, sample_rate, wanted, omega0)
     # the analytic half, taken once: the Gaussian below is zero on the
     # negative frequencies, so they need not be raised to it at all
     positive = omega > 0.0

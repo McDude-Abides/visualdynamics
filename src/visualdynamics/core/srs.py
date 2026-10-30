@@ -125,6 +125,12 @@ def ramp_invariant(frequencies: ArrayLike, sample_rate: float,
     return b, a
 
 
+try:
+    from vd_rust import srs_peaks as _compiled_peaks
+except ImportError:
+    _compiled_peaks = None
+
+
 def peaks(signal: ArrayLike, frequencies: ArrayLike, sample_rate: float,
           damping: float | None = None,
           q: float = DEFAULT_Q) -> tuple[np.ndarray, np.ndarray]:
@@ -150,6 +156,12 @@ def peaks(signal: ArrayLike, frequencies: ArrayLike, sample_rate: float,
     b, a = ramp_invariant(frequencies, sample_rate, zeta)
     highest = np.zeros(len(b))
     lowest = np.zeros(len(b))
+    if x.size and _compiled_peaks is not None:
+        # the same recursion in the compiled module, every filter on its
+        # own core and none of their responses held (bench/baseline.py)
+        return _compiled_peaks(np.ascontiguousarray(x),
+                               np.ascontiguousarray(b, dtype=float),
+                               np.ascontiguousarray(a, dtype=float))
     if x.size:
         for k in range(len(b)):
             y = lfilter(b[k], a[k], x)

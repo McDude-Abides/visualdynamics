@@ -22,7 +22,8 @@ from typing import Any
 import numpy as np
 import scipy.sparse as sp
 
-#: set to 'superlu' to keep Accelerate out, which is how the tests run
+#: set to 'superlu' to keep Accelerate and faer out, or 'faer' to keep
+#: Accelerate out, which is how the tests run
 #: both paths on one machine
 BACKEND_VARIABLE = 'VISUALDYNAMICS_SPARSE_SOLVER'
 
@@ -324,9 +325,57 @@ class AccelerateFactor:
             self._factor = None
 
 
-def factor_symmetric(matrix: Any) -> AccelerateFactor | SuperLUFactor:
+#: the threads faer's factorization and solves run on (`FaerFactor`).
+#: Set from measurement: its parallel solves of the shifted factor cost
+#: more in coordination than they save on the models here (see
+#: bench/eigensolve.py), so the default is the count measured fastest.
+FAER_THREADS = 1
+
+
+class FaerFactor:
+    """faer's supernodal Cholesky of a symmetric positive definite
+    matrix, through the compiled `vd_rust` module.
+
+    The factorization and its solves run on every core, where SuperLU's
+    run on one, and a Cholesky factor is half an LU's. It refuses a
+    matrix that is not positive definite, which the caller then hands
+    to SuperLU.
+    """
+
+    backend = 'faer'
+
+    def __init__(self, matrix: Any) -> None:
+        import vd_rust
+
+        vd_rust.set_threads(int(os.environ.get('VISUALDYNAMICS_FAER_THREADS',
+                                               FAER_THREADS)))
+        csc = sp.csc_matrix(matrix)
+        csc.sort_indices()
+        try:
+            self._factor = vd_rust.SparseCholesky(
+                csc.shape[0], csc.indptr.astype(np.int64),
+                csc.indices.astype(np.int64), csc.data.astype(np.float64))
+        except RuntimeError as failure:
+            raise ValueError(str(failure)) from None
+        self.shape: tuple[int, int] = tuple(self._factor.shape)
+        residual = probe_backward_error(matrix, self.solve)
+        if not residual < PROBE_LIMIT:
+            raise ValueError('faer found the matrix singular: a probe solve '
+                             f'has a backward error of {residual:.1e}')
+
+    def solve(self, rhs: Any) -> np.ndarray:
+        """X with A X = `rhs`, for one right-hand side or a block of
+        them, in the shape `rhs` came in."""
+        rhs = np.asarray(rhs, dtype=np.float64)
+        block = rhs.reshape(rhs.shape[0], -1)
+        return self._factor.solve_block(block).reshape(rhs.shape)
+
+
+def factor_symmetric(matrix: Any) -> AccelerateFactor | FaerFactor | SuperLUFactor:
     """The matrix factored, by Accelerate where it is and takes the
-    matrix, else by SuperLU; both answer `solve(rhs)` and `shape`.
+    matrix, else by faer where `vd_rust` is installed and the matrix is
+    positive definite, else by SuperLU; each answers `solve(rhs)` and
+    `shape`.
 
     Parameters
     ----------
@@ -335,11 +384,17 @@ def factor_symmetric(matrix: Any) -> AccelerateFactor | SuperLUFactor:
 
     Returns
     -------
-    AccelerateFactor or SuperLUFactor
+    AccelerateFactor, FaerFactor or SuperLUFactor
     """
-    if os.environ.get(BACKEND_VARIABLE, '').lower() != 'superlu':
+    chosen = os.environ.get(BACKEND_VARIABLE, '').lower()
+    if chosen not in ('superlu', 'faer'):
         try:
             return AccelerateFactor(matrix)
         except ValueError:
+            pass
+    if chosen != 'superlu':
+        try:
+            return FaerFactor(matrix)
+        except (ImportError, ValueError):
             pass
     return SuperLUFactor(matrix)

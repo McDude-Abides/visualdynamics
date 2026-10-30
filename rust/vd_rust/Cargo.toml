@@ -1,0 +1,22 @@
+[package]
+name = "vd_rust"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Compiled kernels for Visual Dynamics"
+publish = false
+
+[lib]
+name = "vd_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py312"] }
+numpy = "0.30"
+faer = "0.24"
+rayon = "1.12"
+rustfft = "6.4"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

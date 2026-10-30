@@ -51,6 +51,7 @@ STAGES = [
     ('solves', sparse_solve.SuperLUFactor, 'solve'),
     # a Mac's factor is Accelerate's; its solves are the same stage
     ('solves', sparse_solve.AccelerateFactor, 'solve'),
+    ('solves', sparse_solve.FaerFactor, 'solve'),
     ('lanczos', fem, 'block_lanczos_modes'),
     ('orthonormalize', fem, '_m_orthonormal'),
     ('ritz eigh', scipy.linalg, 'eigh'),
