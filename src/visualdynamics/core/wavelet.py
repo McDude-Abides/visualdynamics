@@ -99,6 +99,7 @@ influence are Torrence and Compo's.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import numpy as np
@@ -152,6 +153,10 @@ COLUMNS = 4096
 
 
 try:
+    # VISUALDYNAMICS_NO_COMPILED set keeps the Python, to compare or to
+    # rule the compiled module out
+    if os.environ.get('VISUALDYNAMICS_NO_COMPILED'):
+        raise ImportError('compiled kernels turned off')
     from vd_rust import scalogram_peaks as _compiled_peaks
 except ImportError:
     _compiled_peaks = None

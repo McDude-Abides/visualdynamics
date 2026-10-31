@@ -41,6 +41,8 @@ same analysis and where it goes wrong.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -126,6 +128,10 @@ def ramp_invariant(frequencies: ArrayLike, sample_rate: float,
 
 
 try:
+    # VISUALDYNAMICS_NO_COMPILED set keeps the Python, to compare or to
+    # rule the compiled module out
+    if os.environ.get('VISUALDYNAMICS_NO_COMPILED'):
+        raise ImportError('compiled kernels turned off')
     from vd_rust import srs_peaks as _compiled_peaks
 except ImportError:
     _compiled_peaks = None

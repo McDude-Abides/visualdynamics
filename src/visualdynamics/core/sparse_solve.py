@@ -392,7 +392,7 @@ def factor_symmetric(matrix: Any) -> AccelerateFactor | FaerFactor | SuperLUFact
             return AccelerateFactor(matrix)
         except ValueError:
             pass
-    if chosen != 'superlu':
+    if chosen != 'superlu' and not os.environ.get('VISUALDYNAMICS_NO_COMPILED'):
         try:
             return FaerFactor(matrix)
         except (ImportError, ValueError):
